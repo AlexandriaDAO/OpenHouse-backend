@@ -1,30 +1,34 @@
 {
   "canisters": {
     "crash_backend": {
-      "candid": "src/crash_backend/crash_backend.did",
+      "type": "rust",
       "package": "crash_backend",
-      "type": "rust"
+      "candid": "crash_backend/crash_backend.did",
+      "specified_id": "fws6k-tyaaa-aaaap-qqc7q-cai"
     },
-    "crash_frontend": {
-      "dependencies": [
-        "crash_backend"
-      ],
-      "source": [
-        "src/crash_frontend/dist"
-      ],
+    "plinko_backend": {
+      "type": "rust",
+      "package": "plinko_backend",
+      "candid": "plinko_backend/plinko_backend.did",
+      "specified_id": "weupr-2qaaa-aaaap-abl3q-cai"
+    },
+    "mines_backend": {
+      "type": "rust",
+      "package": "mines_backend",
+      "candid": "mines_backend/mines_backend.did",
+      "specified_id": "wvrcw-3aaaa-aaaah-arm4a-cai"
+    },
+    "dice_backend": {
+      "type": "rust",
+      "package": "dice_backend",
+      "candid": "dice_backend/dice_backend.did",
+      "specified_id": "whchi-hyaaa-aaaao-a4ruq-cai"
+    },
+    "openhouse_frontend": {
       "type": "assets",
-      "workspace": "crash_frontend"
-    },
-    "internet_identity": {
-      "candid": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity.did",
-      "frontend": {},
-      "remote": {
-        "id": {
-          "ic": "rdmx6-jaaaa-aaaaa-aaadq-cai"
-        }
-      },
-      "type": "custom",
-      "wasm": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity_dev.wasm.gz"
+      "source": ["openhouse_frontend/dist"],
+      "specified_id": "pezw3-laaaa-aaaal-qssoa-cai",
+      "dependencies": ["crash_backend", "plinko_backend", "mines_backend", "dice_backend"]
     }
   },
   "defaults": {
@@ -33,6 +37,12 @@
       "packtool": ""
     }
   },
-  "output_env_file": ".env",
+  "networks": {
+    "ic": {
+      "providers": [
+        "https://icp0.io"
+      ]
+    }
+  },
   "version": 1
 }

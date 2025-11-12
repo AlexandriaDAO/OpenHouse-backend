@@ -1,0 +1,30 @@
+type MinesGame = record {
+  player: principal;
+  bet_amount: nat64;
+  num_mines: nat8;
+  revealed_tiles: vec nat8;
+  mine_positions: vec nat8;
+  current_multiplier: float64;
+  is_active: bool;
+  payout: opt nat64;
+  timestamp: nat64;
+};
+
+type GameStats = record {
+  total_games: nat64;
+  total_volume: nat64;
+  total_payouts: nat64;
+  house_profit: int64;
+};
+
+service : {
+  // Start a new mines game
+  start_game: (nat64, nat8) -> (variant { Ok: nat64; Err: text });
+
+  // Query functions
+  get_stats: () -> (GameStats) query;
+  get_recent_games: (nat32) -> (vec MinesGame) query;
+
+  // Test function
+  greet: (text) -> (text) query;
+}

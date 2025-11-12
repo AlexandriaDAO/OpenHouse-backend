@@ -1,0 +1,38 @@
+type RollDirection = variant {
+  Over;
+  Under;
+};
+
+type DiceResult = record {
+  player: principal;
+  bet_amount: nat64;
+  target_number: nat8;
+  direction: RollDirection;
+  rolled_number: nat8;
+  win_chance: float64;
+  multiplier: float64;
+  payout: nat64;
+  is_win: bool;
+  timestamp: nat64;
+};
+
+type GameStats = record {
+  total_games: nat64;
+  total_volume: nat64;
+  total_payouts: nat64;
+  house_profit: int64;
+};
+
+service : {
+  // Play a game of dice
+  play_dice: (nat64, nat8, RollDirection) -> (variant { Ok: DiceResult; Err: text });
+
+  // Query functions
+  get_stats: () -> (GameStats) query;
+  get_recent_games: (nat32) -> (vec DiceResult) query;
+  get_game: (nat64) -> (opt DiceResult) query;
+  calculate_payout_info: (nat8, RollDirection) -> (variant { Ok: record { float64; float64 }; Err: text }) query;
+
+  // Test function
+  greet: (text) -> (text) query;
+}

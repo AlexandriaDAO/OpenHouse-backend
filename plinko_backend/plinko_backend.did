@@ -1,0 +1,37 @@
+type RiskLevel = variant {
+  Low;
+  Medium;
+  High;
+};
+
+type PlinkoResult = record {
+  player: principal;
+  bet_amount: nat64;
+  rows: nat8;
+  risk: RiskLevel;
+  path: vec bool;
+  final_position: nat8;
+  multiplier: float64;
+  payout: nat64;
+  timestamp: nat64;
+};
+
+type GameStats = record {
+  total_games: nat64;
+  total_volume: nat64;
+  total_payouts: nat64;
+  house_profit: int64;
+};
+
+service : {
+  // Play a game of Plinko
+  play_plinko: (nat64, nat8, RiskLevel) -> (variant { Ok: PlinkoResult; Err: text });
+
+  // Query functions
+  get_stats: () -> (GameStats) query;
+  get_recent_games: (nat32) -> (vec PlinkoResult) query;
+  get_multipliers: (nat8, RiskLevel) -> (vec float64) query;
+
+  // Test function
+  greet: (text) -> (text) query;
+}
