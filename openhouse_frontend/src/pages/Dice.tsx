@@ -35,6 +35,10 @@ export const Dice: React.FC = () => {
   const [gameHistory, setGameHistory] = useState<GameResult[]>([]);
   const [gameError, setGameError] = useState('');
 
+  // Mode toggle: 'practice' or 'real'
+  const [mode, setMode] = useState<'practice' | 'real'>('practice');
+  const isPracticeMode = mode === 'practice' || !isAuthenticated;
+
   // Test backend connection when actor is ready
   useEffect(() => {
     const testConnection = async () => {
@@ -140,6 +144,16 @@ export const Dice: React.FC = () => {
     }
   };
 
+  // Handle mode toggle
+  const handleModeToggle = (newMode: 'practice' | 'real') => {
+    if (newMode === 'real' && !isAuthenticated) {
+      setGameError('Please login to use Real Mode');
+      return;
+    }
+    setMode(newMode);
+    setGameError('');
+  };
+
   return (
     <div className="space-y-6">
       {/* Game Header */}
@@ -147,16 +161,45 @@ export const Dice: React.FC = () => {
         <div className="text-6xl mb-4">🎲</div>
         <div className="flex items-center justify-center gap-3 mb-2">
           <h1 className="text-4xl font-bold">Dice Game</h1>
-          {!isAuthenticated && (
+          {isPracticeMode && (
             <span className="bg-yellow-900/30 border border-yellow-500/50 text-yellow-400 text-sm font-bold px-3 py-1 rounded-full">
               PRACTICE MODE
             </span>
           )}
         </div>
         <p className="text-gray-400">Roll over or under your target number!</p>
-        {!isAuthenticated && (
+
+        {/* Mode Toggle */}
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <button
+            onClick={() => handleModeToggle('practice')}
+            className={`px-6 py-2 rounded-lg font-bold transition ${
+              mode === 'practice'
+                ? 'bg-yellow-600 text-white'
+                : 'bg-casino-primary text-gray-400 hover:bg-casino-accent'
+            }`}
+          >
+            🎮 Practice Mode
+          </button>
+          <button
+            onClick={() => handleModeToggle('real')}
+            disabled={!isAuthenticated}
+            className={`px-6 py-2 rounded-lg font-bold transition ${
+              mode === 'real' && isAuthenticated
+                ? 'bg-green-600 text-white'
+                : !isAuthenticated
+                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-casino-primary text-gray-400 hover:bg-casino-accent'
+            }`}
+            title={!isAuthenticated ? 'Login required for Real Mode' : ''}
+          >
+            💰 Real Mode {!isAuthenticated && '🔒'}
+          </button>
+        </div>
+
+        {isPracticeMode && (
           <p className="text-yellow-400 text-sm mt-2">
-            🎮 Playing with virtual ICP • Login to bet real ICP
+            🎮 Playing with virtual ICP • {!isAuthenticated ? 'Login to bet real ICP' : 'Switch to Real Mode to bet real ICP'}
           </p>
         )}
       </div>
@@ -210,7 +253,7 @@ export const Dice: React.FC = () => {
       </div>
 
       {/* Practice Mode Info */}
-      {!isAuthenticated && (
+      {isPracticeMode && (
         <div className="card max-w-2xl mx-auto bg-yellow-900/10 border-2 border-yellow-500/30">
           <div className="flex items-start gap-3">
             <span className="text-2xl">🎮</span>
@@ -221,8 +264,12 @@ export const Dice: React.FC = () => {
                 are simulated and won't affect real balances.
               </p>
               <p className="text-sm text-gray-400">
-                Ready to play for real? Click <strong>"Login to Play"</strong> in the header to authenticate
-                with Internet Identity and start betting real ICP.
+                {!isAuthenticated ? (
+                  <>Ready to play for real? Click <strong>"Login to Play"</strong> in the header to authenticate
+                  with Internet Identity and start betting real ICP.</>
+                ) : (
+                  <>Ready to play for real? Click the <strong>"💰 Real Mode"</strong> button above to start betting real ICP.</>
+                )}
               </p>
             </div>
           </div>
@@ -233,7 +280,7 @@ export const Dice: React.FC = () => {
       <div className="card max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold">Place Your Bet</h3>
-          {!isAuthenticated && (
+          {isPracticeMode && (
             <span className="bg-yellow-900/30 border border-yellow-500/50 text-yellow-400 text-xs font-bold px-2 py-1 rounded">
               VIRTUAL ICP
             </span>
@@ -246,7 +293,7 @@ export const Dice: React.FC = () => {
             {/* Bet Amount Input */}
             <div>
               <label className="block text-sm text-gray-400 mb-2">
-                Bet Amount ({!isAuthenticated ? 'Virtual ' : ''}ICP)
+                Bet Amount ({isPracticeMode ? 'Virtual ' : ''}ICP)
               </label>
               <input
                 type="number"
@@ -340,7 +387,7 @@ export const Dice: React.FC = () => {
             <div className="bg-casino-primary rounded p-4">
               <div className="text-sm text-gray-400 mb-1">Potential Win</div>
               <div className="text-2xl font-bold">
-                {(betAmount * multiplier).toFixed(2)} {!isAuthenticated ? 'Virtual ' : ''}ICP
+                {(betAmount * multiplier).toFixed(2)} {isPracticeMode ? 'Virtual ' : ''}ICP
               </div>
             </div>
           </div>
@@ -360,7 +407,7 @@ export const Dice: React.FC = () => {
           ) : (
             <span className="flex items-center justify-center gap-2">
               🎲 ROLL DICE
-              {!isAuthenticated && <span className="text-sm font-normal opacity-80">(Practice)</span>}
+              {isPracticeMode && <span className="text-sm font-normal opacity-80">(Practice)</span>}
             </span>
           )}
         </button>
@@ -401,7 +448,7 @@ export const Dice: React.FC = () => {
               </div>
               {lastResult.is_win && (
                 <div className="text-2xl text-green-400 font-bold mt-2">
-                  +{(Number(lastResult.payout) / 100_000_000).toFixed(2)} {!isAuthenticated ? 'Virtual ' : ''}ICP
+                  +{(Number(lastResult.payout) / 100_000_000).toFixed(2)} {isPracticeMode ? 'Virtual ' : ''}ICP
                 </div>
               )}
             </div>
@@ -414,7 +461,7 @@ export const Dice: React.FC = () => {
         <div className="card max-w-4xl mx-auto">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold">Recent Games</h3>
-            {!isAuthenticated && (
+            {isPracticeMode && (
               <span className="bg-yellow-900/30 border border-yellow-500/50 text-yellow-400 text-xs font-bold px-2 py-1 rounded">
                 PRACTICE ROLLS
               </span>
@@ -448,7 +495,7 @@ export const Dice: React.FC = () => {
                       </span>
                     </td>
                     <td className="py-2 text-right">
-                      {game.is_win ? `+${(Number(game.payout) / 100_000_000).toFixed(2)}` : '0.00'} {!isAuthenticated ? 'Virtual ' : ''}ICP
+                      {game.is_win ? `+${(Number(game.payout) / 100_000_000).toFixed(2)}` : '0.00'} {isPracticeMode ? 'Virtual ' : ''}ICP
                     </td>
                   </tr>
                 ))}
