@@ -59,6 +59,8 @@ export const Dice: React.FC = () => {
 
   // Calculate odds when target or direction changes
   useEffect(() => {
+    let cancelled = false;
+
     const updateOdds = async () => {
       if (!actor) return;
 
@@ -66,19 +68,25 @@ export const Dice: React.FC = () => {
         const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
         const result = await actor.calculate_payout_info(targetNumber, directionVariant);
 
-        if ('Ok' in result) {
+        if (!cancelled && 'Ok' in result) {
           const [chance, mult] = result.Ok;
           setWinChance(chance * 100);
           setMultiplier(mult);
-        } else {
+        } else if (!cancelled && 'Err' in result) {
           setGameError(result.Err);
         }
       } catch (err) {
-        console.error('Failed to calculate odds:', err);
+        if (!cancelled) {
+          console.error('Failed to calculate odds:', err);
+        }
       }
     };
 
     updateOdds();
+
+    return () => {
+      cancelled = true;
+    };
   }, [targetNumber, direction, actor]);
 
   // Load game history on mount
@@ -97,9 +105,15 @@ export const Dice: React.FC = () => {
     loadHistory();
   }, [actor]);
 
-  // Handle dice roll
+  // Handle dice roll (supports both practice and real mode)
   const rollDice = async () => {
-    if (!actor || !isAuthenticated) return;
+    if (!actor) return;
+
+    // Validate bet amount
+    if (betAmount < 0.1 || betAmount > 100) {
+      setGameError('Bet amount must be between 0.1 and 100 ICP');
+      return;
+    }
 
     setIsRolling(true);
     setGameError('');
@@ -109,6 +123,7 @@ export const Dice: React.FC = () => {
       const betAmountE8s = BigInt(Math.floor(betAmount * 100_000_000));
       const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
 
+      // In practice mode (not authenticated), still call backend but it won't affect real balances
       const result = await actor.play_dice(betAmountE8s, targetNumber, directionVariant);
 
       if ('Ok' in result) {
@@ -130,8 +145,20 @@ export const Dice: React.FC = () => {
       {/* Game Header */}
       <div className="text-center">
         <div className="text-6xl mb-4">🎲</div>
-        <h1 className="text-4xl font-bold mb-2">Dice Game</h1>
+        <div className="flex items-center justify-center gap-3 mb-2">
+          <h1 className="text-4xl font-bold">Dice Game</h1>
+          {!isAuthenticated && (
+            <span className="bg-yellow-900/30 border border-yellow-500/50 text-yellow-400 text-sm font-bold px-3 py-1 rounded-full">
+              PRACTICE MODE
+            </span>
+          )}
+        </div>
         <p className="text-gray-400">Roll over or under your target number!</p>
+        {!isAuthenticated && (
+          <p className="text-yellow-400 text-sm mt-2">
+            🎮 Playing with virtual ICP • Login to bet real ICP
+          </p>
+        )}
       </div>
 
       {/* Connection Status */}
@@ -182,16 +209,20 @@ export const Dice: React.FC = () => {
         )}
       </div>
 
-      {/* Authentication Notice */}
+      {/* Practice Mode Info */}
       {!isAuthenticated && (
-        <div className="card max-w-2xl mx-auto bg-casino-accent">
+        <div className="card max-w-2xl mx-auto bg-yellow-900/10 border-2 border-yellow-500/30">
           <div className="flex items-start gap-3">
-            <span className="text-2xl">ℹ️</span>
+            <span className="text-2xl">🎮</span>
             <div>
-              <h3 className="font-bold mb-1">Login Required to Play</h3>
-              <p className="text-sm text-gray-300">
-                You're currently in anonymous mode. Click "Login to Play" in the header to authenticate
-                with Internet Identity and start placing bets.
+              <h3 className="font-bold mb-1 text-yellow-400">Practice Mode Active</h3>
+              <p className="text-sm text-gray-300 mb-2">
+                You're playing with <strong>virtual ICP</strong> to test the game. Your bets and winnings
+                are simulated and won't affect real balances.
+              </p>
+              <p className="text-sm text-gray-400">
+                Ready to play for real? Click <strong>"Login to Play"</strong> in the header to authenticate
+                with Internet Identity and start betting real ICP.
               </p>
             </div>
           </div>
@@ -200,7 +231,14 @@ export const Dice: React.FC = () => {
 
       {/* BETTING CONTROLS */}
       <div className="card max-w-4xl mx-auto">
-        <h3 className="font-bold mb-4">Place Your Bet</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-bold">Place Your Bet</h3>
+          {!isAuthenticated && (
+            <span className="bg-yellow-900/30 border border-yellow-500/50 text-yellow-400 text-xs font-bold px-2 py-1 rounded">
+              VIRTUAL ICP
+            </span>
+          )}
+        </div>
 
         <div className="grid md:grid-cols-2 gap-6">
           {/* Left column: Bet controls */}
@@ -208,7 +246,7 @@ export const Dice: React.FC = () => {
             {/* Bet Amount Input */}
             <div>
               <label className="block text-sm text-gray-400 mb-2">
-                Bet Amount (ICP)
+                Bet Amount ({!isAuthenticated ? 'Virtual ' : ''}ICP)
               </label>
               <input
                 type="number"
@@ -216,7 +254,12 @@ export const Dice: React.FC = () => {
                 max="100"
                 step="0.1"
                 value={betAmount}
-                onChange={(e) => setBetAmount(parseFloat(e.target.value))}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val) && val >= 0.1 && val <= 100) {
+                    setBetAmount(val);
+                  }
+                }}
                 className="w-full bg-casino-primary border border-casino-accent rounded px-4 py-2"
                 disabled={isRolling}
               />
@@ -297,7 +340,7 @@ export const Dice: React.FC = () => {
             <div className="bg-casino-primary rounded p-4">
               <div className="text-sm text-gray-400 mb-1">Potential Win</div>
               <div className="text-2xl font-bold">
-                {(betAmount * multiplier).toFixed(2)} ICP
+                {(betAmount * multiplier).toFixed(2)} {!isAuthenticated ? 'Virtual ' : ''}ICP
               </div>
             </div>
           </div>
@@ -306,7 +349,7 @@ export const Dice: React.FC = () => {
         {/* Roll Button */}
         <button
           onClick={rollDice}
-          disabled={isRolling || !isAuthenticated || !actor}
+          disabled={isRolling || !actor}
           className="w-full mt-6 bg-casino-highlight hover:bg-casino-highlight/80 disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold py-4 px-6 rounded-lg text-xl transition"
         >
           {isRolling ? (
@@ -315,7 +358,10 @@ export const Dice: React.FC = () => {
               Rolling...
             </span>
           ) : (
-            '🎲 ROLL DICE'
+            <span className="flex items-center justify-center gap-2">
+              🎲 ROLL DICE
+              {!isAuthenticated && <span className="text-sm font-normal opacity-80">(Practice)</span>}
+            </span>
           )}
         </button>
 
@@ -355,7 +401,7 @@ export const Dice: React.FC = () => {
               </div>
               {lastResult.is_win && (
                 <div className="text-2xl text-green-400 font-bold mt-2">
-                  +{(Number(lastResult.payout) / 100_000_000).toFixed(2)} ICP
+                  +{(Number(lastResult.payout) / 100_000_000).toFixed(2)} {!isAuthenticated ? 'Virtual ' : ''}ICP
                 </div>
               )}
             </div>
@@ -366,7 +412,14 @@ export const Dice: React.FC = () => {
       {/* GAME HISTORY */}
       {gameHistory.length > 0 && (
         <div className="card max-w-4xl mx-auto">
-          <h3 className="font-bold mb-4">Recent Games</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold">Recent Games</h3>
+            {!isAuthenticated && (
+              <span className="bg-yellow-900/30 border border-yellow-500/50 text-yellow-400 text-xs font-bold px-2 py-1 rounded">
+                PRACTICE ROLLS
+              </span>
+            )}
+          </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -380,8 +433,8 @@ export const Dice: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {gameHistory.map((game, idx) => (
-                  <tr key={idx} className="border-b border-casino-primary/50">
+                {gameHistory.map((game) => (
+                  <tr key={`${game.timestamp.toString()}-${game.player.toString()}`} className="border-b border-casino-primary/50">
                     <td className="py-2">{game.target_number}</td>
                     <td className="py-2">
                       <span className={Object.keys(game.direction)[0] === 'Over' ? 'text-green-400' : 'text-red-400'}>
@@ -395,7 +448,7 @@ export const Dice: React.FC = () => {
                       </span>
                     </td>
                     <td className="py-2 text-right">
-                      {game.is_win ? `+${(Number(game.payout) / 100_000_000).toFixed(2)}` : '0.00'} ICP
+                      {game.is_win ? `+${(Number(game.payout) / 100_000_000).toFixed(2)}` : '0.00'} {!isAuthenticated ? 'Virtual ' : ''}ICP
                     </td>
                   </tr>
                 ))}
