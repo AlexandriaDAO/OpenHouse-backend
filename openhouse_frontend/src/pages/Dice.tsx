@@ -1,6 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import useDiceActor from '../hooks/actors/useDiceActor';
 import { useAuth } from '../providers/AuthProvider';
+import type { Principal } from '@dfinity/principal';
+
+interface GameResult {
+  player: Principal;
+  bet_amount: bigint;
+  target_number: number;
+  direction: { Over: null } | { Under: null };
+  rolled_number: number;
+  win_chance: number;
+  multiplier: number;
+  payout: bigint;
+  is_win: boolean;
+  timestamp: bigint;
+}
 
 export const Dice: React.FC = () => {
   const { actor } = useDiceActor();
@@ -9,6 +23,17 @@ export const Dice: React.FC = () => {
   const [error, setError] = useState<string>('');
   const [testingConnection, setTestingConnection] = useState(false);
   const actorLoading = !actor;
+
+  // Game state
+  const [betAmount, setBetAmount] = useState(1);
+  const [targetNumber, setTargetNumber] = useState(50);
+  const [direction, setDirection] = useState<'Over' | 'Under'>('Over');
+  const [winChance, setWinChance] = useState(0);
+  const [multiplier, setMultiplier] = useState(0);
+  const [isRolling, setIsRolling] = useState(false);
+  const [lastResult, setLastResult] = useState<GameResult | null>(null);
+  const [gameHistory, setGameHistory] = useState<GameResult[]>([]);
+  const [gameError, setGameError] = useState('');
 
   // Test backend connection when actor is ready
   useEffect(() => {
@@ -31,6 +56,74 @@ export const Dice: React.FC = () => {
 
     testConnection();
   }, [actor]);
+
+  // Calculate odds when target or direction changes
+  useEffect(() => {
+    const updateOdds = async () => {
+      if (!actor) return;
+
+      try {
+        const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
+        const result = await actor.calculate_payout_info(targetNumber, directionVariant);
+
+        if ('Ok' in result) {
+          const [chance, mult] = result.Ok;
+          setWinChance(chance * 100);
+          setMultiplier(mult);
+        } else {
+          setGameError(result.Err);
+        }
+      } catch (err) {
+        console.error('Failed to calculate odds:', err);
+      }
+    };
+
+    updateOdds();
+  }, [targetNumber, direction, actor]);
+
+  // Load game history on mount
+  useEffect(() => {
+    const loadHistory = async () => {
+      if (!actor) return;
+
+      try {
+        const history = await actor.get_recent_games(10);
+        setGameHistory(history);
+      } catch (err) {
+        console.error('Failed to load history:', err);
+      }
+    };
+
+    loadHistory();
+  }, [actor]);
+
+  // Handle dice roll
+  const rollDice = async () => {
+    if (!actor || !isAuthenticated) return;
+
+    setIsRolling(true);
+    setGameError('');
+    setLastResult(null);
+
+    try {
+      const betAmountE8s = BigInt(Math.floor(betAmount * 100_000_000));
+      const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
+
+      const result = await actor.play_dice(betAmountE8s, targetNumber, directionVariant);
+
+      if ('Ok' in result) {
+        setLastResult(result.Ok);
+        setGameHistory(prev => [result.Ok, ...prev.slice(0, 9)]);
+      } else {
+        setGameError(result.Err);
+      }
+    } catch (err) {
+      console.error('Failed to roll dice:', err);
+      setGameError(err instanceof Error ? err.message : 'Failed to roll dice');
+    } finally {
+      setIsRolling(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -105,16 +198,212 @@ export const Dice: React.FC = () => {
         </div>
       )}
 
-      {/* Game Area Placeholder */}
+      {/* BETTING CONTROLS */}
       <div className="card max-w-4xl mx-auto">
-        <h3 className="font-bold mb-4">Game Area</h3>
-        <div className="bg-casino-primary rounded-lg p-12 text-center">
-          <p className="text-gray-400 mb-4">Game UI will be implemented here</p>
-          <p className="text-sm text-gray-500">
-            Actor initialization is complete. Ready for game logic implementation.
-          </p>
+        <h3 className="font-bold mb-4">Place Your Bet</h3>
+
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* Left column: Bet controls */}
+          <div className="space-y-4">
+            {/* Bet Amount Input */}
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">
+                Bet Amount (ICP)
+              </label>
+              <input
+                type="number"
+                min="0.1"
+                max="100"
+                step="0.1"
+                value={betAmount}
+                onChange={(e) => setBetAmount(parseFloat(e.target.value))}
+                className="w-full bg-casino-primary border border-casino-accent rounded px-4 py-2"
+                disabled={isRolling}
+              />
+            </div>
+
+            {/* Target Number Slider */}
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">
+                Target Number: <span className="text-white font-bold">{targetNumber}</span>
+              </label>
+              <input
+                type="range"
+                min="1"
+                max="99"
+                value={targetNumber}
+                onChange={(e) => setTargetNumber(parseInt(e.target.value))}
+                className="w-full"
+                disabled={isRolling}
+              />
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>1</span>
+                <span>50</span>
+                <span>99</span>
+              </div>
+            </div>
+
+            {/* Direction Toggle */}
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">
+                Direction
+              </label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setDirection('Over')}
+                  disabled={isRolling}
+                  className={`flex-1 py-3 px-4 rounded font-bold transition ${
+                    direction === 'Over'
+                      ? 'bg-green-600 text-white'
+                      : 'bg-casino-primary text-gray-400 hover:bg-casino-accent'
+                  }`}
+                >
+                  OVER {targetNumber}
+                </button>
+                <button
+                  onClick={() => setDirection('Under')}
+                  disabled={isRolling}
+                  className={`flex-1 py-3 px-4 rounded font-bold transition ${
+                    direction === 'Under'
+                      ? 'bg-red-600 text-white'
+                      : 'bg-casino-primary text-gray-400 hover:bg-casino-accent'
+                  }`}
+                >
+                  UNDER {targetNumber}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Right column: Odds display */}
+          <div className="space-y-4">
+            {/* Win Chance */}
+            <div className="bg-casino-primary rounded p-4">
+              <div className="text-sm text-gray-400 mb-1">Win Chance</div>
+              <div className="text-3xl font-bold text-casino-highlight">
+                {winChance.toFixed(2)}%
+              </div>
+            </div>
+
+            {/* Multiplier */}
+            <div className="bg-casino-primary rounded p-4">
+              <div className="text-sm text-gray-400 mb-1">Multiplier</div>
+              <div className="text-3xl font-bold text-green-400">
+                {multiplier.toFixed(2)}x
+              </div>
+            </div>
+
+            {/* Potential Payout */}
+            <div className="bg-casino-primary rounded p-4">
+              <div className="text-sm text-gray-400 mb-1">Potential Win</div>
+              <div className="text-2xl font-bold">
+                {(betAmount * multiplier).toFixed(2)} ICP
+              </div>
+            </div>
+          </div>
         </div>
+
+        {/* Roll Button */}
+        <button
+          onClick={rollDice}
+          disabled={isRolling || !isAuthenticated || !actor}
+          className="w-full mt-6 bg-casino-highlight hover:bg-casino-highlight/80 disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold py-4 px-6 rounded-lg text-xl transition"
+        >
+          {isRolling ? (
+            <span className="flex items-center justify-center gap-2">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
+              Rolling...
+            </span>
+          ) : (
+            '🎲 ROLL DICE'
+          )}
+        </button>
+
+        {/* Error Display */}
+        {gameError && (
+          <div className="mt-4 bg-red-900/20 border border-red-500/50 rounded p-3 text-red-400">
+            {gameError}
+          </div>
+        )}
       </div>
+
+      {/* RESULT DISPLAY */}
+      {lastResult && (
+        <div className="card max-w-4xl mx-auto">
+          <h3 className="font-bold mb-4">Result</h3>
+
+          <div className={`rounded-lg p-8 text-center ${
+            lastResult.is_win ? 'bg-green-900/20 border-2 border-green-500' : 'bg-red-900/20 border-2 border-red-500'
+          }`}>
+            {/* Rolled Number Display */}
+            <div className="text-8xl font-bold mb-4">
+              {lastResult.rolled_number}
+            </div>
+
+            {/* Win/Loss Message */}
+            <div className={`text-3xl font-bold mb-4 ${lastResult.is_win ? 'text-green-400' : 'text-red-400'}`}>
+              {lastResult.is_win ? '🎉 YOU WIN!' : '😢 YOU LOSE'}
+            </div>
+
+            {/* Details */}
+            <div className="text-gray-300 space-y-1">
+              <div>
+                Target: {lastResult.target_number} ({Object.keys(lastResult.direction)[0]})
+              </div>
+              <div>
+                Win Chance: {(lastResult.win_chance * 100).toFixed(2)}%
+              </div>
+              {lastResult.is_win && (
+                <div className="text-2xl text-green-400 font-bold mt-2">
+                  +{(Number(lastResult.payout) / 100_000_000).toFixed(2)} ICP
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GAME HISTORY */}
+      {gameHistory.length > 0 && (
+        <div className="card max-w-4xl mx-auto">
+          <h3 className="font-bold mb-4">Recent Games</h3>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b border-casino-accent">
+                <tr className="text-gray-400">
+                  <th className="text-left py-2">Target</th>
+                  <th className="text-left py-2">Direction</th>
+                  <th className="text-left py-2">Roll</th>
+                  <th className="text-left py-2">Result</th>
+                  <th className="text-right py-2">Payout</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gameHistory.map((game, idx) => (
+                  <tr key={idx} className="border-b border-casino-primary/50">
+                    <td className="py-2">{game.target_number}</td>
+                    <td className="py-2">
+                      <span className={Object.keys(game.direction)[0] === 'Over' ? 'text-green-400' : 'text-red-400'}>
+                        {Object.keys(game.direction)[0]}
+                      </span>
+                    </td>
+                    <td className="py-2 font-bold">{game.rolled_number}</td>
+                    <td className="py-2">
+                      <span className={game.is_win ? 'text-green-400' : 'text-red-400'}>
+                        {game.is_win ? 'Win' : 'Loss'}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right">
+                      {game.is_win ? `+${(Number(game.payout) / 100_000_000).toFixed(2)}` : '0.00'} ICP
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Game Info */}
       <div className="card max-w-2xl mx-auto">
