@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import useDiceActor from '../hooks/actors/useDiceActor';
 import { useAuth } from '../providers/AuthProvider';
 import type { Principal } from '@dfinity/principal';
 import { DiceAnimation } from '../components/DiceAnimation';
+
+const MAX_HISTORY_DISPLAY = 5;
 
 interface GameResult {
   player: Principal;
@@ -38,6 +40,11 @@ export const Dice: React.FC = () => {
   // Mode toggle: 'practice' or 'real'
   const [mode, setMode] = useState<'practice' | 'real'>('practice');
   const isPracticeMode = mode === 'practice' || !isAuthenticated;
+
+  // Memoized animation complete handler
+  const handleAnimationComplete = useCallback(() => {
+    setIsRolling(false);
+  }, []);
 
   // Load game history on mount
   useEffect(() => {
@@ -82,22 +89,21 @@ export const Dice: React.FC = () => {
       const result = await actor.play_dice(betAmountE8s, targetNumber, directionVariant);
 
       if ('Ok' in result) {
-        // Trigger animation with the result
+        // Trigger animation with the result and set result immediately
         setAnimatingResult(result.Ok.rolled_number);
-
-        // Set result after brief delay for animation
-        setTimeout(() => {
-          setLastResult(result.Ok);
-          setGameHistory(prev => [{...result.Ok, clientId: crypto.randomUUID()}, ...prev.slice(0, 9)]);
-        }, 2200);
+        setLastResult(result.Ok);
+        setGameHistory(prev => [{...result.Ok, clientId: crypto.randomUUID()}, ...prev.slice(0, 9)]);
+        // isRolling will be set to false by animation complete callback
       } else {
         setGameError(result.Err);
         setIsRolling(false);
+        setAnimatingResult(null); // Reset animation on error
       }
     } catch (err) {
       console.error('Failed to roll dice:', err);
       setGameError(err instanceof Error ? err.message : 'Failed to roll dice');
       setIsRolling(false);
+      setAnimatingResult(null); // Reset animation on error
     }
   };
 
@@ -125,6 +131,7 @@ export const Dice: React.FC = () => {
               mode === 'practice' ? 'bg-yellow-600' : 'bg-gray-700'
             }`}
             title="Practice Mode"
+            aria-label="Switch to Practice Mode"
           >
             🎮
           </button>
@@ -135,6 +142,7 @@ export const Dice: React.FC = () => {
               mode === 'real' && isAuthenticated ? 'bg-green-600' : 'bg-gray-700'
             }`}
             title={!isAuthenticated ? 'Login for Real Mode' : 'Real Mode'}
+            aria-label={!isAuthenticated ? 'Login required for Real Mode' : 'Switch to Real Mode'}
           >
             💰
           </button>
@@ -221,7 +229,7 @@ export const Dice: React.FC = () => {
         <DiceAnimation
           targetNumber={animatingResult}
           isRolling={isRolling}
-          onAnimationComplete={() => setIsRolling(false)}
+          onAnimationComplete={handleAnimationComplete}
         />
 
         {/* Show win/loss message below dice after animation */}
@@ -247,7 +255,7 @@ export const Dice: React.FC = () => {
           <h3 className="text-sm font-bold mb-3 text-gray-400">Recent Rolls</h3>
 
           <div className="space-y-1">
-            {gameHistory.slice(0, 5).map((game) => (
+            {gameHistory.slice(0, MAX_HISTORY_DISPLAY).map((game) => (
               <div key={game.clientId} className="flex items-center justify-between text-sm py-2 border-b border-gray-800">
                 <span className="font-mono">{game.rolled_number}</span>
                 <span className={game.is_win ? 'text-green-400' : 'text-red-400'}>

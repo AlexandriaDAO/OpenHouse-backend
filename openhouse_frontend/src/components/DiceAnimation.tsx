@@ -1,6 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import './DiceAnimation.css';
 
+// Animation timing constants
+const ANIMATION_CONFIG = {
+  ROLL_DURATION: 2000,
+  FRAME_INTERVAL: 33,
+  RESULT_DELAY: 100,
+  RESULT_DISPLAY_DURATION: 2000
+} as const;
+
 interface DiceAnimationProps {
   targetNumber: number | null;
   isRolling: boolean;
@@ -22,9 +30,9 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
       // Start rolling animation
       setAnimationPhase('rolling');
 
-      // Rapidly cycle through random numbers for ~2 seconds
+      // Rapidly cycle through random numbers
       let frameCount = 0;
-      const maxFrames = 60; // 2 seconds at 30fps
+      const maxFrames = Math.floor(ANIMATION_CONFIG.ROLL_DURATION / ANIMATION_CONFIG.FRAME_INTERVAL);
 
       const interval = setInterval(() => {
         // Generate random number 0-100 for visual effect
@@ -34,7 +42,7 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
         if (frameCount >= maxFrames) {
           clearInterval(interval);
         }
-      }, 33); // ~30fps
+      }, ANIMATION_CONFIG.FRAME_INTERVAL);
 
       return () => clearInterval(interval);
     }
@@ -47,17 +55,20 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
       setTimeout(() => {
         setDisplayNumber(targetNumber);
         setAnimationPhase('complete');
-        onAnimationComplete?.();
-      }, 2100); // Slightly after rolling animation ends
+        // Call completion callback if provided
+        if (onAnimationComplete) {
+          onAnimationComplete();
+        }
+      }, ANIMATION_CONFIG.ROLL_DURATION + ANIMATION_CONFIG.RESULT_DELAY);
     }
-  }, [targetNumber, animationPhase, onAnimationComplete]);
+  }, [targetNumber, animationPhase]); // Removed onAnimationComplete from deps - using it in closure is fine
 
   // Reset when not rolling
   useEffect(() => {
     if (!isRolling && animationPhase === 'complete') {
       setTimeout(() => {
         setAnimationPhase('idle');
-      }, 2000); // Keep result visible for 2s
+      }, ANIMATION_CONFIG.RESULT_DISPLAY_DURATION);
     }
   }, [isRolling, animationPhase]);
 
