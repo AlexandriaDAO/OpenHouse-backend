@@ -2,14 +2,14 @@ use candid::{CandidType, Deserialize, Principal};
 use ic_cdk::api::management_canister::main::raw_rand;
 use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
-use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, Storable};
+use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, StableCell, Storable};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::cell::RefCell;
 
 // Seed management structure
-#[derive(Clone, Debug, Serialize, Deserialize, CandidType)]
+#[derive(Clone, Debug, Serialize, Deserialize, CandidType, Default)]
 struct RandomnessSeed {
     current_seed: [u8; 32],
     creation_time: u64,
@@ -18,11 +18,69 @@ struct RandomnessSeed {
     nonce: u64,
 }
 
-// Global seed state
+impl Storable for RandomnessSeed {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(serde_json::to_vec(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    const BOUND: ic_stable_structures::storable::Bound = ic_stable_structures::storable::Bound::Bounded {
+        max_size: 256,
+        is_fixed_size: false,
+    };
+}
+
+// Rotation history for verification
+#[derive(Clone, Debug, Serialize, Deserialize, CandidType)]
+struct SeedRotationRecord {
+    seed_hash: String,
+    start_nonce: u64,
+    end_nonce: u64,
+    timestamp: u64,
+}
+
+impl Storable for SeedRotationRecord {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(serde_json::to_vec(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    const BOUND: ic_stable_structures::storable::Bound = ic_stable_structures::storable::Bound::Unbounded;
+}
+
+// Global seed state using stable structures
 thread_local! {
     static SEED_STATE: RefCell<Option<RandomnessSeed>> = RefCell::new(None);
-    static LAST_SEED_ROTATION: RefCell<u64> = RefCell::new(0);
     static SEED_INIT_LOCK: RefCell<bool> = RefCell::new(false);
+
+    // Stable cells for persistence
+    static SEED_CELL: RefCell<StableCell<RandomnessSeed, Memory>> = RefCell::new(
+        StableCell::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(1))),
+            RandomnessSeed::default()
+        ).unwrap()
+    );
+
+    static LAST_ROTATION_CELL: RefCell<StableCell<u64, Memory>> = RefCell::new(
+        StableCell::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(2))),
+            0u64
+        ).unwrap()
+    );
+
+    static ROTATION_HISTORY: RefCell<StableBTreeMap<u64, SeedRotationRecord, Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(3))),
+        )
+    );
+
+    static NEXT_ROTATION_ID: RefCell<u64> = RefCell::new(0);
 }
 
 const SEED_ROTATION_INTERVAL_NS: u64 = 300_000_000_000; // 5 minutes in nanoseconds
@@ -143,18 +201,28 @@ async fn initialize_seed() {
     hasher.update(&random_bytes);
     let seed_array: [u8; 32] = hasher.finalize()[0..32].try_into().unwrap();
 
+    let now = ic_cdk::api::time();
+    let new_seed = RandomnessSeed {
+        current_seed: seed_array,
+        creation_time: now,
+        games_used: 0,
+        max_games: MAX_GAMES_PER_SEED,
+        nonce: 0,
+    };
+
+    // Save to volatile state
     SEED_STATE.with(|s| {
-        *s.borrow_mut() = Some(RandomnessSeed {
-            current_seed: seed_array,
-            creation_time: ic_cdk::api::time(),
-            games_used: 0,
-            max_games: MAX_GAMES_PER_SEED,
-            nonce: 0,
-        });
+        *s.borrow_mut() = Some(new_seed.clone());
     });
 
-    LAST_SEED_ROTATION.with(|t| {
-        *t.borrow_mut() = ic_cdk::api::time();
+    // Persist to stable cell
+    SEED_CELL.with(|cell| {
+        cell.borrow_mut().set(new_seed).expect("Failed to save seed to stable cell");
+    });
+
+    // Update last rotation timestamp
+    LAST_ROTATION_CELL.with(|cell| {
+        cell.borrow_mut().set(now).expect("Failed to save rotation time");
     });
 
     // Release lock
@@ -166,28 +234,21 @@ async fn initialize_seed() {
 // Upgrade hooks
 #[pre_upgrade]
 fn pre_upgrade() {
-    // Save seed state to stable memory
-    let seed_state = SEED_STATE.with(|s| s.borrow().clone());
-    let last_rotation = LAST_SEED_ROTATION.with(|t| *t.borrow());
-
-    ic_cdk::storage::stable_save((seed_state, last_rotation))
-        .expect("Failed to save seed state to stable memory");
+    // Seed state is already in stable cells - no action needed
+    // StableCell and StableBTreeMap handle persistence automatically
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    // Restore seed state from stable memory
-    let (seed_state, last_rotation): (Option<RandomnessSeed>, u64) =
-        ic_cdk::storage::stable_restore()
-            .unwrap_or((None, 0));
+    // Restore seed state from stable cell
+    let seed = SEED_CELL.with(|cell| cell.borrow().get().clone());
 
-    SEED_STATE.with(|s| {
-        *s.borrow_mut() = seed_state;
-    });
-
-    LAST_SEED_ROTATION.with(|t| {
-        *t.borrow_mut() = last_rotation;
-    });
+    // Only restore if seed was actually initialized (not default)
+    if seed.creation_time > 0 {
+        SEED_STATE.with(|s| {
+            *s.borrow_mut() = Some(seed);
+        });
+    }
 }
 
 // Calculate win chance and multiplier based on target and direction
@@ -218,27 +279,12 @@ fn calculate_multiplier(win_chance: f64) -> f64 {
 // Generate instant random number using seed+nonce+client_seed (0-100)
 // Returns: (rolled_number, nonce, server_seed_hash)
 fn generate_dice_roll_instant(client_seed: &str) -> Result<(u8, u64, String), String> {
-    // If no seed initialized, use time-based fallback temporarily
-    let has_seed = SEED_STATE.with(|s| s.borrow().is_some());
-
-    if !has_seed {
-        // Fallback: Use time-based entropy for first game before seed initialization
-        let time = ic_cdk::api::time();
-        let caller = ic_cdk::caller();
-        let mut hasher = Sha256::new();
-        hasher.update(time.to_be_bytes());
-        hasher.update(caller.as_slice());
-        hasher.update(client_seed.as_bytes());
-        let hash = hasher.finalize();
-        let rand_u64 = u64::from_be_bytes(hash[0..8].try_into().unwrap());
-        let roll = (rand_u64 % (MAX_NUMBER as u64 + 1)) as u8;
-        return Ok((roll, 0, "fallback".to_string()));
-    }
-
     // Get current seed state and compute hash
     let (server_seed, nonce, server_seed_hash) = SEED_STATE.with(|s| {
         let mut state = s.borrow_mut();
-        let seed_state = state.as_mut().ok_or("Seed not initialized")?;
+        let seed_state = state.as_mut().ok_or(
+            "Randomness seed initializing, please retry in a moment"
+        )?;
 
         // Increment nonce for this game
         seed_state.nonce += 1;
@@ -248,6 +294,11 @@ fn generate_dice_roll_instant(client_seed: &str) -> Result<(u8, u64, String), St
         let mut seed_hasher = Sha256::new();
         seed_hasher.update(&seed_state.current_seed);
         let seed_hash = format!("{:x}", seed_hasher.finalize());
+
+        // Update stable cell with new state
+        SEED_CELL.with(|cell| {
+            let _ = cell.borrow_mut().set(seed_state.clone());
+        });
 
         Ok::<_, String>((seed_state.current_seed, seed_state.nonce, seed_hash))
     })?;
@@ -364,6 +415,8 @@ fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, clien
     });
 
     // TODO: Actually transfer ICP for bet and payout
+    // NOTE: Currently in practice/testing mode - all games record stats but don't move real ICP
+    // Real money integration will be added after randomness system is proven secure and fair
 
     Ok(result)
 }
@@ -465,11 +518,41 @@ fn maybe_schedule_seed_rotation() {
 // Rotate the seed asynchronously
 async fn rotate_seed_async() {
     // Check if we already rotated recently (prevent double rotation)
-    let last_rotation = LAST_SEED_ROTATION.with(|t| *t.borrow());
+    let last_rotation = LAST_ROTATION_CELL.with(|cell| cell.borrow().get().clone());
     let now = ic_cdk::api::time();
 
     if now - last_rotation < 10_000_000_000 { // 10 seconds minimum between rotations
         return;
+    }
+
+    // Save old seed to rotation history before rotating
+    let old_seed_info = SEED_STATE.with(|s| {
+        s.borrow().as_ref().map(|seed| {
+            let mut hasher = Sha256::new();
+            hasher.update(&seed.current_seed);
+            let seed_hash = format!("{:x}", hasher.finalize());
+            (seed_hash, seed.nonce, seed.games_used)
+        })
+    });
+
+    if let Some((seed_hash, end_nonce, _games_used)) = old_seed_info {
+        // Record rotation history
+        let record = SeedRotationRecord {
+            seed_hash,
+            start_nonce: 1,
+            end_nonce,
+            timestamp: now,
+        };
+
+        let rotation_id = NEXT_ROTATION_ID.with(|id| {
+            let current = *id.borrow();
+            *id.borrow_mut() = current + 1;
+            current
+        });
+
+        ROTATION_HISTORY.with(|history| {
+            history.borrow_mut().insert(rotation_id, record);
+        });
     }
 
     // Get new VRF seed
@@ -478,19 +561,26 @@ async fn rotate_seed_async() {
         hasher.update(&random_bytes);
         let seed_array: [u8; 32] = hasher.finalize()[0..32].try_into().unwrap();
 
-        // Update seed state
+        let new_seed = RandomnessSeed {
+            current_seed: seed_array,
+            creation_time: now,
+            games_used: 0,
+            max_games: MAX_GAMES_PER_SEED,
+            nonce: 0,
+        };
+
+        // Update volatile state
         SEED_STATE.with(|s| {
-            *s.borrow_mut() = Some(RandomnessSeed {
-                current_seed: seed_array,
-                creation_time: now,
-                games_used: 0,
-                max_games: MAX_GAMES_PER_SEED,
-                nonce: 0,
-            });
+            *s.borrow_mut() = Some(new_seed.clone());
         });
 
-        LAST_SEED_ROTATION.with(|t| {
-            *t.borrow_mut() = now;
+        // Persist to stable cells
+        SEED_CELL.with(|cell| {
+            let _ = cell.borrow_mut().set(new_seed);
+        });
+
+        LAST_ROTATION_CELL.with(|cell| {
+            let _ = cell.borrow_mut().set(now);
         });
 
         ic_cdk::println!("Seed rotated successfully at {}", now);
@@ -543,5 +633,18 @@ fn get_seed_info() -> (String, u64, u64) {
             };
             (hash, seed_state.games_used, seed_state.creation_time)
         }).unwrap_or(("Not initialized".to_string(), 0, 0))
+    })
+}
+
+// Get rotation history for verification
+#[query]
+fn get_rotation_history(limit: u32) -> Vec<(u64, SeedRotationRecord)> {
+    ROTATION_HISTORY.with(|history| {
+        history.borrow()
+            .iter()
+            .rev()
+            .take(limit as usize)
+            .map(|(id, record)| (id, record))
+            .collect()
     })
 }
