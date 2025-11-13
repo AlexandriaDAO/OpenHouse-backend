@@ -53,6 +53,8 @@ export const BalanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [ledgerActor, identity, principal, isAuthenticated]);
 
   // Fetch balance when identity or ledger actor changes
+  // NOTE: We DON'T include refreshBalance in deps to avoid infinite loop
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (isAuthenticated && ledgerActor) {
       refreshBalance();
@@ -61,7 +63,7 @@ export const BalanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setBalance(null);
       setError(null);
     }
-  }, [isAuthenticated, ledgerActor, refreshBalance]);
+  }, [isAuthenticated, ledgerActor]); // Only these deps, not refreshBalance
 
   const value: BalanceContextType = {
     balance,

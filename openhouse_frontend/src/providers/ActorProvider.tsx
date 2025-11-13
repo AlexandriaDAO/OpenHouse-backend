@@ -89,6 +89,8 @@ export const ActorProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [identity, isInitializing]);
 
   // Set interceptors for all actors
+  // NOTE: Actor hooks are stable, only update when interceptors change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     ensureAllInitialized().then(() => {
       crash.setInterceptors(interceptors);
@@ -97,7 +99,7 @@ export const ActorProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       dice.setInterceptors(interceptors);
       ledger.setInterceptors(interceptors);
     });
-  }, [interceptors, crash, plinko, mines, dice, ledger]);
+  }, [interceptors]); // Only interceptors, actor hooks are stable
 
   return <>{children}</>;
 };
