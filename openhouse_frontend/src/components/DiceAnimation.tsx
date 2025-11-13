@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import './DiceAnimation.css';
 
 // Animation timing constants
@@ -23,10 +23,14 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
   // State for current displayed number during animation
   const [displayNumber, setDisplayNumber] = useState(0);
   const [animationPhase, setAnimationPhase] = useState<'idle' | 'rolling' | 'complete'>('idle');
+  const animationStartTimeRef = useRef<number | null>(null);
 
   // Start rolling animation when isRolling becomes true
   useEffect(() => {
     if (isRolling) {
+      // Track animation start time for race condition fix
+      animationStartTimeRef.current = Date.now();
+
       // Start rolling animation
       setAnimationPhase('rolling');
 
@@ -44,14 +48,28 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
         }
       }, ANIMATION_CONFIG.FRAME_INTERVAL);
 
-      return () => clearInterval(interval);
+      return () => {
+        clearInterval(interval);
+        animationStartTimeRef.current = null;
+      };
     }
   }, [isRolling]);
 
   // When backend returns result, slow down and land on target
   useEffect(() => {
     if (targetNumber !== null && animationPhase === 'rolling') {
-      // After backend returns result, slow down and land on target
+      // Calculate elapsed time since animation started
+      const elapsed = animationStartTimeRef.current
+        ? Date.now() - animationStartTimeRef.current
+        : 0;
+
+      // Calculate remaining animation time (minimum 0, to handle fast backend responses)
+      const remainingTime = Math.max(
+        0,
+        ANIMATION_CONFIG.ROLL_DURATION + ANIMATION_CONFIG.RESULT_DELAY - elapsed
+      );
+
+      // Land on target number after remaining animation time
       const timeoutId = setTimeout(() => {
         setDisplayNumber(targetNumber);
         setAnimationPhase('complete');
@@ -59,12 +77,12 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
         if (onAnimationComplete) {
           onAnimationComplete();
         }
-      }, ANIMATION_CONFIG.ROLL_DURATION + ANIMATION_CONFIG.RESULT_DELAY);
+      }, remainingTime);
 
       // Cleanup timeout on unmount or deps change
       return () => clearTimeout(timeoutId);
     }
-  }, [targetNumber, animationPhase]); // Removed onAnimationComplete from deps - using it in closure is fine
+  }, [targetNumber, animationPhase, onAnimationComplete]);
 
   // Reset when not rolling
   useEffect(() => {
