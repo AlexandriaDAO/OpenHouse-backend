@@ -52,7 +52,7 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
   useEffect(() => {
     if (targetNumber !== null && animationPhase === 'rolling') {
       // After backend returns result, slow down and land on target
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         setDisplayNumber(targetNumber);
         setAnimationPhase('complete');
         // Call completion callback if provided
@@ -60,15 +60,21 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
           onAnimationComplete();
         }
       }, ANIMATION_CONFIG.ROLL_DURATION + ANIMATION_CONFIG.RESULT_DELAY);
+
+      // Cleanup timeout on unmount or deps change
+      return () => clearTimeout(timeoutId);
     }
   }, [targetNumber, animationPhase]); // Removed onAnimationComplete from deps - using it in closure is fine
 
   // Reset when not rolling
   useEffect(() => {
     if (!isRolling && animationPhase === 'complete') {
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         setAnimationPhase('idle');
       }, ANIMATION_CONFIG.RESULT_DISPLAY_DURATION);
+
+      // Cleanup timeout on unmount or deps change
+      return () => clearTimeout(timeoutId);
     }
   }, [isRolling, animationPhase]);
 
