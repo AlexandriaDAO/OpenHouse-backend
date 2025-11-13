@@ -16,6 +16,10 @@ interface GameResult {
   timestamp: bigint;
 }
 
+interface GameResultWithId extends GameResult {
+  clientId: string;
+}
+
 export const Dice: React.FC = () => {
   const { actor } = useDiceActor();
   const { isAuthenticated } = useAuth();
@@ -32,7 +36,7 @@ export const Dice: React.FC = () => {
   const [multiplier, setMultiplier] = useState(0);
   const [isRolling, setIsRolling] = useState(false);
   const [lastResult, setLastResult] = useState<GameResult | null>(null);
-  const [gameHistory, setGameHistory] = useState<GameResult[]>([]);
+  const [gameHistory, setGameHistory] = useState<GameResultWithId[]>([]);
   const [gameError, setGameError] = useState('');
 
   // Mode toggle: 'practice' or 'real'
@@ -50,6 +54,7 @@ export const Dice: React.FC = () => {
       try {
         const result = await actor.greet('Player');
         setGreeting(result);
+        setError(''); // Clear error on success
       } catch (err) {
         console.error('Failed to connect to Dice backend:', err);
         setError(err instanceof Error ? err.message : String(err));
@@ -64,13 +69,14 @@ export const Dice: React.FC = () => {
   // Calculate odds when target or direction changes
   useEffect(() => {
     let cancelled = false;
+    const currentActor = actor;
 
     const updateOdds = async () => {
-      if (!actor) return;
+      if (!currentActor) return;
 
       try {
         const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
-        const result = await actor.calculate_payout_info(targetNumber, directionVariant);
+        const result = await currentActor.calculate_payout_info(targetNumber, directionVariant);
 
         if (!cancelled && 'Ok' in result) {
           const [chance, mult] = result.Ok;
@@ -100,7 +106,11 @@ export const Dice: React.FC = () => {
 
       try {
         const history = await actor.get_recent_games(10);
-        setGameHistory(history);
+        const historyWithIds = history.map(game => ({
+          ...game,
+          clientId: crypto.randomUUID()
+        }));
+        setGameHistory(historyWithIds);
       } catch (err) {
         console.error('Failed to load history:', err);
       }
@@ -132,7 +142,7 @@ export const Dice: React.FC = () => {
 
       if ('Ok' in result) {
         setLastResult(result.Ok);
-        setGameHistory(prev => [result.Ok, ...prev.slice(0, 9)]);
+        setGameHistory(prev => [{...result.Ok, clientId: crypto.randomUUID()}, ...prev.slice(0, 9)]);
       } else {
         setGameError(result.Err);
       }
@@ -301,12 +311,7 @@ export const Dice: React.FC = () => {
                 max="100"
                 step="0.1"
                 value={betAmount}
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  if (!isNaN(val) && val >= 0.1 && val <= 100) {
-                    setBetAmount(val);
-                  }
-                }}
+                onChange={(e) => setBetAmount(parseFloat(e.target.value) || 0)}
                 className="w-full bg-casino-primary border border-casino-accent rounded px-4 py-2"
                 disabled={isRolling}
               />
@@ -371,7 +376,7 @@ export const Dice: React.FC = () => {
             <div className="bg-casino-primary rounded p-4">
               <div className="text-sm text-gray-400 mb-1">Win Chance</div>
               <div className="text-3xl font-bold text-casino-highlight">
-                {winChance.toFixed(2)}%
+                {(winChance || 0).toFixed(2)}%
               </div>
             </div>
 
@@ -379,7 +384,7 @@ export const Dice: React.FC = () => {
             <div className="bg-casino-primary rounded p-4">
               <div className="text-sm text-gray-400 mb-1">Multiplier</div>
               <div className="text-3xl font-bold text-green-400">
-                {multiplier.toFixed(2)}x
+                {(multiplier || 0).toFixed(2)}x
               </div>
             </div>
 
@@ -387,7 +392,7 @@ export const Dice: React.FC = () => {
             <div className="bg-casino-primary rounded p-4">
               <div className="text-sm text-gray-400 mb-1">Potential Win</div>
               <div className="text-2xl font-bold">
-                {(betAmount * multiplier).toFixed(2)} {isPracticeMode ? 'Virtual ' : ''}ICP
+                {((betAmount || 0) * (multiplier || 0)).toFixed(2)} {isPracticeMode ? 'Virtual ' : ''}ICP
               </div>
             </div>
           </div>
@@ -481,7 +486,7 @@ export const Dice: React.FC = () => {
               </thead>
               <tbody>
                 {gameHistory.map((game) => (
-                  <tr key={`${game.timestamp.toString()}-${game.player.toString()}`} className="border-b border-casino-primary/50">
+                  <tr key={game.clientId} className="border-b border-casino-primary/50">
                     <td className="py-2">{game.target_number}</td>
                     <td className="py-2">
                       <span className={Object.keys(game.direction)[0] === 'Over' ? 'text-green-400' : 'text-red-400'}>
