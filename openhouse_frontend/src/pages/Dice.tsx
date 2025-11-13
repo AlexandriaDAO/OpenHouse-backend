@@ -137,8 +137,11 @@ export const Dice: React.FC = () => {
       const betAmountE8s = BigInt(Math.floor(betAmount * 100_000_000));
       const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
 
-      // Generate client seed (timestamp + random)
-      const clientSeed = `${Date.now()}_${Math.random().toString(36).substring(2)}`;
+      // Generate cryptographically secure client seed
+      const randomBytes = new Uint8Array(16);
+      crypto.getRandomValues(randomBytes);
+      const randomHex = Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
+      const clientSeed = `${Date.now()}_${randomHex}`;
 
       // In practice mode (not authenticated), still call backend but it won't affect real balances
       const result = await actor.play_dice(betAmountE8s, targetNumber, directionVariant, clientSeed);

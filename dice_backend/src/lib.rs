@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 
 // Seed management structure
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, CandidType)]
 struct RandomnessSeed {
     current_seed: [u8; 32],
     creation_time: u64,
@@ -22,6 +22,7 @@ struct RandomnessSeed {
 thread_local! {
     static SEED_STATE: RefCell<Option<RandomnessSeed>> = RefCell::new(None);
     static LAST_SEED_ROTATION: RefCell<u64> = RefCell::new(0);
+    static SEED_INIT_LOCK: RefCell<bool> = RefCell::new(false);
 }
 
 const SEED_ROTATION_INTERVAL_NS: u64 = 300_000_000_000; // 5 minutes in nanoseconds
@@ -55,6 +56,10 @@ pub struct DiceResult {
     pub payout: u64,
     pub is_win: bool,
     pub timestamp: u64,
+    // Verification fields for provable fairness
+    pub client_seed: String,
+    pub nonce: u64,
+    pub server_seed_hash: String,
 }
 
 #[derive(CandidType, Deserialize, Clone, Default)]
@@ -99,15 +104,37 @@ fn init() {
     // Seed will be initialized on first game or in post_upgrade
 }
 
-// Initialize the seed with VRF randomness
+// Initialize the seed with VRF randomness (with lock to prevent race conditions)
 async fn initialize_seed() {
+    // Check if already initializing
+    let is_locked = SEED_INIT_LOCK.with(|lock| *lock.borrow());
+    if is_locked {
+        return; // Already initializing, skip
+    }
+
+    // Set lock
+    SEED_INIT_LOCK.with(|lock| {
+        *lock.borrow_mut() = true;
+    });
+
+    // Double-check seed state after acquiring lock
+    let already_initialized = SEED_STATE.with(|s| s.borrow().is_some());
+    if already_initialized {
+        SEED_INIT_LOCK.with(|lock| {
+            *lock.borrow_mut() = false;
+        });
+        return;
+    }
+
     let random_bytes = match raw_rand().await {
         Ok((bytes,)) => bytes,
         Err(_) => {
-            // Fallback to time-based seed
+            // Improved fallback: combine timestamp with caller principal
             let time = ic_cdk::api::time();
+            let caller = ic_cdk::caller();
             let mut hasher = Sha256::new();
             hasher.update(time.to_be_bytes());
+            hasher.update(caller.as_slice());
             hasher.finalize().to_vec()
         }
     };
@@ -129,18 +156,38 @@ async fn initialize_seed() {
     LAST_SEED_ROTATION.with(|t| {
         *t.borrow_mut() = ic_cdk::api::time();
     });
+
+    // Release lock
+    SEED_INIT_LOCK.with(|lock| {
+        *lock.borrow_mut() = false;
+    });
 }
 
 // Upgrade hooks
 #[pre_upgrade]
 fn pre_upgrade() {
-    // State is already in stable memory
+    // Save seed state to stable memory
+    let seed_state = SEED_STATE.with(|s| s.borrow().clone());
+    let last_rotation = LAST_SEED_ROTATION.with(|t| *t.borrow());
+
+    ic_cdk::storage::stable_save((seed_state, last_rotation))
+        .expect("Failed to save seed state to stable memory");
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    // State is restored from stable memory
-    // Seed will be initialized on first game if needed
+    // Restore seed state from stable memory
+    let (seed_state, last_rotation): (Option<RandomnessSeed>, u64) =
+        ic_cdk::storage::stable_restore()
+            .unwrap_or((None, 0));
+
+    SEED_STATE.with(|s| {
+        *s.borrow_mut() = seed_state;
+    });
+
+    LAST_SEED_ROTATION.with(|t| {
+        *t.borrow_mut() = last_rotation;
+    });
 }
 
 // Calculate win chance and multiplier based on target and direction
@@ -169,23 +216,27 @@ fn calculate_multiplier(win_chance: f64) -> f64 {
 }
 
 // Generate instant random number using seed+nonce+client_seed (0-100)
-fn generate_dice_roll_instant(client_seed: &str) -> Result<u8, String> {
+// Returns: (rolled_number, nonce, server_seed_hash)
+fn generate_dice_roll_instant(client_seed: &str) -> Result<(u8, u64, String), String> {
     // If no seed initialized, use time-based fallback temporarily
     let has_seed = SEED_STATE.with(|s| s.borrow().is_some());
 
     if !has_seed {
         // Fallback: Use time-based entropy for first game before seed initialization
         let time = ic_cdk::api::time();
+        let caller = ic_cdk::caller();
         let mut hasher = Sha256::new();
         hasher.update(time.to_be_bytes());
+        hasher.update(caller.as_slice());
         hasher.update(client_seed.as_bytes());
         let hash = hasher.finalize();
         let rand_u64 = u64::from_be_bytes(hash[0..8].try_into().unwrap());
-        return Ok((rand_u64 % (MAX_NUMBER as u64 + 1)) as u8);
+        let roll = (rand_u64 % (MAX_NUMBER as u64 + 1)) as u8;
+        return Ok((roll, 0, "fallback".to_string()));
     }
 
-    // Get current seed state
-    let (server_seed, nonce) = SEED_STATE.with(|s| {
+    // Get current seed state and compute hash
+    let (server_seed, nonce, server_seed_hash) = SEED_STATE.with(|s| {
         let mut state = s.borrow_mut();
         let seed_state = state.as_mut().ok_or("Seed not initialized")?;
 
@@ -193,7 +244,12 @@ fn generate_dice_roll_instant(client_seed: &str) -> Result<u8, String> {
         seed_state.nonce += 1;
         seed_state.games_used += 1;
 
-        Ok::<_, String>((seed_state.current_seed, seed_state.nonce))
+        // Compute server seed hash for verification
+        let mut seed_hasher = Sha256::new();
+        seed_hasher.update(&seed_state.current_seed);
+        let seed_hash = format!("{:x}", seed_hasher.finalize());
+
+        Ok::<_, String>((seed_state.current_seed, seed_state.nonce, seed_hash))
     })?;
 
     // Combine server seed + client seed + nonce for unique result
@@ -205,7 +261,8 @@ fn generate_dice_roll_instant(client_seed: &str) -> Result<u8, String> {
 
     // Convert to 0-100 range
     let rand_u64 = u64::from_be_bytes(hash[0..8].try_into().unwrap());
-    Ok((rand_u64 % (MAX_NUMBER as u64 + 1)) as u8)
+    let roll = (rand_u64 % (MAX_NUMBER as u64 + 1)) as u8;
+    Ok((roll, nonce, server_seed_hash))
 }
 
 // Play a game of dice
@@ -247,11 +304,16 @@ fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, clien
         return Err("Invalid target number - win chance must be between 1% and 98%".to_string());
     }
 
+    // Validate client seed length (DoS protection)
+    if client_seed.len() > 256 {
+        return Err("Client seed too long (max 256 characters)".to_string());
+    }
+
     // Check if seed needs rotation
     maybe_schedule_seed_rotation();
 
     let multiplier = calculate_multiplier(win_chance);
-    let rolled_number = generate_dice_roll_instant(&client_seed)?;
+    let (rolled_number, nonce, server_seed_hash) = generate_dice_roll_instant(&client_seed)?;
 
     // Determine if player won
     let is_win = match direction {
@@ -276,6 +338,9 @@ fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, clien
         payout,
         is_win,
         timestamp: ic_cdk::api::time(),
+        client_seed,
+        nonce,
+        server_seed_hash,
     };
 
     // Update stats
