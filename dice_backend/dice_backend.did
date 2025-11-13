@@ -24,14 +24,19 @@ type GameStats = record {
 };
 
 service : {
-  // Play a game of dice
-  play_dice: (nat64, nat8, RollDirection) -> (variant { Ok: DiceResult; Err: text });
+  // Play a game of dice - now with client seed for instant randomness
+  play_dice: (nat64, nat8, RollDirection, text) -> (variant { Ok: DiceResult; Err: text });
 
   // Query functions
   get_stats: () -> (GameStats) query;
   get_recent_games: (nat32) -> (vec DiceResult) query;
   get_game: (nat64) -> (opt DiceResult) query;
   calculate_payout_info: (nat8, RollDirection) -> (variant { Ok: record { float64; float64 }; Err: text }) query;
+
+  // Provable fairness verification methods
+  get_current_seed_hash: () -> (text) query;
+  verify_game_result: (blob, text, nat64, nat8) -> (variant { Ok: bool; Err: text }) query;
+  get_seed_info: () -> (text, nat64, nat64) query;
 
   // Test function
   greet: (text) -> (text) query;
