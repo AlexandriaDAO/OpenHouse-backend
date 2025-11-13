@@ -41,8 +41,8 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
       const maxFrames = Math.floor(ANIMATION_CONFIG.ROLL_DURATION / ANIMATION_CONFIG.FRAME_INTERVAL);
 
       const interval = setInterval(() => {
-        // Generate random number 0-99 for visual effect (matching dice range)
-        setDisplayNumber(Math.floor(Math.random() * 100));
+        // Generate random number 0-100 for visual effect (matching dice range)
+        setDisplayNumber(Math.floor(Math.random() * 101));
         frameCount++;
 
         if (frameCount >= maxFrames) {
