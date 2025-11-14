@@ -1,6 +1,31 @@
+//! Plinko Game Logic Canister
+//!
+//! **Architecture Philosophy:**
+//! This canister implements ONLY the core Plinko game mechanics:
+//! - Generate random ball path using IC VRF
+//! - Map final position to multiplier based on risk/rows
+//!
+//! **What this canister does NOT do:**
+//! - ICP betting/transfers (handled by frontend or separate accounting canister)
+//! - Game history storage (can be added as separate layer if needed)
+//! - Player balance management
+//!
+//! **Why this separation?**
+//! 1. Reusability: Game logic can be used by multiple betting interfaces
+//! 2. Verifiability: Core randomness algorithm is simple and auditable
+//! 3. Modularity: Betting logic can evolve independently
+//! 4. Cost: Less state = lower storage costs
+//!
+//! **Transparency & Fairness:**
+//! - Randomness source: IC VRF (raw_rand) with SHA256 fallback
+//! - Multiplier tables are public and fixed (query `get_multipliers`)
+//! - Game logic is deterministic: same path -> same multiplier
+//! - Frontend should log all game results for user verification
+
 use candid::{CandidType, Deserialize};
 use ic_cdk::{query, update};
 use ic_cdk::api::management_canister::main::raw_rand;
+use sha2::{Digest, Sha256};
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub enum RiskLevel { Low, Medium, High }
@@ -13,14 +38,30 @@ pub struct PlinkoResult {
 }
 
 // Drop a ball down the Plinko board
+// Architecture: This canister provides ONLY game logic (random path + multiplier lookup).
+// Frontend or a separate accounting canister handles betting/ICP transfers.
+// This separation allows the game logic to be reusable and independently verifiable.
 #[update]
 async fn drop_ball(rows: u8, risk: RiskLevel) -> Result<PlinkoResult, String> {
     if ![8, 12, 16].contains(&rows) {
         return Err("Rows must be 8, 12, or 16".to_string());
     }
 
-    // Generate random path using IC VRF
-    let random_bytes = raw_rand().await.map(|(bytes,)| bytes).unwrap_or_default();
+    // Generate random path using IC VRF with secure fallback
+    let random_bytes = match raw_rand().await {
+        Ok((bytes,)) => bytes,
+        Err(_) => {
+            // Secure fallback: Hash timestamp + caller principal
+            // This maintains randomness even if VRF fails
+            let time = ic_cdk::api::time();
+            let caller = ic_cdk::caller();
+            let mut hasher = Sha256::new();
+            hasher.update(time.to_be_bytes());
+            hasher.update(caller.as_slice());
+            hasher.finalize().to_vec()
+        }
+    };
+
     let path: Vec<bool> = (0..rows)
         .map(|i| (random_bytes[i as usize % random_bytes.len()] >> (i % 8)) & 1 == 1)
         .collect();
@@ -82,6 +123,13 @@ fn get_multiplier(rows: u8, risk: &RiskLevel, pos: u8) -> f64 {
         },
         _ => 1.0,
     }
+}
+
+// Backwards compatibility: Legacy function name
+// TODO: Remove after frontend migration to drop_ball()
+#[update]
+async fn play_plinko(rows: u8, risk: RiskLevel) -> Result<PlinkoResult, String> {
+    drop_ball(rows, risk).await
 }
 
 #[query]

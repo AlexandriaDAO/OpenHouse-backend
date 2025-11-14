@@ -14,6 +14,9 @@ service : {
   // Drop a ball and get the result (path + multiplier)
   drop_ball: (nat8, RiskLevel) -> (variant { Ok: PlinkoResult; Err: text });
 
+  // Backwards compatibility - legacy function name (deprecated)
+  play_plinko: (nat8, RiskLevel) -> (variant { Ok: PlinkoResult; Err: text });
+
   // Get multiplier table for a given configuration
   get_multipliers: (nat8, RiskLevel) -> (vec float64) query;
 
