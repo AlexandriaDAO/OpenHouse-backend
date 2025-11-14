@@ -15,6 +15,9 @@ import { useGameBalance } from '../providers/GameBalanceProvider';
 import { ConnectionStatus } from '../components/ui/ConnectionStatus';
 import type { Principal } from '@dfinity/principal';
 
+// ICP conversion constant
+const E8S_PER_ICP = 100_000_000; // 1 ICP = 100,000,000 e8s
+
 interface DiceGameResult {
   player: Principal;
   bet_amount: bigint;
@@ -32,7 +35,9 @@ interface DiceGameResult {
 export const Dice: React.FC = () => {
   const { actor } = useDiceActor();
   const gameMode = useGameMode();
-  const gameState = useGameState<DiceGameResult>(0.01, 100);
+  // Initialize with conservative default, will be updated dynamically
+  const [maxBet, setMaxBet] = useState(10); // Dynamic max bet in ICP
+  const gameState = useGameState<DiceGameResult>(0.01, maxBet);
   // Use global balance state
   const gameBalanceContext = useGameBalance('dice');
   const balance = gameBalanceContext.balance;
@@ -55,6 +60,8 @@ export const Dice: React.FC = () => {
 
       try {
         const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
+
+        // Get payout info (existing)
         const result = await actor.calculate_payout_info(targetNumber, directionVariant);
 
         if ('Ok' in result) {
@@ -63,6 +70,22 @@ export const Dice: React.FC = () => {
           setMultiplier(mult);
         } else if ('Err' in result) {
           gameState.setGameError(result.Err);
+        }
+
+        // Get max bet (NEW) - with error handling
+        try {
+          const maxBetE8s = await actor.get_max_bet(targetNumber, directionVariant);
+          const maxBetICP = Number(maxBetE8s) / E8S_PER_ICP;
+          setMaxBet(maxBetICP);
+
+          // Adjust current bet if it exceeds new max (NEW)
+          if (gameState.betAmount > maxBetICP) {
+            gameState.setBetAmount(maxBetICP);
+          }
+        } catch (maxBetError) {
+          console.error('Failed to get max bet, using default:', maxBetError);
+          // Use a safe default if the call fails
+          setMaxBet(10);
         }
       } catch (err) {
         console.error('Failed to calculate odds:', err);
@@ -79,12 +102,15 @@ export const Dice: React.FC = () => {
 
       try {
         const games = await actor.get_recent_games(10);
-        // Add each game to history with a unique ID
-        games.forEach((game: DiceGameResult) => {
-          gameState.addToHistory({
-            ...game,
-            clientId: crypto.randomUUID()
-          });
+        // Process all games at once to avoid multiple state updates
+        const processedGames = games.map((game: DiceGameResult) => ({
+          ...game,
+          clientId: crypto.randomUUID()
+        }));
+
+        // Add all games in a single batch if we have a batch method
+        processedGames.forEach((game) => {
+          gameState.addToHistory(game);
         });
       } catch (err) {
         console.error('Failed to load game history:', err);
@@ -96,7 +122,9 @@ export const Dice: React.FC = () => {
 
   // Load initial balances on mount
   useEffect(() => {
-    refreshBalance();
+    if (actor) {
+      refreshBalance().catch(console.error);
+    }
   }, [actor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Refresh callback for accounting panel
@@ -112,8 +140,13 @@ export const Dice: React.FC = () => {
     gameState.clearErrors();
     setAnimatingResult(null);
 
+    // Create a timeout promise that rejects after 15 seconds
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Game timed out. Please try again.')), 15000);
+    });
+
     try {
-      const betAmountE8s = BigInt(Math.floor(gameState.betAmount * 100_000_000));
+      const betAmountE8s = BigInt(Math.floor(gameState.betAmount * E8S_PER_ICP));
       const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
 
       // Generate client seed for provable fairness
@@ -121,7 +154,11 @@ export const Dice: React.FC = () => {
       crypto.getRandomValues(randomBytes);
       const clientSeed = Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
 
-      const result = await actor.play_dice(betAmountE8s, targetNumber, directionVariant, clientSeed);
+      // Race between the actual call and timeout
+      const result = await Promise.race([
+        actor.play_dice(betAmountE8s, targetNumber, directionVariant, clientSeed),
+        timeoutPromise
+      ]);
 
       if ('Ok' in result) {
         setAnimatingResult(result.Ok.rolled_number);
@@ -164,6 +201,7 @@ export const Dice: React.FC = () => {
   const stats: GameStat[] = [
     { label: 'Win Chance', value: `${winChance.toFixed(2)}%`, highlight: true, color: 'yellow' },
     { label: 'Multiplier', value: `${multiplier.toFixed(2)}x`, highlight: true, color: 'green' },
+    { label: 'Max Bet', value: `${maxBet.toFixed(4)} ICP`, highlight: true, color: 'blue' },
     { label: 'Win Amount', value: `${(gameState.betAmount * multiplier).toFixed(2)} ICP` },
   ];
 
@@ -203,7 +241,7 @@ export const Dice: React.FC = () => {
           value={gameState.betAmount}
           onChange={gameState.setBetAmount}
           min={0.01}
-          max={100}
+          max={maxBet}
           disabled={gameState.isPlaying}
           isPracticeMode={gameMode.isPracticeMode}
           error={gameState.betError}
