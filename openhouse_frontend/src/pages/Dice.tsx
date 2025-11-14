@@ -50,6 +50,13 @@ export const Dice: React.FC = () => {
   const [maxBet, setMaxBet] = useState(10); // Dynamic max bet in ICP
   const [animatingResult, setAnimatingResult] = useState<number | null>(null);
 
+  // Refresh balance when actor becomes available
+  useEffect(() => {
+    if (actor) {
+      refreshBalance().catch(console.error);
+    }
+  }, [actor, refreshBalance]);
+
   // Calculate odds when target or direction changes
   useEffect(() => {
     const updateOdds = async () => {
