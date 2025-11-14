@@ -7,12 +7,23 @@ export default {
   theme: {
     extend: {
       colors: {
-        casino: {
-          primary: '#1a1a2e',
-          secondary: '#16213e',
-          accent: '#0f3460',
-          highlight: '#e94560',
-        }
+        // DFINITY brand colors
+        dfinity: {
+          turquoise: '#29ABE2',  // Main brand color
+          purple: '#3B00B9',      // Secondary/links
+          green: '#00E19B',       // Success/positive
+          red: '#ED0047',         // Error/negative
+          orange: '#F15A24',      // Hover states
+          navy: '#0E031F',        // Deep background
+          gray: '#E6E6E6',        // Light UI elements
+        },
+        // Core monochrome
+        'pure-black': '#000000',
+        'pure-white': '#FFFFFF',
+      },
+      fontFamily: {
+        mono: ['JetBrains Mono', 'IBM Plex Mono', 'monospace'],
+        pixel: ['"Press Start 2P"', 'cursive'],
       }
     },
   },

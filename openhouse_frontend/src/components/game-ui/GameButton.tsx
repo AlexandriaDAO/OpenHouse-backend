@@ -22,15 +22,24 @@ export const GameButton: React.FC<GameButtonProps> = ({
   icon,
 }) => {
   const getButtonStyles = () => {
-    const base = `font-bold py-4 rounded-lg text-xl transition ${fullWidth ? 'w-full' : ''}`;
+    const base = `font-mono font-bold py-4 text-xl transition border-2 ${fullWidth ? 'w-full' : ''}`;
 
     switch (variant) {
       case 'primary':
-        return `${base} bg-casino-highlight hover:bg-casino-highlight/80 disabled:bg-gray-700 text-white`;
+        // DFINITY turquoise terminal button
+        return `${base} bg-transparent border-dfinity-turquoise text-dfinity-turquoise
+                hover:bg-dfinity-turquoise hover:text-pure-black
+                disabled:border-pure-white/20 disabled:text-pure-white/20`;
       case 'secondary':
-        return `${base} bg-casino-secondary hover:bg-casino-accent disabled:bg-gray-700 text-white`;
+        // Purple variant
+        return `${base} bg-transparent border-dfinity-purple text-dfinity-purple
+                hover:bg-dfinity-purple hover:text-pure-white
+                disabled:border-pure-white/20 disabled:text-pure-white/20`;
       case 'danger':
-        return `${base} bg-red-600 hover:bg-red-500 disabled:bg-gray-700 text-white`;
+        // Red variant
+        return `${base} bg-transparent border-dfinity-red text-dfinity-red
+                hover:bg-dfinity-red hover:text-pure-white
+                disabled:border-pure-white/20 disabled:text-pure-white/20`;
       default:
         return base;
     }

@@ -7,7 +7,7 @@ const ANIMATION_CONFIG = {
   FRAME_INTERVAL: 33,
   RESULT_DELAY: 100,
   RESULT_DISPLAY_DURATION: 2000,
-  MIN_DISPLAY_TIME: 500 // Minimum time to display result even if backend is very fast
+  MIN_DISPLAY_TIME: 500
 } as const;
 
 interface DiceAnimationProps {
@@ -16,27 +16,79 @@ interface DiceAnimationProps {
   onAnimationComplete?: () => void;
 }
 
+// Helper component for rendering dice dots
+const DiceDots: React.FC<{ number: number }> = ({ number }) => {
+  // For 1-6: render traditional dice dot patterns
+  if (number >= 1 && number <= 6) {
+    return (
+      <div className={`dice-dots dots-${number}`}>
+        {number === 1 && (
+          <div className="dice-dot center"></div>
+        )}
+        {number === 2 && (
+          <>
+            <div className="dice-dot top-left"></div>
+            <div className="dice-dot bottom-right"></div>
+          </>
+        )}
+        {number === 3 && (
+          <>
+            <div className="dice-dot top-left"></div>
+            <div className="dice-dot center"></div>
+            <div className="dice-dot bottom-right"></div>
+          </>
+        )}
+        {number === 4 && (
+          <>
+            <div className="dice-dot top-left"></div>
+            <div className="dice-dot top-right"></div>
+            <div className="dice-dot bottom-left"></div>
+            <div className="dice-dot bottom-right"></div>
+          </>
+        )}
+        {number === 5 && (
+          <>
+            <div className="dice-dot top-left"></div>
+            <div className="dice-dot top-right"></div>
+            <div className="dice-dot center"></div>
+            <div className="dice-dot bottom-left"></div>
+            <div className="dice-dot bottom-right"></div>
+          </>
+        )}
+        {number === 6 && (
+          <>
+            <div className="dice-dot top-left"></div>
+            <div className="dice-dot top-right"></div>
+            <div className="dice-dot middle-left"></div>
+            <div className="dice-dot middle-right"></div>
+            <div className="dice-dot bottom-left"></div>
+            <div className="dice-dot bottom-right"></div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // For 0, 7-100: render number in monospace font
+  return <span className="dice-number-display">{number}</span>;
+};
+
 export const DiceAnimation: React.FC<DiceAnimationProps> = ({
   targetNumber,
   isRolling,
   onAnimationComplete
 }) => {
-  // State for current displayed number during animation
   const [displayNumber, setDisplayNumber] = useState(0);
   const [animationPhase, setAnimationPhase] = useState<'idle' | 'rolling' | 'complete'>('idle');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Start rolling animation when isRolling becomes true
+  // Start rolling animation
   useEffect(() => {
     if (isRolling) {
-      // Explicitly reset animation state for new roll
       setAnimationPhase('rolling');
       setDisplayNumber(0);
 
-      // Continuously cycle through random numbers until backend returns result
-      // No maxFrames - animation continues indefinitely until targetNumber arrives
       intervalRef.current = setInterval(() => {
-        // Generate random number 0-100 for visual effect (matching dice range)
         setDisplayNumber(Math.floor(Math.random() * 101));
       }, ANIMATION_CONFIG.FRAME_INTERVAL);
 
@@ -49,20 +101,17 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
     }
   }, [isRolling]);
 
-  // When backend returns result, immediately show it (no delay)
+  // Show result immediately when backend returns
   useEffect(() => {
     if (targetNumber !== null && animationPhase === 'rolling') {
-      // Stop the random number animation immediately
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
 
-      // Show the actual result immediately (no setTimeout delay!)
       setDisplayNumber(targetNumber);
       setAnimationPhase('complete');
 
-      // Call completion callback if provided
       if (onAnimationComplete) {
         onAnimationComplete();
       }
@@ -76,29 +125,81 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
         setAnimationPhase('idle');
       }, ANIMATION_CONFIG.RESULT_DISPLAY_DURATION);
 
-      // Cleanup timeout on unmount or deps change
       return () => clearTimeout(timeoutId);
     }
   }, [isRolling, animationPhase]);
 
+  // Calculate opposite face numbers for traditional dice
+  const getOppositeFace = (num: number): number => {
+    if (num >= 1 && num <= 6) {
+      return 7 - num;
+    }
+    return (num + 50) % 101; // For 0-100, just offset by 50
+  };
+
+  // Calculate adjacent face numbers
+  const getAdjacentFaces = (num: number): [number, number, number, number] => {
+    if (num >= 1 && num <= 6) {
+      // Traditional dice face arrangement
+      const adjacent: Record<number, [number, number, number, number]> = {
+        1: [2, 3, 4, 5],
+        2: [1, 3, 5, 6],
+        3: [1, 2, 4, 6],
+        4: [1, 3, 5, 6],
+        5: [1, 2, 4, 6],
+        6: [2, 3, 4, 5]
+      };
+      return adjacent[num];
+    }
+    // For larger numbers, just use variations
+    return [
+      (num + 25) % 101,
+      (num + 50) % 101,
+      (num + 75) % 101,
+      (num + 33) % 101
+    ];
+  };
+
+  const adjacentFaces = getAdjacentFaces(displayNumber);
+
   return (
     <div className="dice-container">
-      {/* 3D Dice Visualization */}
+      {/* 3D dice cube with 6 faces */}
       <div className={`dice-cube ${animationPhase === 'rolling' ? 'rolling-animation' : ''}`}>
-        {/* Main dice display */}
-        <div className="dice-face">
-          <span className="dice-number">{displayNumber}</span>
+        {/* Front face (showing current number) */}
+        <div className="dice-face dice-face-front">
+          <DiceDots number={displayNumber} />
         </div>
 
-        {/* Visual effects during roll */}
-        {animationPhase === 'rolling' && (
-          <div className="rolling-effects"></div>
-        )}
+        {/* Back face (opposite number) */}
+        <div className="dice-face dice-face-back">
+          <DiceDots number={getOppositeFace(displayNumber)} />
+        </div>
+
+        {/* Right face */}
+        <div className="dice-face dice-face-right">
+          <DiceDots number={adjacentFaces[0]} />
+        </div>
+
+        {/* Left face */}
+        <div className="dice-face dice-face-left">
+          <DiceDots number={adjacentFaces[1]} />
+        </div>
+
+        {/* Top face */}
+        <div className="dice-face dice-face-top">
+          <DiceDots number={adjacentFaces[2]} />
+        </div>
+
+        {/* Bottom face */}
+        <div className="dice-face dice-face-bottom">
+          <DiceDots number={adjacentFaces[3]} />
+        </div>
       </div>
 
-      {/* Result indicator when complete */}
+      {/* Result glow with DFINITY turquoise */}
       {animationPhase === 'complete' && targetNumber !== null && (
-        <div className="result-glow"></div>
+        <div className="result-glow-turquoise"></div>
       )}
     </div>
   );

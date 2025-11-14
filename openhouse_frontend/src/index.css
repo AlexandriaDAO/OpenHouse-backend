@@ -1,27 +1,88 @@
+/* Import Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Press+Start+2P&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   body {
-    @apply bg-casino-primary text-white min-h-screen;
+    /* Pure black background */
+    @apply bg-pure-black text-pure-white font-mono;
+  }
+
+  h1, h2, h3 {
+    /* Pixel font for headers */
+    @apply font-pixel;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply bg-casino-highlight hover:bg-opacity-90 text-white font-semibold py-2 px-6 rounded-lg transition-all duration-200;
+    /* DFINITY turquoise with terminal borders */
+    @apply bg-transparent border-2 border-dfinity-turquoise text-dfinity-turquoise;
+    @apply hover:bg-dfinity-turquoise hover:text-pure-black;
+    @apply font-mono font-bold py-2 px-6 transition-all duration-200;
   }
 
   .btn-secondary {
-    @apply bg-casino-accent hover:bg-opacity-90 text-white font-semibold py-2 px-6 rounded-lg transition-all duration-200;
+    /* DFINITY purple variant */
+    @apply bg-transparent border-2 border-dfinity-purple text-dfinity-purple;
+    @apply hover:bg-dfinity-purple hover:text-pure-white;
+    @apply font-mono font-bold py-2 px-6 transition-all duration-200;
   }
 
   .card {
-    @apply bg-casino-secondary rounded-xl p-6 shadow-lg hover:shadow-xl transition-all duration-200;
+    /* Monochrome card with subtle border */
+    @apply bg-pure-black border border-pure-white/20 p-6;
+  }
+
+  .card-accent {
+    /* Optional DFINITY color border for emphasis */
+    @apply border-dfinity-turquoise;
   }
 
   .game-card {
-    @apply card cursor-pointer hover:scale-105 transform;
+    @apply card cursor-pointer hover:border-dfinity-turquoise transition-all duration-200;
+  }
+
+  /* Range slider with DFINITY turquoise */
+  .slider-turquoise {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    outline: none;
+  }
+
+  .slider-turquoise::-webkit-slider-track {
+    background: rgba(255, 255, 255, 0.1);
+    height: 4px;
+    border-radius: 2px;
+  }
+
+  .slider-turquoise::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    background: #29ABE2; /* DFINITY turquoise */
+    border: 2px solid #FFFFFF;
+    cursor: pointer;
+    border-radius: 50%;
+  }
+
+  .slider-turquoise::-moz-range-track {
+    background: rgba(255, 255, 255, 0.1);
+    height: 4px;
+    border-radius: 2px;
+  }
+
+  .slider-turquoise::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    background: #29ABE2;
+    border: 2px solid #FFFFFF;
+    cursor: pointer;
+    border-radius: 50%;
   }
 }

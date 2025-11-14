@@ -23,27 +23,27 @@ export const GameStats: React.FC<GameStatsProps> = ({
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   const getColorClass = (color?: GameStat['color'], highlight?: boolean) => {
-    if (!highlight) return '';
+    if (!highlight) return 'text-pure-white/60';
 
     switch (color) {
       case 'green':
-        return 'text-green-400';
+        return 'text-dfinity-green';
       case 'red':
-        return 'text-red-400';
+        return 'text-dfinity-red';
       case 'yellow':
-        return 'text-casino-highlight';
+        return 'text-dfinity-turquoise'; // Use turquoise instead of yellow
       case 'blue':
-        return 'text-blue-400';
+        return 'text-dfinity-purple';
       default:
-        return 'text-casino-highlight';
+        return 'text-dfinity-turquoise';
     }
   };
 
   const statsContent = (
-    <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+    <div className="mt-2 grid grid-cols-3 gap-2 text-xs font-mono">
       {stats.map((stat, index) => (
-        <div key={index} className="bg-casino-primary rounded p-2 text-center">
-          <div className="text-gray-500 mb-1">{stat.label}</div>
+        <div key={index} className="bg-pure-black border border-pure-white/10 p-2 text-center">
+          <div className="text-pure-white/40 mb-1">{stat.label}</div>
           <div className={`font-bold ${getColorClass(stat.color, stat.highlight)}`}>
             {stat.value}
           </div>
@@ -60,7 +60,7 @@ export const GameStats: React.FC<GameStatsProps> = ({
     <div className="mb-6">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="text-xs text-gray-400 hover:text-gray-300 transition flex items-center gap-1"
+        className="text-xs text-pure-white/60 hover:text-dfinity-turquoise transition flex items-center gap-1 font-mono"
         type="button"
       >
         <span>{isOpen ? '▼' : '▶'}</span>

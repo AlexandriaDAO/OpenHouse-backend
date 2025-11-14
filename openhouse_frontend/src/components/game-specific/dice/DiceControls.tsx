@@ -21,7 +21,7 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
     <>
       {/* Target Number Slider */}
       <div className="mb-4">
-        <label className="block text-sm text-gray-400 mb-2">
+        <label className="block text-sm text-pure-white/60 mb-2 font-mono">
           Target: {targetNumber}
         </label>
         <input
@@ -30,7 +30,7 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
           max="99"
           value={targetNumber}
           onChange={(e) => onTargetChange(parseInt(e.target.value))}
-          className="w-full"
+          className="w-full slider-turquoise"
           disabled={disabled}
         />
       </div>
@@ -41,8 +41,10 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
           <button
             onClick={() => onDirectionChange('Over')}
             disabled={disabled}
-            className={`flex-1 py-3 rounded font-bold transition ${
-              direction === 'Over' ? 'bg-green-600' : 'bg-gray-700'
+            className={`flex-1 py-3 font-mono font-bold border-2 transition ${
+              direction === 'Over'
+                ? 'bg-dfinity-green border-dfinity-green text-pure-black'
+                : 'bg-transparent border-dfinity-green text-dfinity-green'
             }`}
           >
             OVER {targetNumber}
@@ -50,8 +52,10 @@ export const DiceControls: React.FC<DiceControlsProps> = ({
           <button
             onClick={() => onDirectionChange('Under')}
             disabled={disabled}
-            className={`flex-1 py-3 rounded font-bold transition ${
-              direction === 'Under' ? 'bg-red-600' : 'bg-gray-700'
+            className={`flex-1 py-3 font-mono font-bold border-2 transition ${
+              direction === 'Under'
+                ? 'bg-dfinity-red border-dfinity-red text-pure-black'
+                : 'bg-transparent border-dfinity-red text-dfinity-red'
             }`}
           >
             UNDER {targetNumber}

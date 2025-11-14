@@ -1,17 +1,18 @@
-/* Dice Animation Styles */
+/* Realistic 3D Dice Animation Styles */
 
 .dice-container {
-  /* Center the dice */
+  /* Pure black void background */
   display: flex;
   justify-content: center;
   align-items: center;
   height: 300px;
   position: relative;
-  perspective: 1000px; /* Enable 3D transforms */
+  perspective: 1000px;
+  background: #000000; /* Pure black void */
 }
 
 .dice-cube {
-  /* Style the dice as a 3D cube */
+  /* 3D cube with all 6 faces */
   width: 150px;
   height: 150px;
   position: relative;
@@ -20,7 +21,7 @@
 }
 
 .dice-cube.rolling-animation {
-  /* Rapid rotation during roll */
+  /* Rotation animation during roll */
   animation: dice-roll 2s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
 
@@ -33,40 +34,107 @@
   }
 }
 
+/* Individual dice faces */
 .dice-face {
-  /* Front face of dice showing the number */
-  width: 100%;
-  height: 100%;
+  /* White cube face with black dots/numbers */
+  position: absolute;
+  width: 150px;
+  height: 150px;
+  background: #FFFFFF; /* Pure white */
+  border: 2px solid #000000; /* Black edges */
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 20px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+
+  /* Subtle edge lighting for depth */
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.1);
 }
 
-.dice-number {
-  /* The number on the dice */
-  font-size: clamp(2.5rem, 8vw, 4rem);
-  font-weight: bold;
-  color: white;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-}
+/* Position each face in 3D space */
+.dice-face-front  { transform: rotateY(0deg) translateZ(75px); }
+.dice-face-back   { transform: rotateY(180deg) translateZ(75px); }
+.dice-face-right  { transform: rotateY(90deg) translateZ(75px); }
+.dice-face-left   { transform: rotateY(-90deg) translateZ(75px); }
+.dice-face-top    { transform: rotateX(90deg) translateZ(75px); }
+.dice-face-bottom { transform: rotateX(-90deg) translateZ(75px); }
 
-.rolling-effects {
-  /* Motion blur and effects during roll */
-  position: absolute;
-  top: 0;
-  left: 0;
+/* Container for dice dots */
+.dice-dots {
   width: 100%;
   height: 100%;
-  filter: blur(3px);
-  opacity: 0.7;
-  pointer-events: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.result-glow {
-  /* Glow effect when dice lands on result */
+/* Individual dice dots */
+.dice-dot {
+  width: 20px;
+  height: 20px;
+  background: #000000; /* Black dots */
+  border-radius: 50%;
+  position: absolute;
+}
+
+/* Dot positioning for different numbers */
+/* Number 1 - center dot */
+.dice-dot.center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* Number 2 - diagonal */
+.dice-dot.top-left {
+  top: 25%;
+  left: 25%;
+}
+
+.dice-dot.bottom-right {
+  bottom: 25%;
+  right: 25%;
+}
+
+/* Number 3 uses top-left, center, bottom-right */
+
+/* Number 4 - corners */
+.dice-dot.top-right {
+  top: 25%;
+  right: 25%;
+}
+
+.dice-dot.bottom-left {
+  bottom: 25%;
+  left: 25%;
+}
+
+/* Number 5 uses all 4 corners + center */
+
+/* Number 6 - two columns */
+.dice-dot.middle-left {
+  top: 50%;
+  left: 25%;
+  transform: translateY(-50%);
+}
+
+.dice-dot.middle-right {
+  top: 50%;
+  right: 25%;
+  transform: translateY(-50%);
+}
+
+/* Number display for 0, 7-100 */
+.dice-number-display {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 2.5rem;
+  font-weight: bold;
+  color: #000000; /* Black on white face */
+  text-shadow: none;
+}
+
+/* Result glow - DFINITY turquoise */
+.result-glow-turquoise {
   position: absolute;
   top: 50%;
   left: 50%;
@@ -74,7 +142,7 @@
   width: 200px;
   height: 200px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(102, 126, 234, 0.4) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(41, 171, 226, 0.4) 0%, transparent 70%);
   animation: pulse-glow 1.5s ease-in-out infinite;
   pointer-events: none;
   z-index: -1;
@@ -91,12 +159,12 @@
   }
 }
 
-/* Accessibility: Respect user motion preferences */
+/* Accessibility */
 @media (prefers-reduced-motion: reduce) {
   .dice-cube.rolling-animation {
     animation: none;
   }
-  .result-glow {
+  .result-glow-turquoise {
     animation: none;
   }
 }
