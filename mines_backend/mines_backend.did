@@ -1,29 +1,51 @@
-type MinesGame = record {
-  player: principal;
-  bet_amount: nat64;
-  num_mines: nat8;
-  revealed_tiles: vec nat8;
-  mine_positions: vec nat8;
-  current_multiplier: float64;
-  is_active: bool;
-  payout: opt nat64;
-  timestamp: nat64;
-};
-
 type GameStats = record {
   total_games: nat64;
-  total_volume: nat64;
-  total_payouts: nat64;
+  total_wagered: nat64;
+  total_paid_out: nat64;
   house_profit: int64;
+};
+
+type RevealResult = record {
+  busted: bool;
+  multiplier: float64;
+  payout: opt nat64;
+};
+
+type GameInfo = record {
+  player: principal;
+  bet_amount: nat64;
+  revealed: vec bool; // 25 booleans for 5x5 grid
+  num_mines: nat8;
+  is_active: bool;
+  current_multiplier: float64;
+};
+
+type GameSummary = record {
+  game_id: nat64;
+  bet_amount: nat64;
+  num_mines: nat8;
+  is_active: bool;
+  timestamp: nat64;
 };
 
 service : {
   // Start a new mines game
   start_game: (nat64, nat8) -> (variant { Ok: nat64; Err: text });
 
-  // Query functions
+  // Reveal a tile (position 0-24)
+  reveal_tile: (nat64, nat8) -> (variant { Ok: RevealResult; Err: text });
+
+  // Cash out and end game
+  cash_out: (nat64) -> (variant { Ok: nat64; Err: text });
+
+  // Query game state (without revealing mines)
+  get_game: (nat64) -> (variant { Ok: GameInfo; Err: text }) query;
+
+  // Query statistics
   get_stats: () -> (GameStats) query;
-  get_recent_games: (nat32) -> (vec MinesGame) query;
+
+  // Get recent games for caller
+  get_recent_games: (nat32) -> (vec GameSummary) query;
 
   // Test function
   greet: (text) -> (text) query;
