@@ -384,10 +384,7 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "ic-cdk",
- "ic-stable-structures",
  "serde",
- "serde_json",
- "sha2",
 ]
 
 [[package]]
