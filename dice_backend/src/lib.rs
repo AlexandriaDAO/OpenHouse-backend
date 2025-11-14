@@ -1,4 +1,4 @@
-use candid::{CandidType, Deserialize, Principal};
+use candid::{CandidType, Deserialize, Nat, Principal};
 use ic_cdk::api::management_canister::main::raw_rand;
 use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
@@ -7,6 +7,13 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::cell::RefCell;
+
+// Accounting module for deposit/withdraw functionality
+mod accounting;
+pub use accounting::{
+    deposit, withdraw, get_balance, get_my_balance, get_house_balance,
+    get_accounting_stats, audit_balances, AccountingStats, Account,
+};
 
 // Seed management structure
 #[derive(Clone, Debug, Serialize, Deserialize, CandidType, Default)]
@@ -236,6 +243,9 @@ async fn initialize_seed() {
 fn pre_upgrade() {
     // Seed state is already in stable cells - no action needed
     // StableCell and StableBTreeMap handle persistence automatically
+
+    // Preserve accounting state
+    accounting::pre_upgrade_accounting();
 }
 
 #[post_upgrade]
@@ -249,6 +259,9 @@ fn post_upgrade() {
             *s.borrow_mut() = Some(seed);
         });
     }
+
+    // Restore accounting state
+    accounting::post_upgrade_accounting();
 }
 
 // Calculate win chance and multiplier based on target and direction
@@ -319,6 +332,23 @@ fn generate_dice_roll_instant(client_seed: &str) -> Result<(u8, u64, String), St
 // Play a game of dice
 #[update]
 fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, client_seed: String) -> Result<DiceResult, String> {
+    let caller = ic_cdk::caller();
+
+    // Check user has sufficient internal balance
+    let user_balance = accounting::get_balance(caller);
+    if user_balance < bet_amount {
+        return Err(format!("Insufficient balance. You have {} e8s, need {} e8s. Please deposit more ICP.",
+                          user_balance, bet_amount));
+    }
+
+    // Calculate max bet based on house balance
+    let house_balance = accounting::get_house_balance();
+    let max_payout = (bet_amount as f64 * 100.0) as u64; // Max 100x multiplier
+    if max_payout > house_balance {
+        return Err(format!("Bet too large. House only has {} e8s, max payout would be {} e8s",
+                          house_balance, max_payout));
+    }
+
     // Validate input
     if bet_amount < MIN_BET {
         return Err(format!("Minimum bet is {} ICP", MIN_BET / 100_000_000));
@@ -347,7 +377,6 @@ fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, clien
         }
     }
 
-    let caller = ic_cdk::caller();
     let win_chance = calculate_win_chance(target_number, &direction);
 
     // Ensure win chance is reasonable
@@ -414,9 +443,16 @@ fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, clien
         history.borrow_mut().insert(game_id, result.clone());
     });
 
-    // TODO: Actually transfer ICP for bet and payout
-    // NOTE: Currently in practice/testing mode - all games record stats but don't move real ICP
-    // Real money integration will be added after randomness system is proven secure and fair
+    // Update user balance based on game result
+    if is_win {
+        // Add winnings to user balance
+        let new_balance = user_balance - bet_amount + payout;
+        accounting::update_balance(caller, new_balance)?;
+    } else {
+        // Deduct bet from user balance
+        let new_balance = user_balance - bet_amount;
+        accounting::update_balance(caller, new_balance)?;
+    }
 
     Ok(result)
 }
@@ -479,6 +515,29 @@ fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<
 #[query]
 fn greet(name: String) -> String {
     format!("Welcome to OpenHouse Dice, {}! Roll the dice and test your luck!", name)
+}
+
+// Get canister ICP balance (async call to ledger)
+#[update]
+async fn get_canister_balance() -> u64 {
+    let account = Account {
+        owner: ic_cdk::id(),
+        subaccount: None,
+    };
+
+    let ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
+    let result: Result<(Nat,), _> = ic_cdk::call(ledger, "icrc1_balance_of", (account,)).await;
+
+    match result {
+        Ok((balance,)) => {
+            // Convert Nat to u64
+            balance.0.try_into().unwrap_or(0)
+        }
+        Err(e) => {
+            ic_cdk::println!("Failed to query canister balance: {:?}", e);
+            0
+        }
+    }
 }
 
 // Check if seed needs rotation and schedule if necessary

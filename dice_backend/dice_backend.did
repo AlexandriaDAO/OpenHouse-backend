@@ -23,6 +23,13 @@ type GameStats = record {
   house_profit: int64;
 };
 
+type AccountingStats = record {
+  total_user_deposits: nat64;
+  house_balance: nat64;
+  canister_balance: nat64;
+  unique_depositors: nat64;
+};
+
 service : {
   // Play a game of dice - now with client seed for instant randomness
   play_dice: (nat64, nat8, RollDirection, text) -> (variant { Ok: DiceResult; Err: text });
@@ -37,6 +44,16 @@ service : {
   get_current_seed_hash: () -> (text) query;
   verify_game_result: (blob, text, nat64, nat8) -> (variant { Ok: bool; Err: text }) query;
   get_seed_info: () -> (text, nat64, nat64) query;
+
+  // Accounting methods
+  deposit: (nat64) -> (variant { Ok: nat64; Err: text });
+  withdraw: (nat64) -> (variant { Ok: nat64; Err: text });
+  get_balance: (principal) -> (nat64) query;
+  get_my_balance: () -> (nat64) query;
+  get_house_balance: () -> (nat64) query;
+  get_canister_balance: () -> (nat64);
+  get_accounting_stats: () -> (AccountingStats) query;
+  audit_balances: () -> (variant { Ok: text; Err: text }) query;
 
   // Test function
   greet: (text) -> (text) query;

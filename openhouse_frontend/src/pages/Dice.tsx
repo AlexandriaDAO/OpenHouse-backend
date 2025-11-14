@@ -9,7 +9,7 @@ import {
   GameStats,
   type GameStat,
 } from '../components/game-ui';
-import { DiceAnimation, DiceControls, type DiceDirection } from '../components/game-specific/dice';
+import { DiceAnimation, DiceControls, DiceAccountingPanel, type DiceDirection } from '../components/game-specific/dice';
 import { useGameMode, useGameState } from '../hooks/games';
 import type { Principal } from '@dfinity/principal';
 
@@ -40,6 +40,7 @@ export const Dice: React.FC = () => {
   const [winChance, setWinChance] = useState(0);
   const [multiplier, setMultiplier] = useState(0);
   const [animatingResult, setAnimatingResult] = useState<number | null>(null);
+  const [gameBalance, setGameBalance] = useState<bigint | null>(null);
 
   // Calculate odds when target or direction changes
   useEffect(() => {
@@ -86,6 +87,34 @@ export const Dice: React.FC = () => {
 
     loadHistory();
   }, [actor]); // Only depend on actor, not gameState to avoid loops
+
+  // Load game balance on mount
+  useEffect(() => {
+    const loadGameBalance = async () => {
+      if (!actor) return;
+
+      try {
+        const balance = await actor.get_my_balance();
+        setGameBalance(balance);
+      } catch (err) {
+        console.error('Failed to load game balance:', err);
+      }
+    };
+
+    loadGameBalance();
+  }, [actor]);
+
+  // Refresh callback for accounting panel
+  const handleBalanceChange = useCallback(async () => {
+    if (!actor) return;
+
+    try {
+      const balance = await actor.get_my_balance();
+      setGameBalance(balance);
+    } catch (err) {
+      console.error('Failed to refresh game balance:', err);
+    }
+  }, [actor]);
 
   // Handle dice roll
   const rollDice = async () => {
@@ -151,6 +180,12 @@ export const Dice: React.FC = () => {
       houseEdge={3}
     >
       <GameModeToggle {...gameMode} />
+
+      {/* ACCOUNTING PANEL */}
+      <DiceAccountingPanel
+        gameBalance={gameBalance}
+        onBalanceChange={handleBalanceChange}
+      />
 
       {/* BETTING CONTROLS */}
       <div className="card max-w-2xl mx-auto">
