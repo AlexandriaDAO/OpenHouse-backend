@@ -1,4 +1,4 @@
-# OpenHouse Casino Design System
+# OpenHouse Games Design System
 
 **Retro Arcade + Cypherpunk Aesthetic**
 
@@ -6,7 +6,7 @@
 
 ## Design Philosophy
 
-OpenHouse Casino combines **retro arcade nostalgia** with **cypherpunk minimalism** to create a unique, high-contrast gaming experience. The design prioritizes:
+OpenHouse Games combines **retro arcade nostalgia** with **cypherpunk minimalism** to create a unique, high-contrast gaming experience. The design prioritizes:
 
 - **Transparency**: Clean, readable UI that doesn't hide information
 - **Terminal Aesthetic**: Monospace fonts and minimal borders evoke command-line interfaces
@@ -395,9 +395,9 @@ The dice is a **realistic 3D cube** with 6 faces:
       <Link to="/" className="flex items-center gap-2">
         <span className="text-3xl">🎰</span>
         <div>
-          <h1 className="text-2xl font-pixel">OpenHouse Casino</h1>
+          <h1 className="text-2xl font-pixel">OpenHouse Games</h1>
           <p className="text-xs text-dfinity-turquoise font-mono">
-            Transparent Odds • Provably Fair
+            Provably Fair Gaming
           </p>
         </div>
       </Link>
@@ -422,17 +422,28 @@ The dice is a **realistic 3D cube** with 6 faces:
 <footer className="bg-pure-black border-t border-pure-white/20 py-6">
   <div className="container mx-auto px-4 text-center text-pure-white/60 text-sm font-mono">
     <p>
-      OpenHouse Casino - Open Source • Transparent Odds • Built on the{' '}
+      OpenHouse Games -{' '}
       <a
-        href="https://internetcomputer.org"
+        href="https://github.com/AlexandriaDAO/OpenHouse"
+        target="_blank"
+        rel="noopener noreferrer"
         className="text-dfinity-turquoise hover:underline"
       >
-        Internet Computer
+        Open Source
       </a>
+      {' • '}
+      An{' '}
+      <a
+        href="https://lbry.app/"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-dfinity-turquoise hover:underline"
+      >
+        Alexandria
+      </a>
+      {' '}Project
     </p>
-    <p className="mt-2">
-      All games use verifiable randomness (VRF) for provably fair results.
-    </p>
+    <p className="mt-2">Powered by Internet Computer Random Beacon</p>
   </div>
 </footer>
 ```
@@ -660,7 +671,7 @@ export const GamePage: React.FC = () => {
           <div className="flex justify-between items-center">
             <Link to="/" className="flex items-center gap-2">
               <span className="text-3xl">🎰</span>
-              <h1 className="text-2xl font-pixel">OpenHouse Casino</h1>
+              <h1 className="text-2xl font-pixel">OpenHouse Games</h1>
             </Link>
           </div>
         </div>
@@ -689,7 +700,15 @@ export const GamePage: React.FC = () => {
       {/* Footer */}
       <footer className="bg-pure-black border-t border-pure-white/20 py-6">
         <div className="container mx-auto px-4 text-center text-pure-white/60 text-sm font-mono">
-          <p>OpenHouse Casino - Provably Fair Gaming</p>
+          <p>
+            OpenHouse Games -{' '}
+            <a href="https://github.com/AlexandriaDAO/OpenHouse" className="text-dfinity-turquoise hover:underline">
+              Open Source
+            </a>
+            {' • '}
+            An <a href="https://lbry.app/" className="text-dfinity-turquoise hover:underline">Alexandria</a> Project
+          </p>
+          <p className="mt-2">Powered by Internet Computer Random Beacon</p>
         </div>
       </footer>
     </div>

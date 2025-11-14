@@ -19,9 +19,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             <Link to="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
               <span className="text-3xl">🎰</span>
               <div>
-                <h1 className="text-2xl font-pixel">OpenHouse Casino</h1>
+                <h1 className="text-2xl font-pixel">OpenHouse Games</h1>
                 <p className="text-xs text-dfinity-turquoise font-mono">
-                  Transparent Odds • Provably Fair
+                  Provably Fair Gaming
                 </p>
               </div>
             </Link>
@@ -47,17 +47,28 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       <footer className="bg-pure-black border-t border-pure-white/20 py-6">
         <div className="container mx-auto px-4 text-center text-pure-white/60 text-sm font-mono">
           <p>
-            OpenHouse Casino - Open Source • Transparent Odds • Built on the{' '}
+            OpenHouse Games -{' '}
             <a
-              href="https://internetcomputer.org"
+              href="https://github.com/AlexandriaDAO/OpenHouse"
               target="_blank"
               rel="noopener noreferrer"
               className="text-dfinity-turquoise hover:underline"
             >
-              Internet Computer
+              Open Source
             </a>
+            {' • '}
+            An{' '}
+            <a
+              href="https://lbry.app/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-dfinity-turquoise hover:underline"
+            >
+              Alexandria
+            </a>
+            {' '}Project
           </p>
-          <p className="mt-2">All games use verifiable randomness (VRF) for provably fair results.</p>
+          <p className="mt-2">Powered by Internet Computer Random Beacon</p>
         </div>
       </footer>
     </div>
