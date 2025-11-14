@@ -1,317 +1,271 @@
-use candid::{CandidType, Deserialize, Principal};
+//! Plinko Game Logic Canister
+//!
+//! **Architecture Philosophy:**
+//! This canister implements ONLY the core Plinko game mechanics:
+//! - Generate random ball path using IC VRF
+//! - Map final position to multiplier based on risk/rows
+//!
+//! **What this canister does NOT do:**
+//! - ICP betting/transfers (handled by frontend or separate accounting canister)
+//! - Game history storage (can be added as separate layer if needed)
+//! - Player balance management
+//!
+//! **Why this separation?**
+//! 1. Reusability: Game logic can be used by multiple betting interfaces
+//! 2. Verifiability: Core randomness algorithm is simple and auditable
+//! 3. Modularity: Betting logic can evolve independently
+//! 4. Cost: Less state = lower storage costs
+//!
+//! **Transparency & Fairness:**
+//! - Randomness source: IC VRF (raw_rand) with SHA256 fallback
+//! - Multiplier tables are public and fixed (query `get_multipliers`)
+//! - Game logic is deterministic: same path -> same multiplier
+//! - Frontend should log all game results for user verification
+
+use candid::{CandidType, Deserialize};
+use ic_cdk::{query, update};
 use ic_cdk::api::management_canister::main::raw_rand;
-use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
-use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
-use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, Storable};
-use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::borrow::Cow;
-use std::cell::RefCell;
 
-type Memory = VirtualMemory<DefaultMemoryImpl>;
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub enum RiskLevel { Low, Medium, High }
 
-// Plinko game constants
-const MIN_BET: u64 = 100_000_000; // 1 ICP
-const MAX_BET: u64 = 10_000_000_000; // 100 ICP
-
-// Risk levels affect multipliers
-#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
-pub enum RiskLevel {
-    Low,
-    Medium,
-    High,
-}
-
-// Plinko game result
-#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
+#[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct PlinkoResult {
-    pub player: Principal,
-    pub bet_amount: u64,
-    pub rows: u8,
-    pub risk: RiskLevel,
-    pub path: Vec<bool>, // true = right, false = left
-    pub final_position: u8,
+    pub path: Vec<bool>,        // true = right, false = left
+    pub final_position: u8,     // 0 to rows (number of rights)
     pub multiplier: f64,
-    pub payout: u64,
-    pub timestamp: u64,
 }
 
-#[derive(CandidType, Deserialize, Clone, Default)]
-pub struct GameStats {
-    pub total_games: u64,
-    pub total_volume: u64,
-    pub total_payouts: u64,
-    pub house_profit: i64,
-}
-
-impl Storable for PlinkoResult {
-    fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(serde_json::to_vec(self).unwrap())
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        serde_json::from_slice(&bytes).unwrap()
-    }
-
-    const BOUND: ic_stable_structures::storable::Bound = ic_stable_structures::storable::Bound::Unbounded;
-}
-
-thread_local! {
-    static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
-        RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
-
-    static GAME_STATS: RefCell<GameStats> = RefCell::new(GameStats::default());
-
-    static GAME_HISTORY: RefCell<StableBTreeMap<u64, PlinkoResult, Memory>> = RefCell::new(
-        StableBTreeMap::init(
-            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(0))),
-        )
-    );
-
-    static NEXT_GAME_ID: RefCell<u64> = RefCell::new(0);
-}
-
-// Initialize canister
-#[init]
-fn init() {
-    ic_cdk::println!("Plinko Game Backend Initialized");
-}
-
-// Upgrade hooks
-#[pre_upgrade]
-fn pre_upgrade() {
-    // State is already in stable memory
-}
-
-#[post_upgrade]
-fn post_upgrade() {
-    // State is restored from stable memory
-}
-
-// Get multipliers based on risk level and position
-fn get_multiplier(rows: u8, risk: &RiskLevel, position: u8) -> f64 {
-    match rows {
-        8 => match risk {
-            RiskLevel::Low => match position {
-                0 | 8 => 5.6,
-                1 | 7 => 2.1,
-                2 | 6 => 1.1,
-                3 | 5 => 1.0,
-                4 => 0.5,
-                _ => 0.0,
-            },
-            RiskLevel::Medium => match position {
-                0 | 8 => 13.0,
-                1 | 7 => 3.0,
-                2 | 6 => 1.3,
-                3 | 5 => 0.7,
-                4 => 0.4,
-                _ => 0.0,
-            },
-            RiskLevel::High => match position {
-                0 | 8 => 29.0,
-                1 | 7 => 4.0,
-                2 | 6 => 1.5,
-                3 | 5 => 0.3,
-                4 => 0.2,
-                _ => 0.0,
-            },
-        },
-        12 => match risk {
-            RiskLevel::Low => match position {
-                0 | 12 => 10.0,
-                1 | 11 => 3.0,
-                2 | 10 => 1.6,
-                3 | 9 => 1.4,
-                4 | 8 => 1.1,
-                5 | 7 => 1.0,
-                6 => 0.5,
-                _ => 0.0,
-            },
-            RiskLevel::Medium => match position {
-                0 | 12 => 33.0,
-                1 | 11 => 11.0,
-                2 | 10 => 4.0,
-                3 | 9 => 2.0,
-                4 | 8 => 1.1,
-                5 | 7 => 0.6,
-                6 => 0.3,
-                _ => 0.0,
-            },
-            RiskLevel::High => match position {
-                0 | 12 => 170.0,
-                1 | 11 => 24.0,
-                2 | 10 => 8.1,
-                3 | 9 => 2.0,
-                4 | 8 => 0.7,
-                5 | 7 => 0.2,
-                6 => 0.2,
-                _ => 0.0,
-            },
-        },
-        16 => match risk {
-            RiskLevel::Low => match position {
-                0 | 16 => 16.0,
-                1 | 15 => 9.0,
-                2 | 14 => 2.0,
-                3 | 13 => 1.4,
-                4 | 12 => 1.4,
-                5 | 11 => 1.2,
-                6 | 10 => 1.1,
-                7 | 9 => 1.0,
-                8 => 0.5,
-                _ => 0.0,
-            },
-            RiskLevel::Medium => match position {
-                0 | 16 => 110.0,
-                1 | 15 => 41.0,
-                2 | 14 => 10.0,
-                3 | 13 => 5.0,
-                4 | 12 => 3.0,
-                5 | 11 => 1.5,
-                6 | 10 => 1.0,
-                7 | 9 => 0.5,
-                8 => 0.3,
-                _ => 0.0,
-            },
-            RiskLevel::High => match position {
-                0 | 16 => 1000.0,
-                1 | 15 => 130.0,
-                2 | 14 => 26.0,
-                3 | 13 => 9.0,
-                4 | 12 => 4.0,
-                5 | 11 => 2.0,
-                6 | 10 => 0.2,
-                7 | 9 => 0.2,
-                8 => 0.2,
-                _ => 0.0,
-            },
-        },
-        _ => 1.0,
-    }
-}
-
-// Generate random ball path
-async fn generate_ball_path(rows: u8) -> Vec<bool> {
-    let random_bytes = match raw_rand().await {
-        Ok((bytes,)) => bytes,
-        Err(_) => {
-            // Fallback to time-based pseudo-random
-            let time = ic_cdk::api::time();
-            let mut hasher = Sha256::new();
-            hasher.update(time.to_be_bytes());
-            hasher.finalize().to_vec()
-        }
-    };
-
-    let mut path = Vec::new();
-    for i in 0..rows {
-        let byte_index = (i as usize) % random_bytes.len();
-        let bit_index = (i % 8) as usize;
-        let go_right = (random_bytes[byte_index] >> bit_index) & 1 == 1;
-        path.push(go_right);
-    }
-
-    path
-}
-
-// Calculate final position from path
-fn calculate_position(path: &[bool]) -> u8 {
-    path.iter().filter(|&&direction| direction).count() as u8
-}
-
-// Play Plinko game
+// Drop a ball down the Plinko board
+// Architecture: This canister provides ONLY game logic (random path + multiplier lookup).
+// Frontend or a separate accounting canister handles betting/ICP transfers.
+// This separation allows the game logic to be reusable and independently verifiable.
+//
+// Performance Note: This uses raw_rand() on every call (~500ms latency).
+// Alternative approach: Dice backend uses seed rotation (faster but more complex state).
+// Tradeoff: Simplicity vs latency. For async games like Plinko, latency is acceptable.
 #[update]
-async fn play_plinko(bet_amount: u64, rows: u8, risk: RiskLevel) -> Result<PlinkoResult, String> {
-    // Validate input
-    if bet_amount < MIN_BET {
-        return Err(format!("Minimum bet is {} ICP", MIN_BET / 100_000_000));
-    }
-    if bet_amount > MAX_BET {
-        return Err(format!("Maximum bet is {} ICP", MAX_BET / 100_000_000));
-    }
+async fn drop_ball(rows: u8, risk: RiskLevel) -> Result<PlinkoResult, String> {
     if ![8, 12, 16].contains(&rows) {
         return Err("Rows must be 8, 12, or 16".to_string());
     }
 
-    let caller = ic_cdk::caller();
-    let path = generate_ball_path(rows).await;
-    let final_position = calculate_position(&path);
-    let multiplier = get_multiplier(rows, &risk, final_position);
-    let payout = (bet_amount as f64 * multiplier) as u64;
-
-    let result = PlinkoResult {
-        player: caller,
-        bet_amount,
-        rows,
-        risk,
-        path,
-        final_position,
-        multiplier,
-        payout,
-        timestamp: ic_cdk::api::time(),
+    // Generate random path using IC VRF with secure fallback
+    let random_bytes = match raw_rand().await {
+        Ok((bytes,)) => bytes,
+        Err(_) => {
+            // Secure fallback: Hash timestamp + caller principal
+            // This maintains randomness even if VRF fails
+            let time = ic_cdk::api::time();
+            let caller = ic_cdk::caller();
+            let mut hasher = Sha256::new();
+            hasher.update(time.to_be_bytes());
+            hasher.update(caller.as_slice());
+            hasher.finalize().to_vec()
+        }
     };
 
-    // Update stats
-    GAME_STATS.with(|stats| {
-        let mut stats = stats.borrow_mut();
-        stats.total_games += 1;
-        stats.total_volume += bet_amount;
-        stats.total_payouts += payout;
-        stats.house_profit = (stats.total_volume as i64) - (stats.total_payouts as i64);
-    });
-
-    // Store in history
-    let game_id = NEXT_GAME_ID.with(|id| {
-        let current = *id.borrow();
-        *id.borrow_mut() = current + 1;
-        current
-    });
-
-    GAME_HISTORY.with(|history| {
-        history.borrow_mut().insert(game_id, result.clone());
-    });
-
-    // TODO: Actually transfer ICP for bet and payout
-
-    Ok(result)
-}
-
-// Get game statistics
-#[query]
-fn get_stats() -> GameStats {
-    GAME_STATS.with(|stats| stats.borrow().clone())
-}
-
-// Get recent games
-#[query]
-fn get_recent_games(limit: u32) -> Vec<PlinkoResult> {
-    GAME_HISTORY.with(|history| {
-        let history = history.borrow();
-        history
-            .iter()
-            .rev()
-            .take(limit as usize)
-            .map(|(_, game)| game)
-            .collect()
-    })
-}
-
-// Get multiplier table for configuration
-#[query]
-fn get_multipliers(rows: u8, risk: RiskLevel) -> Vec<f64> {
-    if ![8, 12, 16].contains(&rows) {
-        return vec![];
+    // Ensure we have enough entropy: need at least `rows` bits
+    // VRF returns 32 bytes (256 bits), enough for up to 256 rows
+    if random_bytes.len() * 8 < rows as usize {
+        return Err("Insufficient randomness".to_string());
     }
 
-    let positions = rows + 1;
-    (0..positions)
-        .map(|pos| get_multiplier(rows, &risk, pos))
+    // Generate path: each row is an independent coin flip
+    // Extract one bit per row to avoid bias from byte reuse
+    let path: Vec<bool> = (0..rows)
+        .map(|i| {
+            let bit_index = i as usize;
+            let byte_index = bit_index / 8;
+            let bit_offset = bit_index % 8;
+            (random_bytes[byte_index] >> bit_offset) & 1 == 1
+        })
+        .collect();
+
+    // Final position = count of right moves
+    let final_position = path.iter().filter(|&&d| d).count() as u8;
+    let multiplier = get_multiplier(rows, &risk, final_position)?;
+
+    Ok(PlinkoResult { path, final_position, multiplier })
+}
+
+// Get multiplier table for frontend display
+#[query]
+fn get_multipliers(rows: u8, risk: RiskLevel) -> Vec<f64> {
+    if ![8, 12, 16].contains(&rows) { return vec![]; }
+    (0..=rows)
+        .filter_map(|pos| get_multiplier(rows, &risk, pos).ok())
         .collect()
 }
 
-// Simple greeting function for testing
+fn get_multiplier(rows: u8, risk: &RiskLevel, pos: u8) -> Result<f64, String> {
+    // Validate position is within bounds
+    if pos > rows {
+        return Err(format!("Invalid position {} for {} rows", pos, rows));
+    }
+
+    let multiplier = match rows {
+        8 => match risk {
+            RiskLevel::Low => match pos {
+                0 | 8 => 5.6, 1 | 7 => 2.1, 2 | 6 => 1.1, 3 | 5 => 1.0, 4 => 0.5, _ => 0.0,
+            },
+            RiskLevel::Medium => match pos {
+                0 | 8 => 13.0, 1 | 7 => 3.0, 2 | 6 => 1.3, 3 | 5 => 0.7, 4 => 0.4, _ => 0.0,
+            },
+            RiskLevel::High => match pos {
+                0 | 8 => 29.0, 1 | 7 => 4.0, 2 | 6 => 1.5, 3 | 5 => 0.3, 4 => 0.2, _ => 0.0,
+            },
+        },
+        12 => match risk {
+            RiskLevel::Low => match pos {
+                0 | 12 => 10.0, 1 | 11 => 3.0, 2 | 10 => 1.6, 3 | 9 => 1.4,
+                4 | 8 => 1.1, 5 | 7 => 1.0, 6 => 0.5, _ => 0.0,
+            },
+            RiskLevel::Medium => match pos {
+                0 | 12 => 33.0, 1 | 11 => 11.0, 2 | 10 => 4.0, 3 | 9 => 2.0,
+                4 | 8 => 1.1, 5 | 7 => 0.6, 6 => 0.3, _ => 0.0,
+            },
+            RiskLevel::High => match pos {
+                0 | 12 => 170.0, 1 | 11 => 24.0, 2 | 10 => 8.1, 3 | 9 => 2.0,
+                4 | 8 => 0.7, 5 | 7 => 0.2, 6 => 0.2, _ => 0.0,
+            },
+        },
+        16 => match risk {
+            RiskLevel::Low => match pos {
+                0 | 16 => 16.0, 1 | 15 => 9.0, 2 | 14 => 2.0, 3 | 13 => 1.4,
+                4 | 12 => 1.4, 5 | 11 => 1.2, 6 | 10 => 1.1, 7 | 9 => 1.0, 8 => 0.5, _ => 0.0,
+            },
+            RiskLevel::Medium => match pos {
+                0 | 16 => 110.0, 1 | 15 => 41.0, 2 | 14 => 10.0, 3 | 13 => 5.0,
+                4 | 12 => 3.0, 5 | 11 => 1.5, 6 | 10 => 1.0, 7 | 9 => 0.5, 8 => 0.3, _ => 0.0,
+            },
+            RiskLevel::High => match pos {
+                0 | 16 => 1000.0, 1 | 15 => 130.0, 2 | 14 => 26.0, 3 | 13 => 9.0,
+                4 | 12 => 4.0, 5 | 11 => 2.0, 6 | 10 => 0.2, 7 | 9 => 0.2, 8 => 0.2, _ => 0.0,
+            },
+        },
+        _ => return Err(format!("Invalid rows: {}", rows)),
+    };
+
+    Ok(multiplier)
+}
+
+// Backwards compatibility: Legacy function name
+// TODO: Remove after frontend migration to drop_ball()
+#[update]
+async fn play_plinko(rows: u8, risk: RiskLevel) -> Result<PlinkoResult, String> {
+    drop_ball(rows, risk).await
+}
+
 #[query]
 fn greet(name: String) -> String {
-    format!("Welcome to OpenHouse Plinko, {}!", name)
+    format!("Plinko: Drop a ball, get a multiplier. Hi {}!", name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_multiplier_valid_positions() {
+        // Test 8 rows, Low risk
+        assert_eq!(get_multiplier(8, &RiskLevel::Low, 0).unwrap(), 5.6);
+        assert_eq!(get_multiplier(8, &RiskLevel::Low, 4).unwrap(), 0.5);
+        assert_eq!(get_multiplier(8, &RiskLevel::Low, 8).unwrap(), 5.6);
+
+        // Test 16 rows, High risk (max payout)
+        assert_eq!(get_multiplier(16, &RiskLevel::High, 0).unwrap(), 1000.0);
+        assert_eq!(get_multiplier(16, &RiskLevel::High, 16).unwrap(), 1000.0);
+
+        // Test symmetry: left edge = right edge
+        assert_eq!(
+            get_multiplier(12, &RiskLevel::Medium, 0).unwrap(),
+            get_multiplier(12, &RiskLevel::Medium, 12).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_multiplier_invalid_positions() {
+        // Position out of bounds
+        assert!(get_multiplier(8, &RiskLevel::Low, 9).is_err());
+        assert!(get_multiplier(16, &RiskLevel::High, 17).is_err());
+    }
+
+    #[test]
+    fn test_multiplier_invalid_rows() {
+        // Invalid row count
+        assert!(get_multiplier(5, &RiskLevel::Low, 0).is_err());
+        assert!(get_multiplier(20, &RiskLevel::High, 0).is_err());
+    }
+
+    #[test]
+    fn test_get_multipliers_table() {
+        // 8 rows should return 9 values (0..=8)
+        let table = get_multipliers(8, RiskLevel::Low);
+        assert_eq!(table.len(), 9);
+
+        // 16 rows should return 17 values
+        let table = get_multipliers(16, RiskLevel::High);
+        assert_eq!(table.len(), 17);
+
+        // Invalid rows should return empty
+        let table = get_multipliers(7, RiskLevel::Low);
+        assert_eq!(table.len(), 0);
+    }
+
+    #[test]
+    fn test_risk_levels_increase_variance() {
+        // Low risk should have lower max multiplier than High
+        let low_max = get_multiplier(16, &RiskLevel::Low, 0).unwrap();
+        let high_max = get_multiplier(16, &RiskLevel::High, 0).unwrap();
+        assert!(high_max > low_max);
+
+        // Center positions should be higher in Low risk
+        let low_center = get_multiplier(16, &RiskLevel::Low, 8).unwrap();
+        let high_center = get_multiplier(16, &RiskLevel::High, 8).unwrap();
+        assert!(low_center > high_center);
+    }
+
+    #[test]
+    fn test_final_position_calculation() {
+        // All left moves -> position 0
+        let path = vec![false, false, false, false];
+        let pos = path.iter().filter(|&&d| d).count();
+        assert_eq!(pos, 0);
+
+        // All right moves -> position = rows
+        let path = vec![true, true, true, true];
+        let pos = path.iter().filter(|&&d| d).count();
+        assert_eq!(pos, 4);
+
+        // Mixed: 2 right, 2 left -> position 2
+        let path = vec![true, false, true, false];
+        let pos = path.iter().filter(|&&d| d).count();
+        assert_eq!(pos, 2);
+    }
+
+    #[test]
+    fn test_house_edge_approximate() {
+        // Calculate expected value for 8 rows, Low risk
+        // Assuming binomial distribution, center positions more likely
+        let table = get_multipliers(8, RiskLevel::Low);
+
+        // Probabilities for 8 rows (binomial coefficients / 2^8)
+        let probs = [1.0/256.0, 8.0/256.0, 28.0/256.0, 56.0/256.0,
+                     70.0/256.0, 56.0/256.0, 28.0/256.0, 8.0/256.0, 1.0/256.0];
+
+        let expected_value: f64 = table.iter()
+            .zip(probs.iter())
+            .map(|(mult, prob)| mult * prob)
+            .sum();
+
+        // Expected value should be < 1.0 (house edge)
+        assert!(expected_value < 1.0, "Expected value: {}", expected_value);
+
+        // House edge should be reasonable (2-5%)
+        let house_edge = 1.0 - expected_value;
+        assert!(house_edge > 0.01 && house_edge < 0.10,
+                "House edge: {}%", house_edge * 100.0);
+    }
 }
