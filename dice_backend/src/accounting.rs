@@ -55,6 +55,9 @@ thread_local! {
 
     // Track total user deposits for house balance calculation
     static TOTAL_USER_DEPOSITS: RefCell<u64> = RefCell::new(0);
+
+    // Cached canister balance (updated after deposits/withdrawals)
+    static CACHED_CANISTER_BALANCE: RefCell<u64> = RefCell::new(0);
 }
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -63,6 +66,36 @@ pub struct AccountingStats {
     pub house_balance: u64,
     pub canister_balance: u64,
     pub unique_depositors: u64,
+}
+
+// =============================================================================
+// BALANCE CACHE MANAGEMENT
+// =============================================================================
+
+/// Refresh the cached canister balance from the ledger
+#[update]
+pub async fn refresh_canister_balance() -> u64 {
+    let account = Account {
+        owner: ic_cdk::id(),
+        subaccount: None,
+    };
+
+    let ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
+    let result: Result<(Nat,), _> = ic_cdk::call(ledger, "icrc1_balance_of", (account,)).await;
+
+    match result {
+        Ok((balance,)) => {
+            let balance_u64 = balance.0.try_into().unwrap_or(0);
+            CACHED_CANISTER_BALANCE.with(|cache| {
+                *cache.borrow_mut() = balance_u64;
+            });
+            balance_u64
+        }
+        Err(e) => {
+            ic_cdk::println!("Failed to refresh canister balance: {:?}", e);
+            0
+        }
+    }
 }
 
 // =============================================================================
@@ -98,11 +131,15 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
     match call_result {
         Ok((transfer_result,)) => match transfer_result {
             Ok(_block_index) => {
-                // STEP 3: Update user balance
+                // STEP 3: Credit user with (amount - fee) since ledger deducts fee
+                // Canister receives amount, but user paid amount + fee
+                // To keep accounting correct: credit user with what canister actually received
+                let credited_amount = amount.saturating_sub(ICP_TRANSFER_FEE);
+
                 let new_balance = USER_BALANCES.with(|balances| {
                     let mut balances = balances.borrow_mut();
                     let current = balances.get(&caller).unwrap_or(&0);
-                    let new_bal = current + amount;
+                    let new_bal = current + credited_amount;
                     balances.insert(caller, new_bal);
                     new_bal
                 });
@@ -114,10 +151,14 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
 
                 // STEP 5: Update total deposits
                 TOTAL_USER_DEPOSITS.with(|total| {
-                    *total.borrow_mut() += amount;
+                    *total.borrow_mut() += credited_amount;
                 });
 
-                ic_cdk::println!("Deposit successful: {} deposited {} e8s", caller, amount);
+                // STEP 6: Refresh cached canister balance
+                refresh_canister_balance().await;
+
+                ic_cdk::println!("Deposit successful: {} deposited {} e8s (credited {} e8s after fee)",
+                                 caller, amount, credited_amount);
                 Ok(new_balance)
             }
             Err(transfer_error) => {
@@ -187,6 +228,9 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
     match call_result {
         Ok((transfer_result,)) => match transfer_result {
             Ok(_block_index) => {
+                // Refresh cached canister balance after successful withdrawal
+                refresh_canister_balance().await;
+
                 ic_cdk::println!("Withdrawal successful: {} withdrew {} e8s", caller, amount);
                 Ok(new_balance)
             }
@@ -239,7 +283,8 @@ pub fn get_my_balance() -> u64 {
 #[query]
 pub fn get_house_balance() -> u64 {
     // House balance = Total canister balance - Total user deposits
-    let canister_balance = get_canister_balance_sync();
+    // Uses cached balance (refreshed after deposits/withdrawals)
+    let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
     let total_deposits = TOTAL_USER_DEPOSITS.with(|total| *total.borrow());
 
     if canister_balance > total_deposits {
@@ -249,18 +294,11 @@ pub fn get_house_balance() -> u64 {
     }
 }
 
-// Synchronous helper for queries
-fn get_canister_balance_sync() -> u64 {
-    // Return 0 for now - actual balance fetched in lib.rs update call
-    // This is because ICRC balance query requires async call
-    0
-}
-
 #[query]
 pub fn get_accounting_stats() -> AccountingStats {
     let total_deposits = TOTAL_USER_DEPOSITS.with(|total| *total.borrow());
     let unique_depositors = USER_BALANCES.with(|balances| balances.borrow().len() as u64);
-    let canister_balance = get_canister_balance_sync();
+    let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
     let house_balance = if canister_balance > total_deposits {
         canister_balance - total_deposits
     } else {
@@ -284,7 +322,7 @@ pub fn audit_balances() -> Result<String, String> {
     // Verify: house_balance + sum(user_balances) = canister_balance
     let total_deposits = TOTAL_USER_DEPOSITS.with(|total| *total.borrow());
     let house_balance = get_house_balance();
-    let canister_balance = get_canister_balance_sync();
+    let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
 
     let calculated_total = house_balance + total_deposits;
 

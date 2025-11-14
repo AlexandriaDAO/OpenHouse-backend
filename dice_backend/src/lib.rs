@@ -12,7 +12,8 @@ use std::cell::RefCell;
 mod accounting;
 pub use accounting::{
     deposit, withdraw, get_balance, get_my_balance, get_house_balance,
-    get_accounting_stats, audit_balances, AccountingStats, Account,
+    get_accounting_stats, audit_balances, refresh_canister_balance,
+    AccountingStats, Account,
 };
 
 // Seed management structure
@@ -444,13 +445,16 @@ fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, clien
     });
 
     // Update user balance based on game result
+    // Re-fetch balance to avoid race conditions with concurrent games
+    let current_balance = accounting::get_balance(caller);
+
     if is_win {
-        // Add winnings to user balance
-        let new_balance = user_balance - bet_amount + payout;
+        // Add winnings to user balance (current - bet + payout)
+        let new_balance = current_balance.saturating_sub(bet_amount).saturating_add(payout);
         accounting::update_balance(caller, new_balance)?;
     } else {
         // Deduct bet from user balance
-        let new_balance = user_balance - bet_amount;
+        let new_balance = current_balance.saturating_sub(bet_amount);
         accounting::update_balance(caller, new_balance)?;
     }
 

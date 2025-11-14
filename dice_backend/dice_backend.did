@@ -54,6 +54,7 @@ service : {
   get_canister_balance: () -> (nat64);
   get_accounting_stats: () -> (AccountingStats) query;
   audit_balances: () -> (variant { Ok: text; Err: text }) query;
+  refresh_canister_balance: () -> (nat64);
 
   // Test function
   greet: (text) -> (text) query;
