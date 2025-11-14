@@ -353,12 +353,6 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
                           house_balance, max_payout));
     }
 
-    // P0-3 FIX: Deduct bet IMMEDIATELY after validation, before game logic
-    // This prevents multiple concurrent games from passing the balance check
-    let balance_after_bet = user_balance.checked_sub(bet_amount)
-        .ok_or("Balance underflow")?;
-    accounting::update_balance(caller, balance_after_bet)?;
-
     // Validate input
     if bet_amount < MIN_BET {
         return Err(format!("Minimum bet is {} ICP", MIN_BET / 100_000_000));
@@ -398,6 +392,14 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
     if client_seed.len() > 256 {
         return Err("Client seed too long (max 256 characters)".to_string());
     }
+
+    // P0-3 FIX: Deduct bet AFTER all validations pass, but BEFORE game logic
+    // This prevents:
+    // 1. Users losing bets on invalid inputs (all validations passed)
+    // 2. Concurrent games from overdrawing balance (atomic deduction)
+    let balance_after_bet = user_balance.checked_sub(bet_amount)
+        .ok_or("Balance underflow")?;
+    accounting::update_balance(caller, balance_after_bet)?;
 
     // Check if seed needs rotation
     maybe_schedule_seed_rotation();
