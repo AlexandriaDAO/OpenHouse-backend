@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../../providers/AuthProvider';
 import { useBalance } from '../../../providers/BalanceProvider';
+import { useGameBalance } from '../../../providers/GameBalanceProvider';
+import { ConnectionStatusMini } from '../../ui/ConnectionStatus';
 import useDiceActor from '../../../hooks/actors/useDiceActor';
 
 interface DiceAccountingPanelProps {
-  gameBalance: bigint | null;
+  gameBalance: bigint;  // Now required, not nullable
   onBalanceChange: () => void;
 }
 
@@ -16,29 +18,16 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
   const { balance: walletBalance, refreshBalance } = useBalance();
   const { actor } = useDiceActor();
 
+  // Get house balance from global state
+  const gameBalanceContext = useGameBalance('dice');
+  const houseBalance = gameBalanceContext.balance.house;
+
   const [depositAmount, setDepositAmount] = useState('0.1');
   const [withdrawAmount, setWithdrawAmount] = useState('0.1');
   const [isDepositing, setIsDepositing] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [houseBalance, setHouseBalance] = useState<bigint | null>(null);
-
-  // Fetch house balance
-  const fetchHouseBalance = async () => {
-    if (!actor) return;
-    try {
-      const balance = await actor.get_house_balance();
-      setHouseBalance(balance);
-    } catch (err) {
-      console.error('Failed to fetch house balance:', err);
-    }
-  };
-
-  // Load house balance on mount and when actor changes
-  useEffect(() => {
-    fetchHouseBalance();
-  }, [actor]);
 
   // Handle deposit
   const handleDeposit = async () => {
@@ -72,10 +61,9 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
         setSuccess(`Deposited ${depositAmount} ICP! New balance: ${Number(newBalance) / 100_000_000} ICP`);
         setDepositAmount('0.1');
 
-        // Refresh balances
+        // Refresh all balances
         await refreshBalance(); // Wallet balance
-        onBalanceChange(); // Game balance
-        await fetchHouseBalance(); // House balance
+        onBalanceChange(); // Game balance (triggers global refresh)
       } else {
         setError(result.Err);
       }
@@ -118,10 +106,9 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
         setSuccess(`Withdrew ${withdrawAmount} ICP! New balance: ${Number(newBalance) / 100_000_000} ICP`);
         setWithdrawAmount('0.1');
 
-        // Refresh balances
+        // Refresh all balances
         await refreshBalance(); // Wallet balance
-        onBalanceChange(); // Game balance
-        await fetchHouseBalance(); // House balance
+        onBalanceChange(); // Game balance (triggers global refresh)
       } else {
         setError(result.Err);
       }
@@ -134,7 +121,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
 
   // Format balances
   const formatBalance = (e8s: bigint | null): string => {
-    if (e8s === null) return 'Loading...';
+    if (e8s === null) return '0.00000000';
     return (Number(e8s) / 100_000_000).toFixed(8);
   };
 
@@ -157,11 +144,17 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
           <p className="text-2xl font-bold text-purple-400">{formatBalance(walletBalance)} ICP</p>
         </div>
         <div className="bg-green-900/20 p-4 rounded-lg border border-green-500/30">
-          <p className="text-sm text-gray-400 mb-1">Dice Balance</p>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-sm text-gray-400">Dice Balance</p>
+            <ConnectionStatusMini game="dice" />
+          </div>
           <p className="text-2xl font-bold text-green-400">{formatBalance(gameBalance)} ICP</p>
         </div>
         <div className="bg-yellow-900/20 p-4 rounded-lg border border-yellow-500/30">
-          <p className="text-sm text-gray-400 mb-1">House Pot</p>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-sm text-gray-400">House Pot</p>
+            <ConnectionStatusMini game="dice" />
+          </div>
           <p className="text-2xl font-bold text-yellow-400">{formatBalance(houseBalance)} ICP</p>
         </div>
       </div>
