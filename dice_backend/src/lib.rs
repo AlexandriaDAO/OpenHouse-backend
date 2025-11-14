@@ -97,7 +97,7 @@ const MAX_GAMES_PER_SEED: u64 = 10_000; // Rotate after 10k games
 type Memory = VirtualMemory<DefaultMemoryImpl>;
 
 // Dice game constants
-const MIN_BET: u64 = 100_000_000; // 1 ICP
+const MIN_BET: u64 = 1_000_000; // 0.01 ICP
 const MAX_BET: u64 = 10_000_000_000; // 100 ICP
 const HOUSE_EDGE: f64 = 0.03; // 3% house edge
 const MAX_NUMBER: u8 = 100; // Dice rolls 0-100
@@ -345,14 +345,6 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
                           user_balance, bet_amount));
     }
 
-    // Calculate max bet based on house balance
-    let house_balance = accounting::get_house_balance();
-    let max_payout = (bet_amount as f64 * 100.0) as u64; // Max 100x multiplier
-    if max_payout > house_balance {
-        return Err(format!("Bet too large. House only has {} e8s, max payout would be {} e8s",
-                          house_balance, max_payout));
-    }
-
     // Validate input
     if bet_amount < MIN_BET {
         return Err(format!("Minimum bet is {} ICP", MIN_BET / 100_000_000));
@@ -381,11 +373,22 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
         }
     }
 
+    // Calculate win chance and multiplier for this specific bet
     let win_chance = calculate_win_chance(target_number, &direction);
 
     // Ensure win chance is reasonable
     if win_chance < 0.01 || win_chance > 0.98 {
         return Err("Invalid target number - win chance must be between 1% and 98%".to_string());
+    }
+
+    let multiplier = calculate_multiplier(win_chance);
+
+    // Calculate max bet based on house balance using ACTUAL multiplier
+    let house_balance = accounting::get_house_balance();
+    let max_payout = (bet_amount as f64 * multiplier) as u64;
+    if max_payout > house_balance {
+        return Err(format!("Bet too large. House only has {} e8s, max payout would be {} e8s ({}x multiplier)",
+                          house_balance, max_payout, multiplier));
     }
 
     // Validate client seed length (DoS protection)
@@ -404,7 +407,6 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
     // Check if seed needs rotation
     maybe_schedule_seed_rotation();
 
-    let multiplier = calculate_multiplier(win_chance);
     let (rolled_number, nonce, server_seed_hash) = generate_dice_roll_instant(&client_seed)?;
 
     // Determine if player won

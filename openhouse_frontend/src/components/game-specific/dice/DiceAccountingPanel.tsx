@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../../providers/AuthProvider';
 import { useBalance } from '../../../providers/BalanceProvider';
 import useDiceActor from '../../../hooks/actors/useDiceActor';
@@ -16,12 +16,29 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
   const { balance: walletBalance, refreshBalance } = useBalance();
   const { actor } = useDiceActor();
 
-  const [depositAmount, setDepositAmount] = useState('1');
-  const [withdrawAmount, setWithdrawAmount] = useState('1');
+  const [depositAmount, setDepositAmount] = useState('0.1');
+  const [withdrawAmount, setWithdrawAmount] = useState('0.1');
   const [isDepositing, setIsDepositing] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [houseBalance, setHouseBalance] = useState<bigint | null>(null);
+
+  // Fetch house balance
+  const fetchHouseBalance = async () => {
+    if (!actor) return;
+    try {
+      const balance = await actor.get_house_balance();
+      setHouseBalance(balance);
+    } catch (err) {
+      console.error('Failed to fetch house balance:', err);
+    }
+  };
+
+  // Load house balance on mount and when actor changes
+  useEffect(() => {
+    fetchHouseBalance();
+  }, [actor]);
 
   // Handle deposit
   const handleDeposit = async () => {
@@ -35,8 +52,8 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
       const amountE8s = BigInt(Math.floor(parseFloat(depositAmount) * 100_000_000));
 
       // Validate amount
-      if (amountE8s < BigInt(100_000_000)) {
-        setError('Minimum deposit is 1 ICP');
+      if (amountE8s < BigInt(10_000_000)) {
+        setError('Minimum deposit is 0.1 ICP');
         setIsDepositing(false);
         return;
       }
@@ -53,11 +70,12 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
       if ('Ok' in result) {
         const newBalance = result.Ok;
         setSuccess(`Deposited ${depositAmount} ICP! New balance: ${Number(newBalance) / 100_000_000} ICP`);
-        setDepositAmount('1');
+        setDepositAmount('0.1');
 
         // Refresh balances
         await refreshBalance(); // Wallet balance
         onBalanceChange(); // Game balance
+        await fetchHouseBalance(); // House balance
       } else {
         setError(result.Err);
       }
@@ -98,11 +116,12 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
       if ('Ok' in result) {
         const newBalance = result.Ok;
         setSuccess(`Withdrew ${withdrawAmount} ICP! New balance: ${Number(newBalance) / 100_000_000} ICP`);
-        setWithdrawAmount('1');
+        setWithdrawAmount('0.1');
 
         // Refresh balances
         await refreshBalance(); // Wallet balance
         onBalanceChange(); // Game balance
+        await fetchHouseBalance(); // House balance
       } else {
         setError(result.Err);
       }
@@ -132,7 +151,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
       <h3 className="text-xl font-bold mb-4 text-center">💰 Manage Funds</h3>
 
       {/* Balance Display */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-3 gap-4 mb-6">
         <div className="bg-purple-900/20 p-4 rounded-lg border border-purple-500/30">
           <p className="text-sm text-gray-400 mb-1">Wallet Balance</p>
           <p className="text-2xl font-bold text-purple-400">{formatBalance(walletBalance)} ICP</p>
@@ -140,6 +159,10 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
         <div className="bg-green-900/20 p-4 rounded-lg border border-green-500/30">
           <p className="text-sm text-gray-400 mb-1">Dice Balance</p>
           <p className="text-2xl font-bold text-green-400">{formatBalance(gameBalance)} ICP</p>
+        </div>
+        <div className="bg-yellow-900/20 p-4 rounded-lg border border-yellow-500/30">
+          <p className="text-sm text-gray-400 mb-1">House Pot</p>
+          <p className="text-2xl font-bold text-yellow-400">{formatBalance(houseBalance)} ICP</p>
         </div>
       </div>
 
@@ -153,8 +176,8 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
             onChange={(e) => setDepositAmount(e.target.value)}
             className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2"
             placeholder="Amount in ICP"
-            min="1"
-            step="0.1"
+            min="0.1"
+            step="0.01"
             disabled={isDepositing}
           />
           <button
@@ -165,7 +188,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
             {isDepositing ? 'Depositing...' : 'Deposit'}
           </button>
         </div>
-        <p className="text-xs text-gray-500 mt-1">Minimum: 1 ICP</p>
+        <p className="text-xs text-gray-500 mt-1">Minimum: 0.1 ICP</p>
       </div>
 
       {/* Withdraw Section */}
@@ -179,7 +202,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
             className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2"
             placeholder="Amount in ICP"
             min="0.1"
-            step="0.1"
+            step="0.01"
             disabled={isWithdrawing}
           />
           <button

@@ -9,7 +9,7 @@ use crate::{MEMORY_MANAGER, Memory};
 
 // Constants
 const ICP_TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP in e8s
-const MIN_DEPOSIT: u64 = 100_000_000; // 1 ICP
+const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
 const MIN_WITHDRAW: u64 = 10_000_000; // 0.1 ICP
 
 // ICRC-1 types (since ic-ledger-types doesn't have them all)
