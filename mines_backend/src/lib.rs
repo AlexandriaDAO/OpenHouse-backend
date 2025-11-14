@@ -10,18 +10,15 @@ use std::cell::RefCell;
 type Memory = VirtualMemory<DefaultMemoryImpl>;
 
 // Constants
-const MIN_BET: u64 = 100_000_000; // 1 ICP
-const MAX_BET: u64 = 10_000_000_000; // 100 ICP
 const GRID_SIZE: usize = 25; // 5x5
 const HOUSE_EDGE: f64 = 0.97; // 3% house edge
 const MIN_TILES_FOR_CASHOUT: usize = 1; // Must reveal at least 1 tile
 
-// ============ CORE GAME LOGIC (55 lines) ============
+// ============ CORE GAME LOGIC ============
 
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub struct MinesGame {
     pub player: Principal,
-    pub bet_amount: u64,
     pub mines: [bool; GRID_SIZE], // true = mine, false = safe
     pub revealed: [bool; GRID_SIZE], // true = revealed
     pub num_mines: u8,
@@ -73,8 +70,8 @@ impl MinesGame {
         Ok((false, multiplier))
     }
 
-    // Cash out - returns payout
-    fn cash_out(&mut self) -> Result<u64, String> {
+    // Cash out - returns final score
+    fn cash_out(&mut self) -> Result<f64, String> {
         if !self.is_active {
             return Err("Game is not active".to_string());
         }
@@ -90,7 +87,7 @@ impl MinesGame {
         let multiplier = self.calculate_multiplier();
         self.is_active = false;
 
-        Ok((self.bet_amount as f64 * multiplier) as u64)
+        Ok(multiplier)
     }
 }
 
@@ -99,22 +96,19 @@ impl MinesGame {
 #[derive(CandidType, Deserialize, Serialize, Clone, Default)]
 pub struct GameStats {
     pub total_games: u64,
-    pub total_wagered: u64,
-    pub total_paid_out: u64,
-    pub house_profit: i64,
+    pub total_completed: u64,
+    pub total_busted: u64,
 }
 
 #[derive(CandidType, Deserialize)]
 pub struct RevealResult {
     pub busted: bool,
     pub multiplier: f64,
-    pub payout: Option<u64>,
 }
 
 #[derive(CandidType, Deserialize)]
 pub struct GameInfo {
     pub player: Principal,
-    pub bet_amount: u64,
     pub revealed: Vec<bool>,
     pub num_mines: u8,
     pub is_active: bool,
@@ -124,7 +118,6 @@ pub struct GameInfo {
 #[derive(CandidType, Deserialize)]
 pub struct GameSummary {
     pub game_id: u64,
-    pub bet_amount: u64,
     pub num_mines: u8,
     pub is_active: bool,
     pub timestamp: u64,
@@ -239,7 +232,7 @@ async fn generate_mines(num_mines: u8) -> Result<[bool; GRID_SIZE], String> {
 
 #[init]
 fn init() {
-    ic_cdk::println!("Mines Backend Initialized");
+    ic_cdk::println!("Mines Game Backend Initialized");
 }
 
 #[pre_upgrade]
@@ -254,14 +247,7 @@ fn post_upgrade() {
 
 // Start new game
 #[update]
-async fn start_game(bet_amount: u64, num_mines: u8) -> Result<u64, String> {
-    if bet_amount < MIN_BET || bet_amount > MAX_BET {
-        return Err(format!(
-            "Bet must be between {} and {} ICP",
-            MIN_BET / 100_000_000,
-            MAX_BET / 100_000_000
-        ));
-    }
+async fn start_game(num_mines: u8) -> Result<u64, String> {
     if num_mines < 1 || num_mines > 24 {
         return Err("Mines must be between 1 and 24".to_string());
     }
@@ -270,7 +256,6 @@ async fn start_game(bet_amount: u64, num_mines: u8) -> Result<u64, String> {
 
     let game = MinesGame {
         player: ic_cdk::caller(),
-        bet_amount,
         mines,
         revealed: [false; GRID_SIZE],
         num_mines,
@@ -314,34 +299,26 @@ fn reveal_tile(game_id: u64, position: u8) -> Result<RevealResult, String> {
 
         let (busted, multiplier) = game.reveal_tile(position)?;
 
-        let payout = if busted {
+        if busted {
             STATS.with(|stats| {
                 let mut stats_cell = stats.borrow_mut();
                 let mut current_stats = stats_cell.get().clone();
-                current_stats.total_wagered += game.bet_amount;
-                current_stats.house_profit += game.bet_amount as i64;
+                current_stats.total_busted += 1;
                 stats_cell
                     .set(current_stats)
                     .expect("Failed to update stats");
             });
-            None
-        } else {
-            Some((game.bet_amount as f64 * multiplier) as u64)
-        };
+        }
 
         games.insert(game_id, game);
 
-        Ok(RevealResult {
-            busted,
-            multiplier,
-            payout,
-        })
+        Ok(RevealResult { busted, multiplier })
     })
 }
 
 // Cash out
 #[update]
-fn cash_out(game_id: u64) -> Result<u64, String> {
+fn cash_out(game_id: u64) -> Result<f64, String> {
     GAMES.with(|games| {
         let mut games = games.borrow_mut();
         let mut game = games.get(&game_id).ok_or("Game not found")?;
@@ -350,21 +327,19 @@ fn cash_out(game_id: u64) -> Result<u64, String> {
             return Err("Not your game".to_string());
         }
 
-        let payout = game.cash_out()?;
+        let score = game.cash_out()?;
 
         STATS.with(|stats| {
             let mut stats_cell = stats.borrow_mut();
             let mut current_stats = stats_cell.get().clone();
-            current_stats.total_wagered += game.bet_amount;
-            current_stats.total_paid_out += payout;
-            current_stats.house_profit += game.bet_amount as i64 - payout as i64;
+            current_stats.total_completed += 1;
             stats_cell
                 .set(current_stats)
                 .expect("Failed to update stats");
         });
 
         games.insert(game_id, game);
-        Ok(payout)
+        Ok(score)
     })
 }
 
@@ -377,7 +352,6 @@ fn get_game(game_id: u64) -> Result<GameInfo, String> {
 
         Ok(GameInfo {
             player: game.player,
-            bet_amount: game.bet_amount,
             revealed: game.revealed.to_vec(),
             num_mines: game.num_mines,
             is_active: game.is_active,
@@ -405,7 +379,6 @@ fn get_recent_games(limit: u32) -> Vec<GameSummary> {
             .take(limit as usize)
             .map(|(id, game)| GameSummary {
                 game_id: id,
-                bet_amount: game.bet_amount,
                 num_mines: game.num_mines,
                 is_active: game.is_active,
                 timestamp: game.timestamp,
@@ -429,7 +402,6 @@ mod tests {
     fn test_multiplier_calculation_single_mine() {
         let mut game = MinesGame {
             player: Principal::anonymous(),
-            bet_amount: 100_000_000,
             mines: [false; GRID_SIZE],
             revealed: [false; GRID_SIZE],
             num_mines: 1,
@@ -456,7 +428,6 @@ mod tests {
     fn test_multiplier_calculation_multiple_mines() {
         let mut game = MinesGame {
             player: Principal::anonymous(),
-            bet_amount: 100_000_000,
             mines: [false; GRID_SIZE],
             revealed: [false; GRID_SIZE],
             num_mines: 5,
@@ -482,7 +453,6 @@ mod tests {
     fn test_reveal_tile_invalid_position() {
         let mut game = MinesGame {
             player: Principal::anonymous(),
-            bet_amount: 100_000_000,
             mines: [false; GRID_SIZE],
             revealed: [false; GRID_SIZE],
             num_mines: 3,
@@ -499,7 +469,6 @@ mod tests {
     fn test_reveal_tile_already_revealed() {
         let mut game = MinesGame {
             player: Principal::anonymous(),
-            bet_amount: 100_000_000,
             mines: [false; GRID_SIZE],
             revealed: [false; GRID_SIZE],
             num_mines: 3,
@@ -517,7 +486,6 @@ mod tests {
     fn test_reveal_tile_hit_mine() {
         let mut game = MinesGame {
             player: Principal::anonymous(),
-            bet_amount: 100_000_000,
             mines: [false; GRID_SIZE],
             revealed: [false; GRID_SIZE],
             num_mines: 1,
@@ -538,7 +506,6 @@ mod tests {
     fn test_reveal_tile_safe() {
         let mut game = MinesGame {
             player: Principal::anonymous(),
-            bet_amount: 100_000_000,
             mines: [false; GRID_SIZE],
             revealed: [false; GRID_SIZE],
             num_mines: 3,
@@ -563,7 +530,6 @@ mod tests {
     fn test_cash_out_validation() {
         let mut game = MinesGame {
             player: Principal::anonymous(),
-            bet_amount: 100_000_000,
             mines: [false; GRID_SIZE],
             revealed: [false; GRID_SIZE],
             num_mines: 3,
@@ -581,7 +547,6 @@ mod tests {
     fn test_cash_out_success() {
         let mut game = MinesGame {
             player: Principal::anonymous(),
-            bet_amount: 100_000_000,
             mines: [false; GRID_SIZE],
             revealed: [false; GRID_SIZE],
             num_mines: 3,
@@ -599,8 +564,8 @@ mod tests {
 
         let result = game.cash_out();
         assert!(result.is_ok());
-        let payout = result.unwrap();
-        assert!(payout > game.bet_amount);
+        let score = result.unwrap();
+        assert!(score > 1.0);
         assert!(!game.is_active);
     }
 
@@ -608,7 +573,6 @@ mod tests {
     fn test_cash_out_inactive_game() {
         let mut game = MinesGame {
             player: Principal::anonymous(),
-            bet_amount: 100_000_000,
             mines: [false; GRID_SIZE],
             revealed: [false; GRID_SIZE],
             num_mines: 3,
