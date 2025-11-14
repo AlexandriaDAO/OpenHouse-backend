@@ -24,65 +24,48 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
   // State for current displayed number during animation
   const [displayNumber, setDisplayNumber] = useState(0);
   const [animationPhase, setAnimationPhase] = useState<'idle' | 'rolling' | 'complete'>('idle');
-  const animationStartTimeRef = useRef<number | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Start rolling animation when isRolling becomes true
   useEffect(() => {
     if (isRolling) {
-      // Track animation start time for race condition fix
-      animationStartTimeRef.current = Date.now();
-
       // Explicitly reset animation state for new roll
       setAnimationPhase('rolling');
       setDisplayNumber(0);
 
-      // Rapidly cycle through random numbers
-      let frameCount = 0;
-      const maxFrames = Math.floor(ANIMATION_CONFIG.ROLL_DURATION / ANIMATION_CONFIG.FRAME_INTERVAL);
-
-      const interval = setInterval(() => {
+      // Continuously cycle through random numbers until backend returns result
+      // No maxFrames - animation continues indefinitely until targetNumber arrives
+      intervalRef.current = setInterval(() => {
         // Generate random number 0-100 for visual effect (matching dice range)
         setDisplayNumber(Math.floor(Math.random() * 101));
-        frameCount++;
-
-        if (frameCount >= maxFrames) {
-          clearInterval(interval);
-        }
       }, ANIMATION_CONFIG.FRAME_INTERVAL);
 
       return () => {
-        clearInterval(interval);
-        animationStartTimeRef.current = null;
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
       };
     }
   }, [isRolling]);
 
-  // When backend returns result, slow down and land on target
+  // When backend returns result, immediately show it (no delay)
   useEffect(() => {
     if (targetNumber !== null && animationPhase === 'rolling') {
-      // Calculate elapsed time since animation started
-      const elapsed = animationStartTimeRef.current
-        ? Date.now() - animationStartTimeRef.current
-        : 0;
+      // Stop the random number animation immediately
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
 
-      // Calculate remaining animation time with minimum display time to prevent jarring instant results
-      const remainingTime = Math.max(
-        ANIMATION_CONFIG.MIN_DISPLAY_TIME,
-        ANIMATION_CONFIG.ROLL_DURATION + ANIMATION_CONFIG.RESULT_DELAY - elapsed
-      );
+      // Show the actual result immediately (no setTimeout delay!)
+      setDisplayNumber(targetNumber);
+      setAnimationPhase('complete');
 
-      // Land on target number after remaining animation time
-      const timeoutId = setTimeout(() => {
-        setDisplayNumber(targetNumber);
-        setAnimationPhase('complete');
-        // Call completion callback if provided
-        if (onAnimationComplete) {
-          onAnimationComplete();
-        }
-      }, remainingTime);
-
-      // Cleanup timeout on unmount or deps change
-      return () => clearTimeout(timeoutId);
+      // Call completion callback if provided
+      if (onAnimationComplete) {
+        onAnimationComplete();
+      }
     }
   }, [targetNumber, animationPhase, onAnimationComplete]);
 
