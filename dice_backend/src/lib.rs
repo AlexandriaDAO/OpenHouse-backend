@@ -332,8 +332,11 @@ fn generate_dice_roll_instant(client_seed: &str) -> Result<(u8, u64, String), St
 
 // Play a game of dice
 #[update]
-fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, client_seed: String) -> Result<DiceResult, String> {
+async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, client_seed: String) -> Result<DiceResult, String> {
     let caller = ic_cdk::caller();
+
+    // P0-2 FIX: Refresh house balance cache before game
+    accounting::refresh_canister_balance().await;
 
     // Check user has sufficient internal balance
     let user_balance = accounting::get_balance(caller);
@@ -349,6 +352,12 @@ fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, clien
         return Err(format!("Bet too large. House only has {} e8s, max payout would be {} e8s",
                           house_balance, max_payout));
     }
+
+    // P0-3 FIX: Deduct bet IMMEDIATELY after validation, before game logic
+    // This prevents multiple concurrent games from passing the balance check
+    let balance_after_bet = user_balance.checked_sub(bet_amount)
+        .ok_or("Balance underflow")?;
+    accounting::update_balance(caller, balance_after_bet)?;
 
     // Validate input
     if bet_amount < MIN_BET {
@@ -445,18 +454,15 @@ fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, clien
     });
 
     // Update user balance based on game result
-    // Re-fetch balance to avoid race conditions with concurrent games
-    let current_balance = accounting::get_balance(caller);
-
+    // Bet was already deducted before game logic (P0-3 fix)
+    // Now only add winnings if player won
     if is_win {
-        // Add winnings to user balance (current - bet + payout)
-        let new_balance = current_balance.saturating_sub(bet_amount).saturating_add(payout);
-        accounting::update_balance(caller, new_balance)?;
-    } else {
-        // Deduct bet from user balance
-        let new_balance = current_balance.saturating_sub(bet_amount);
+        let current_balance = accounting::get_balance(caller);
+        let new_balance = current_balance.checked_add(payout)
+            .ok_or("Balance overflow when adding winnings")?;
         accounting::update_balance(caller, new_balance)?;
     }
+    // If loss, balance was already deducted - nothing more to do
 
     Ok(result)
 }

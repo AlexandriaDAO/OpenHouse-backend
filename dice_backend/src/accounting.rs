@@ -131,15 +131,13 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
     match call_result {
         Ok((transfer_result,)) => match transfer_result {
             Ok(_block_index) => {
-                // STEP 3: Credit user with (amount - fee) since ledger deducts fee
-                // Canister receives amount, but user paid amount + fee
-                // To keep accounting correct: credit user with what canister actually received
-                let credited_amount = amount.saturating_sub(ICP_TRANSFER_FEE);
-
+                // STEP 3: Credit user with full amount
+                // In ICRC-1: user pays (amount + fee), canister receives amount
+                // So credit the full amount that the canister received
                 let new_balance = USER_BALANCES.with(|balances| {
                     let mut balances = balances.borrow_mut();
                     let current = balances.get(&caller).unwrap_or(&0);
-                    let new_bal = current + credited_amount;
+                    let new_bal = current + amount;
                     balances.insert(caller, new_bal);
                     new_bal
                 });
@@ -151,14 +149,13 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
 
                 // STEP 5: Update total deposits
                 TOTAL_USER_DEPOSITS.with(|total| {
-                    *total.borrow_mut() += credited_amount;
+                    *total.borrow_mut() += amount;
                 });
 
                 // STEP 6: Refresh cached canister balance
                 refresh_canister_balance().await;
 
-                ic_cdk::println!("Deposit successful: {} deposited {} e8s (credited {} e8s after fee)",
-                                 caller, amount, credited_amount);
+                ic_cdk::println!("Deposit successful: {} deposited {} e8s", caller, amount);
                 Ok(new_balance)
             }
             Err(transfer_error) => {
