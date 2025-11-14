@@ -15,6 +15,9 @@ import { useGameBalance } from '../providers/GameBalanceProvider';
 import { ConnectionStatus } from '../components/ui/ConnectionStatus';
 import type { Principal } from '@dfinity/principal';
 
+// ICP conversion constant
+const E8S_PER_ICP = 100_000_000; // 1 ICP = 100,000,000 e8s
+
 interface DiceGameResult {
   player: Principal;
   bet_amount: bigint;
@@ -32,8 +35,9 @@ interface DiceGameResult {
 export const Dice: React.FC = () => {
   const { actor } = useDiceActor();
   const gameMode = useGameMode();
-  const [maxBetTemp] = useState(10); // Initial max bet, will be updated dynamically
-  const gameState = useGameState<DiceGameResult>(0.01, maxBetTemp);
+  // Initialize with conservative default, will be updated dynamically
+  const [maxBet, setMaxBet] = useState(10); // Dynamic max bet in ICP
+  const gameState = useGameState<DiceGameResult>(0.01, maxBet);
   // Use global balance state
   const gameBalanceContext = useGameBalance('dice');
   const balance = gameBalanceContext.balance;
@@ -47,7 +51,6 @@ export const Dice: React.FC = () => {
   const [direction, setDirection] = useState<DiceDirection>('Over');
   const [winChance, setWinChance] = useState(0);
   const [multiplier, setMultiplier] = useState(0);
-  const [maxBet, setMaxBet] = useState(10); // Dynamic max bet in ICP
   const [animatingResult, setAnimatingResult] = useState<number | null>(null);
 
   // Calculate odds when target or direction changes
@@ -72,7 +75,7 @@ export const Dice: React.FC = () => {
         // Get max bet (NEW) - with error handling
         try {
           const maxBetE8s = await actor.get_max_bet(targetNumber, directionVariant);
-          const maxBetICP = Number(maxBetE8s) / 100_000_000;
+          const maxBetICP = Number(maxBetE8s) / E8S_PER_ICP;
           setMaxBet(maxBetICP);
 
           // Adjust current bet if it exceeds new max (NEW)
@@ -143,7 +146,7 @@ export const Dice: React.FC = () => {
     });
 
     try {
-      const betAmountE8s = BigInt(Math.floor(gameState.betAmount * 100_000_000));
+      const betAmountE8s = BigInt(Math.floor(gameState.betAmount * E8S_PER_ICP));
       const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
 
       // Generate client seed for provable fairness

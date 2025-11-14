@@ -96,9 +96,12 @@ const MAX_GAMES_PER_SEED: u64 = 10_000; // Rotate after 10k games
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
 
+// Conversion constant
+const E8S_PER_ICP: u64 = 100_000_000; // 1 ICP = 100,000,000 e8s
+
 // Dice game constants
 const MIN_BET: u64 = 1_000_000; // 0.01 ICP
-const MAX_WIN: u64 = 1_000_000_000; // 10 ICP max win
+const MAX_WIN: u64 = 10 * E8S_PER_ICP; // 10 ICP max win
 const HOUSE_EDGE: f64 = 0.03; // 3% house edge
 const MAX_NUMBER: u8 = 100; // Dice rolls 0-100
 
@@ -298,9 +301,21 @@ fn calculate_max_bet(target_number: u8, direction: &RollDirection) -> u64 {
     // Calculate multiplier
     let multiplier = calculate_multiplier(win_chance);
 
+    // Prevent division by zero and handle edge cases
+    if multiplier <= 0.0 || !multiplier.is_finite() {
+        return MIN_BET; // Return minimum as safe fallback
+    }
+
     // Max bet = max win / multiplier
-    // Use floor to ensure we never exceed max win
     let max_bet_f64 = (MAX_WIN as f64) / multiplier;
+
+    // Protect against overflow when converting to u64
+    if max_bet_f64.is_infinite() || max_bet_f64 > u64::MAX as f64 {
+        return MAX_WIN; // Cap at max win since multiplier is ~1
+    } else if max_bet_f64 < MIN_BET as f64 {
+        return MIN_BET;
+    }
+
     max_bet_f64.floor() as u64
 }
 
@@ -361,7 +376,7 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
 
     // Validate input
     if bet_amount < MIN_BET {
-        return Err(format!("Minimum bet is {} ICP", MIN_BET / 100_000_000));
+        return Err(format!("Minimum bet is {} ICP", MIN_BET as f64 / E8S_PER_ICP as f64));
     }
 
     // Calculate dynamic max bet for this specific bet
@@ -371,7 +386,7 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
         let multiplier = calculate_multiplier(win_chance);
         return Err(format!(
             "Maximum bet is {:.4} ICP for {:.2}x multiplier (10 ICP max win)",
-            max_bet as f64 / 100_000_000.0,
+            max_bet as f64 / E8S_PER_ICP as f64,
             multiplier
         ));
     }
@@ -749,4 +764,66 @@ fn get_rotation_history(limit: u32) -> Vec<(u64, SeedRotationRecord)> {
             .map(|(id, record)| (id, record))
             .collect()
     })
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_max_bet_high_multiplier() {
+        // 99 Over = ~1% win chance = ~97x multiplier
+        // Max bet should be around 0.1 ICP
+        let max_bet = calculate_max_bet(99, &RollDirection::Over);
+        assert!(max_bet < 20_000_000); // Less than 0.2 ICP
+        assert!(max_bet > 5_000_000);  // More than 0.05 ICP
+    }
+
+    #[test]
+    fn test_max_bet_medium_multiplier() {
+        // 50 Over = ~50% win chance = ~2x multiplier
+        // Max bet should be around 5 ICP
+        let max_bet = calculate_max_bet(50, &RollDirection::Over);
+        assert!(max_bet < 600_000_000); // Less than 6 ICP
+        assert!(max_bet > 400_000_000); // More than 4 ICP
+    }
+
+    #[test]
+    fn test_max_bet_low_multiplier() {
+        // 2 Over = ~98% win chance = ~1x multiplier
+        // Max bet should be close to 10 ICP
+        let max_bet = calculate_max_bet(2, &RollDirection::Over);
+        // Due to rounding, might not be exactly MAX_WIN
+        assert!(max_bet >= MAX_WIN); // Should be at least 10 ICP
+        assert!(max_bet <= MAX_WIN + 10_000_000); // Allow small margin for rounding
+    }
+
+    #[test]
+    fn test_max_bet_edge_cases() {
+        // Test extreme values
+        let max_bet_99_under = calculate_max_bet(99, &RollDirection::Under);
+        assert!(max_bet_99_under > 900_000_000); // Should be close to 10 ICP
+        
+        let max_bet_1_over = calculate_max_bet(1, &RollDirection::Over);
+        assert!(max_bet_1_over > 900_000_000); // Should be close to 10 ICP
+    }
+
+    #[test]
+    fn test_max_bet_never_exceeds_max_win() {
+        // Test all possible target numbers and directions
+        for target in 1..=99 {
+            for direction in [RollDirection::Over, RollDirection::Under] {
+                let max_bet = calculate_max_bet(target, &direction);
+                
+                // Calculate what the actual payout would be
+                let win_chance = calculate_win_chance(target, &direction);
+                let multiplier = calculate_multiplier(win_chance);
+                let max_payout = (max_bet as f64 * multiplier) as u64;
+                
+                // Ensure max payout never exceeds MAX_WIN (with small margin for rounding)
+                assert!(max_payout <= MAX_WIN + 1_000_000); // Allow 0.01 ICP margin for rounding
+            }
+        }
+    }
 }
