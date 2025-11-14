@@ -81,6 +81,7 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
   const [displayNumber, setDisplayNumber] = useState(0);
   const [animationPhase, setAnimationPhase] = useState<'idle' | 'rolling' | 'complete'>('idle');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Start rolling animation
   useEffect(() => {
@@ -92,31 +93,57 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
         setDisplayNumber(Math.floor(Math.random() * 101));
       }, ANIMATION_CONFIG.FRAME_INTERVAL);
 
+      // Add a safety timeout to prevent infinite rolling (10 seconds max)
+      timeoutRef.current = setTimeout(() => {
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+        setAnimationPhase('complete');
+        if (onAnimationComplete) {
+          onAnimationComplete();
+        }
+      }, 10000);
+
       return () => {
         if (intervalRef.current) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
         }
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+          timeoutRef.current = null;
+        }
       };
     }
-  }, [isRolling]);
+  }, [isRolling, onAnimationComplete]);
 
-  // Show result immediately when backend returns
+  // Show result when backend returns (fixed race condition)
   useEffect(() => {
-    if (targetNumber !== null && animationPhase === 'rolling') {
+    if (targetNumber !== null && isRolling) {
+      // Clear any existing animation interval
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
 
-      setDisplayNumber(targetNumber);
-      setAnimationPhase('complete');
-
-      if (onAnimationComplete) {
-        onAnimationComplete();
+      // Clear timeout since we got a result
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
       }
+
+      // Small delay to ensure at least some rolling animation is shown
+      setTimeout(() => {
+        setDisplayNumber(targetNumber);
+        setAnimationPhase('complete');
+
+        if (onAnimationComplete) {
+          onAnimationComplete();
+        }
+      }, Math.min(500, ANIMATION_CONFIG.ROLL_DURATION));
     }
-  }, [targetNumber, animationPhase, onAnimationComplete]);
+  }, [targetNumber, isRolling, onAnimationComplete]);
 
   // Reset when not rolling
   useEffect(() => {

@@ -133,6 +133,11 @@ export const Dice: React.FC = () => {
     gameState.clearErrors();
     setAnimatingResult(null);
 
+    // Create a timeout promise that rejects after 15 seconds
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Game timed out. Please try again.')), 15000);
+    });
+
     try {
       const betAmountE8s = BigInt(Math.floor(gameState.betAmount * 100_000_000));
       const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
@@ -142,7 +147,11 @@ export const Dice: React.FC = () => {
       crypto.getRandomValues(randomBytes);
       const clientSeed = Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
 
-      const result = await actor.play_dice(betAmountE8s, targetNumber, directionVariant, clientSeed);
+      // Race between the actual call and timeout
+      const result = await Promise.race([
+        actor.play_dice(betAmountE8s, targetNumber, directionVariant, clientSeed),
+        timeoutPromise
+      ]);
 
       if ('Ok' in result) {
         setAnimatingResult(result.Ok.rolled_number);
