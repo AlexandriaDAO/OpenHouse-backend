@@ -11,6 +11,8 @@ import {
 } from '../components/game-ui';
 import { DiceAnimation, DiceControls, DiceAccountingPanel, type DiceDirection } from '../components/game-specific/dice';
 import { useGameMode, useGameState } from '../hooks/games';
+import { useGameBalance } from '../providers/GameBalanceProvider';
+import { ConnectionStatus } from '../components/ui/ConnectionStatus';
 import type { Principal } from '@dfinity/principal';
 
 interface DiceGameResult {
@@ -31,6 +33,11 @@ export const Dice: React.FC = () => {
   const { actor } = useDiceActor();
   const gameMode = useGameMode();
   const gameState = useGameState<DiceGameResult>();
+  // Use global balance state
+  const gameBalanceContext = useGameBalance('dice');
+  const balance = gameBalanceContext.balance;
+  const refreshBalance = gameBalanceContext.refresh;
+  const optimisticUpdate = gameBalanceContext.optimisticUpdate;
   // Note: Disabled useGameHistory to prevent infinite loop - using gameState.history instead
   // const { history } = useGameHistory<DiceGameResult>(actor, 'get_recent_games', 10);
 
@@ -40,7 +47,6 @@ export const Dice: React.FC = () => {
   const [winChance, setWinChance] = useState(0);
   const [multiplier, setMultiplier] = useState(0);
   const [animatingResult, setAnimatingResult] = useState<number | null>(null);
-  const [gameBalance, setGameBalance] = useState<bigint | null>(null);
 
   // Calculate odds when target or direction changes
   useEffect(() => {
@@ -88,33 +94,15 @@ export const Dice: React.FC = () => {
     loadHistory();
   }, [actor]); // Only depend on actor, not gameState to avoid loops
 
-  // Load game balance on mount
+  // Load initial balances on mount
   useEffect(() => {
-    const loadGameBalance = async () => {
-      if (!actor) return;
-
-      try {
-        const balance = await actor.get_my_balance();
-        setGameBalance(balance);
-      } catch (err) {
-        console.error('Failed to load game balance:', err);
-      }
-    };
-
-    loadGameBalance();
-  }, [actor]);
+    refreshBalance();
+  }, [actor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Refresh callback for accounting panel
   const handleBalanceChange = useCallback(async () => {
-    if (!actor) return;
-
-    try {
-      const balance = await actor.get_my_balance();
-      setGameBalance(balance);
-    } catch (err) {
-      console.error('Failed to refresh game balance:', err);
-    }
-  }, [actor]);
+    await refreshBalance();
+  }, [refreshBalance]);
 
   // Handle dice roll
   const rollDice = async () => {
@@ -138,6 +126,25 @@ export const Dice: React.FC = () => {
       if ('Ok' in result) {
         setAnimatingResult(result.Ok.rolled_number);
         gameState.addToHistory(result.Ok);
+
+        // Apply optimistic update immediately
+        if (result.Ok.is_win) {
+          // Win: add payout to game balance
+          optimisticUpdate({
+            field: 'game',
+            amount: result.Ok.payout,
+            operation: 'add'
+          });
+        } else {
+          // Loss: subtract bet from game balance
+          optimisticUpdate({
+            field: 'game',
+            amount: result.Ok.bet_amount,
+            operation: 'subtract'
+          });
+        }
+
+        // Note: Background verification is handled automatically by GameBalanceProvider
       } else {
         gameState.setGameError(result.Err);
         gameState.setIsPlaying(false);
@@ -181,9 +188,12 @@ export const Dice: React.FC = () => {
     >
       <GameModeToggle {...gameMode} />
 
+      {/* CONNECTION STATUS */}
+      <ConnectionStatus game="dice" />
+
       {/* ACCOUNTING PANEL */}
       <DiceAccountingPanel
-        gameBalance={gameBalance}
+        gameBalance={balance.game}
         onBalanceChange={handleBalanceChange}
       />
 

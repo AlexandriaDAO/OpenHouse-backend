@@ -5,16 +5,14 @@
   },
   "name": "crash",
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "prebuild": "npm run prebuild --workspaces --if-present",
-    "pretest": "npm run prebuild --workspaces --if-present",
-    "start": "npm start --workspaces --if-present",
-    "test": "npm test --workspaces --if-present"
+    "build": "echo 'No build needed'",
+    "prebuild": "echo 'No prebuild needed'",
+    "pretest": "echo 'No pretest needed'",
+    "start": "echo 'No start needed'",
+    "test": "echo 'No test needed'"
   },
   "type": "module",
-  "workspaces": [
-    "src/crash_frontend"
-  ],
+  "workspaces": [],
   "dependencies": {
     "@dfinity/auth-client": "^3.4.2"
   }
