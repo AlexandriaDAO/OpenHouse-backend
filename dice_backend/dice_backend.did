@@ -39,6 +39,7 @@ service : {
   get_recent_games: (nat32) -> (vec DiceResult) query;
   get_game: (nat64) -> (opt DiceResult) query;
   calculate_payout_info: (nat8, RollDirection) -> (variant { Ok: record { float64; float64 }; Err: text }) query;
+  get_max_bet: (nat8, RollDirection) -> (nat64) query;
 
   // Provable fairness verification methods
   get_current_seed_hash: () -> (text) query;

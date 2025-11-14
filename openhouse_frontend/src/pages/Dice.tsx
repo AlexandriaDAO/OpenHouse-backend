@@ -32,7 +32,8 @@ interface DiceGameResult {
 export const Dice: React.FC = () => {
   const { actor } = useDiceActor();
   const gameMode = useGameMode();
-  const gameState = useGameState<DiceGameResult>(0.01, 100);
+  const [maxBetTemp] = useState(10); // Initial max bet, will be updated dynamically
+  const gameState = useGameState<DiceGameResult>(0.01, maxBetTemp);
   // Use global balance state
   const gameBalanceContext = useGameBalance('dice');
   const balance = gameBalanceContext.balance;
@@ -46,6 +47,7 @@ export const Dice: React.FC = () => {
   const [direction, setDirection] = useState<DiceDirection>('Over');
   const [winChance, setWinChance] = useState(0);
   const [multiplier, setMultiplier] = useState(0);
+  const [maxBet, setMaxBet] = useState(10); // Dynamic max bet in ICP
   const [animatingResult, setAnimatingResult] = useState<number | null>(null);
 
   // Calculate odds when target or direction changes
@@ -55,6 +57,8 @@ export const Dice: React.FC = () => {
 
       try {
         const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
+
+        // Get payout info (existing)
         const result = await actor.calculate_payout_info(targetNumber, directionVariant);
 
         if ('Ok' in result) {
@@ -63,6 +67,16 @@ export const Dice: React.FC = () => {
           setMultiplier(mult);
         } else if ('Err' in result) {
           gameState.setGameError(result.Err);
+        }
+
+        // Get max bet (NEW)
+        const maxBetE8s = await actor.get_max_bet(targetNumber, directionVariant);
+        const maxBetICP = Number(maxBetE8s) / 100_000_000;
+        setMaxBet(maxBetICP);
+
+        // Adjust current bet if it exceeds new max (NEW)
+        if (gameState.betAmount > maxBetICP) {
+          gameState.setBetAmount(maxBetICP);
         }
       } catch (err) {
         console.error('Failed to calculate odds:', err);
@@ -164,6 +178,7 @@ export const Dice: React.FC = () => {
   const stats: GameStat[] = [
     { label: 'Win Chance', value: `${winChance.toFixed(2)}%`, highlight: true, color: 'yellow' },
     { label: 'Multiplier', value: `${multiplier.toFixed(2)}x`, highlight: true, color: 'green' },
+    { label: 'Max Bet', value: `${maxBet.toFixed(4)} ICP`, highlight: true, color: 'blue' },
     { label: 'Win Amount', value: `${(gameState.betAmount * multiplier).toFixed(2)} ICP` },
   ];
 
@@ -203,7 +218,7 @@ export const Dice: React.FC = () => {
           value={gameState.betAmount}
           onChange={gameState.setBetAmount}
           min={0.01}
-          max={100}
+          max={maxBet}
           disabled={gameState.isPlaying}
           isPracticeMode={gameMode.isPracticeMode}
           error={gameState.betError}

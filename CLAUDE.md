@@ -78,8 +78,9 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 ### 4. Dice
 - **Mechanics**: Roll a number from 0-100, predict over or under target
 - **Objective**: Choose target number and direction, win if roll matches prediction
-- **Min Bet**: 1 ICP
-- **Max Win**: 100x (1% or 98% win chance)
+- **Min Bet**: 0.01 ICP
+- **Max Bet**: Dynamic based on multiplier (10 ICP max win / multiplier)
+- **Max Win**: 10 ICP
 - **House Edge**: 3%
 - **Win Chance**: 1% to 98% (adjustable via target number)
 - **Canister**: `dice_backend`
@@ -207,6 +208,7 @@ get_stats() -> GameStats
 get_recent_games(limit: u32) -> Vec<DiceResult>
 get_game(game_id: u64) -> Option<DiceResult>
 calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<(f64, f64), String>
+get_max_bet(target_number: u8, direction: RollDirection) -> u64
 ```
 
 ## 🛠️ Adding New Games

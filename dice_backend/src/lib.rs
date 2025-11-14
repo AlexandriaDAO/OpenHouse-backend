@@ -98,7 +98,7 @@ type Memory = VirtualMemory<DefaultMemoryImpl>;
 
 // Dice game constants
 const MIN_BET: u64 = 1_000_000; // 0.01 ICP
-const MAX_BET: u64 = 10_000_000_000; // 100 ICP
+const MAX_WIN: u64 = 1_000_000_000; // 10 ICP max win
 const HOUSE_EDGE: f64 = 0.03; // 3% house edge
 const MAX_NUMBER: u8 = 100; // Dice rolls 0-100
 
@@ -290,6 +290,20 @@ fn calculate_multiplier(win_chance: f64) -> f64 {
     ((1.0 - HOUSE_EDGE) / win_chance).min(100.0) // Cap at 100x
 }
 
+// Calculate maximum allowed bet based on target number and direction
+fn calculate_max_bet(target_number: u8, direction: &RollDirection) -> u64 {
+    // Calculate win chance for this bet
+    let win_chance = calculate_win_chance(target_number, direction);
+
+    // Calculate multiplier
+    let multiplier = calculate_multiplier(win_chance);
+
+    // Max bet = max win / multiplier
+    // Use floor to ensure we never exceed max win
+    let max_bet_f64 = (MAX_WIN as f64) / multiplier;
+    max_bet_f64.floor() as u64
+}
+
 // Generate instant random number using seed+nonce+client_seed (0-100)
 // Returns: (rolled_number, nonce, server_seed_hash)
 fn generate_dice_roll_instant(client_seed: &str) -> Result<(u8, u64, String), String> {
@@ -349,8 +363,17 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
     if bet_amount < MIN_BET {
         return Err(format!("Minimum bet is {} ICP", MIN_BET / 100_000_000));
     }
-    if bet_amount > MAX_BET {
-        return Err(format!("Maximum bet is {} ICP", MAX_BET / 100_000_000));
+
+    // Calculate dynamic max bet for this specific bet
+    let max_bet = calculate_max_bet(target_number, &direction);
+    if bet_amount > max_bet {
+        let win_chance = calculate_win_chance(target_number, &direction);
+        let multiplier = calculate_multiplier(win_chance);
+        return Err(format!(
+            "Maximum bet is {:.4} ICP for {:.2}x multiplier (10 ICP max win)",
+            max_bet as f64 / 100_000_000.0,
+            multiplier
+        ));
     }
 
     // Validate target number based on direction
@@ -523,6 +546,12 @@ fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<
 
     let multiplier = calculate_multiplier(win_chance);
     Ok((win_chance, multiplier))
+}
+
+// Get maximum allowed bet for given parameters (helper for UI)
+#[query]
+fn get_max_bet(target_number: u8, direction: RollDirection) -> u64 {
+    calculate_max_bet(target_number, &direction)
 }
 
 // Simple greeting function for testing
