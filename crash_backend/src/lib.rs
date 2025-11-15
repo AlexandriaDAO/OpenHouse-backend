@@ -13,7 +13,7 @@ type Memory = VirtualMemory<DefaultMemoryImpl>;
 // Game constants
 const MIN_BET: u64 = 100_000_000; // 1 ICP
 const MAX_BET: u64 = 10_000_000_000; // 100 ICP
-const HOUSE_EDGE: f64 = 0.03; // 3% house edge
+const HOUSE_EDGE: f64 = 0.01; // 1% house edge
 const MIN_MULTIPLIER: f64 = 1.01;
 const MAX_MULTIPLIER: f64 = 1000.0;
 

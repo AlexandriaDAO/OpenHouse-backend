@@ -56,7 +56,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 - **Objective**: Cash out before the crash
 - **Min Bet**: 1 ICP
 - **Max Win**: 1000x
-- **House Edge**: 3%
+- **House Edge**: 1%
 - **Canister**: `crash_backend`
 
 ### 2. Plinko
@@ -64,7 +64,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 - **Features**: Adjustable rows (8/12/16) and risk levels (Low/Medium/High)
 - **Min Bet**: 1 ICP
 - **Max Win**: 1000x (16 rows, high risk)
-- **House Edge**: 3%
+- **House Edge**: 1%
 - **Canister**: `plinko_backend`
 
 ### 3. Mines
@@ -72,7 +72,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 - **Objective**: Reveal safe tiles to increase multiplier, avoid mines
 - **Min Bet**: 1 ICP
 - **Max Win**: 5000x
-- **House Edge**: 3%
+- **House Edge**: 1%
 - **Canister**: `mines_backend`
 
 ### 4. Dice
@@ -81,7 +81,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 - **Min Bet**: 0.01 ICP
 - **Max Bet**: Dynamic based on multiplier (10 ICP max win / multiplier)
 - **Max Win**: 10 ICP
-- **House Edge**: 3%
+- **House Edge**: 1%
 - **Win Chance**: 1% to 98% (adjustable via target number)
 - **Canister**: `dice_backend`
 

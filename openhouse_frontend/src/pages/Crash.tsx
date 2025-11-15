@@ -130,7 +130,7 @@ export const Crash: React.FC = () => {
           </div>
           <div className="flex justify-between">
             <span className="text-gray-400">House Edge:</span>
-            <span className="font-semibold">3%</span>
+            <span className="font-semibold">1%</span>
           </div>
         </div>
       </div>
