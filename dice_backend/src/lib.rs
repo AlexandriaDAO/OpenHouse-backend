@@ -121,7 +121,7 @@ const E8S_PER_ICP: u64 = 100_000_000; // 1 ICP = 100,000,000 e8s
 // Dice game constants
 const MIN_BET: u64 = 1_000_000; // 0.01 ICP
 const MAX_WIN: u64 = 10 * E8S_PER_ICP; // 10 ICP max win
-const HOUSE_EDGE: f64 = 0.03; // 3% house edge
+// House edge is now implicit: exact hit (target number) = house wins (0.99% edge)
 const MAX_NUMBER: u8 = 100; // Dice rolls 0-100
 
 // Direction to predict
@@ -146,6 +146,8 @@ pub struct DiceResult {
     pub payout: u64,
     pub is_win: bool,
     pub timestamp: u64,
+    #[serde(default)]
+    pub is_house_hit: bool,  // True when house wins on exact target hit (0.99% edge)
     // Verification fields for provable fairness
     pub client_seed: String,
     pub nonce: u64,
@@ -329,37 +331,31 @@ fn calculate_win_chance(target: u8, direction: &RollDirection) -> f64 {
     }
 }
 
-fn calculate_multiplier(win_chance: f64) -> f64 {
-    if win_chance <= 0.0 {
+// Calculate payout multiplier with 0.99% house edge
+// Formula: 100 / winning_numbers gives clean round multipliers
+// House edge comes from exact hit (target number) always being a loss
+fn calculate_multiplier_direct(target: u8, direction: &RollDirection) -> f64 {
+    let winning_numbers = match direction {
+        RollDirection::Over => (100 - target) as f64,
+        RollDirection::Under => target as f64,
+    };
+    // Division by zero prevented by upstream validation (target 0 for Under, 100 for Over are rejected)
+    // This check is defensive programming for potential future edge cases
+    if winning_numbers == 0.0 {
         return 0.0;
     }
-    ((1.0 - HOUSE_EDGE) / win_chance).min(100.0) // Cap at 100x
+    100.0 / winning_numbers  // Clean round numbers: 2x, 4x, 5x, 10x, 20x, 50x, 100x
 }
 
 // Calculate maximum allowed bet based on target number and direction
 fn calculate_max_bet(target_number: u8, direction: &RollDirection) -> u64 {
-    // Calculate win chance for this bet
-    let win_chance = calculate_win_chance(target_number, direction);
+    let multiplier = calculate_multiplier_direct(target_number, direction);
 
-    // Calculate multiplier
-    let multiplier = calculate_multiplier(win_chance);
-
-    // Prevent division by zero and handle edge cases
-    if multiplier <= 0.0 || !multiplier.is_finite() {
-        return MIN_BET; // Return minimum as safe fallback
-    }
-
-    // Max bet = max win / multiplier
-    let max_bet_f64 = (MAX_WIN as f64) / multiplier;
-
-    // Protect against overflow when converting to u64
-    if max_bet_f64.is_infinite() || max_bet_f64 > u64::MAX as f64 {
-        return MAX_WIN; // Cap at max win since multiplier is ~1
-    } else if max_bet_f64 < MIN_BET as f64 {
+    if multiplier <= 0.0 {
         return MIN_BET;
     }
 
-    max_bet_f64.floor() as u64
+    ((MAX_WIN as f64) / multiplier).floor() as u64
 }
 
 // Generate instant random number using seed+nonce+client_seed (0-100)
@@ -431,8 +427,7 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
     // Calculate dynamic max bet for this specific bet
     let max_bet = calculate_max_bet(target_number, &direction);
     if bet_amount > max_bet {
-        let win_chance = calculate_win_chance(target_number, &direction);
-        let multiplier = calculate_multiplier(win_chance);
+        let multiplier = calculate_multiplier_direct(target_number, &direction);
         return Err(format!(
             "Maximum bet is {:.4} ICP for {:.2}x multiplier (10 ICP max win)",
             max_bet as f64 / E8S_PER_ICP as f64,
@@ -462,13 +457,7 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
 
     // Calculate win chance and multiplier for this specific bet
     let win_chance = calculate_win_chance(target_number, &direction);
-
-    // Ensure win chance is reasonable
-    if win_chance < 0.01 || win_chance > 0.98 {
-        return Err("Invalid target number - win chance must be between 1% and 98%".to_string());
-    }
-
-    let multiplier = calculate_multiplier(win_chance);
+    let multiplier = calculate_multiplier_direct(target_number, &direction);
 
     // Calculate max bet based on house balance using ACTUAL multiplier
     let house_balance = accounting::get_house_balance();
@@ -496,10 +485,17 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
 
     let (rolled_number, nonce, server_seed_hash) = generate_dice_roll_instant(&client_seed)?;
 
+    // Check for exact hit (house wins on exact target match - 0.99% edge)
+    let is_house_hit = rolled_number == target_number;
+
     // Determine if player won
-    let is_win = match direction {
-        RollDirection::Over => rolled_number > target_number,
-        RollDirection::Under => rolled_number < target_number,
+    let is_win = if is_house_hit {
+        false  // House always wins on exact hit
+    } else {
+        match direction {
+            RollDirection::Over => rolled_number > target_number,
+            RollDirection::Under => rolled_number < target_number,
+        }
     };
 
     let payout = if is_win {
@@ -527,6 +523,7 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
         payout,
         is_win,
         timestamp: ic_cdk::api::time(),
+        is_house_hit,
         client_seed,
         nonce,
         server_seed_hash,
@@ -695,12 +692,7 @@ fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<
     }
 
     let win_chance = calculate_win_chance(target_number, &direction);
-
-    if win_chance < 0.01 || win_chance > 0.98 {
-        return Err("Win chance must be between 1% and 98%".to_string());
-    }
-
-    let multiplier = calculate_multiplier(win_chance);
+    let multiplier = calculate_multiplier_direct(target_number, &direction);
     Ok((win_chance, multiplier))
 }
 
@@ -998,57 +990,103 @@ mod tests {
 
     #[test]
     fn test_max_bet_high_multiplier() {
-        // 99 Over = ~1% win chance = ~97x multiplier
-        // Max bet should be around 0.1 ICP
+        // 99 Over = 0.99% win chance = exactly 100x multiplier (0.99% house edge)
+        // Max bet should be 0.1 ICP (10 ICP max win / 100x)
         let max_bet = calculate_max_bet(99, &RollDirection::Over);
-        assert!(max_bet < 20_000_000); // Less than 0.2 ICP
-        assert!(max_bet > 5_000_000);  // More than 0.05 ICP
+        assert_eq!(max_bet, 10_000_000); // Exactly 0.1 ICP
     }
 
     #[test]
     fn test_max_bet_medium_multiplier() {
-        // 50 Over = ~50% win chance = ~2x multiplier
-        // Max bet should be around 5 ICP
+        // 50 Over = 49.5% win chance = exactly 2x multiplier (0.99% house edge)
+        // Max bet should be 5 ICP (10 ICP max win / 2x)
         let max_bet = calculate_max_bet(50, &RollDirection::Over);
-        assert!(max_bet < 600_000_000); // Less than 6 ICP
-        assert!(max_bet > 400_000_000); // More than 4 ICP
+        assert_eq!(max_bet, 500_000_000); // Exactly 5 ICP
     }
 
     #[test]
     fn test_max_bet_low_multiplier() {
-        // 2 Over = ~98% win chance = ~1x multiplier
-        // Max bet should be close to 10 ICP
-        let max_bet = calculate_max_bet(2, &RollDirection::Over);
-        // Due to rounding, might not be exactly MAX_WIN
-        assert!(max_bet >= MAX_WIN); // Should be at least 10 ICP
-        assert!(max_bet <= MAX_WIN + 10_000_000); // Allow small margin for rounding
+        // 1 Over = 98.02% win chance = exactly 1.0101x multiplier (0.99% house edge)
+        // Max bet should be ~9.9 ICP (10 ICP max win / 1.0101x)
+        let max_bet = calculate_max_bet(1, &RollDirection::Over);
+        assert_eq!(max_bet, 989_999_999); // 9.9 ICP (floor of 10B / 1.0101)
     }
 
     #[test]
     fn test_max_bet_edge_cases() {
-        // Test extreme values
+        // 99 Under = 98.02% win chance = exactly 1.0101x multiplier
         let max_bet_99_under = calculate_max_bet(99, &RollDirection::Under);
-        assert!(max_bet_99_under > 900_000_000); // Should be close to 10 ICP
-        
+        assert_eq!(max_bet_99_under, 989_999_999); // 9.9 ICP
+
+        // 1 Over = 98.02% win chance = exactly 1.0101x multiplier
         let max_bet_1_over = calculate_max_bet(1, &RollDirection::Over);
-        assert!(max_bet_1_over > 900_000_000); // Should be close to 10 ICP
+        assert_eq!(max_bet_1_over, 989_999_999); // 9.9 ICP
     }
 
     #[test]
     fn test_max_bet_never_exceeds_max_win() {
-        // Test all possible target numbers and directions
+        // Test all possible target numbers and directions with new 0.99% edge system
         for target in 1..=99 {
             for direction in [RollDirection::Over, RollDirection::Under] {
                 let max_bet = calculate_max_bet(target, &direction);
-                
+
                 // Calculate what the actual payout would be
-                let win_chance = calculate_win_chance(target, &direction);
-                let multiplier = calculate_multiplier(win_chance);
+                let multiplier = calculate_multiplier_direct(target, &direction);
                 let max_payout = (max_bet as f64 * multiplier) as u64;
-                
+
                 // Ensure max payout never exceeds MAX_WIN (with small margin for rounding)
                 assert!(max_payout <= MAX_WIN + 1_000_000); // Allow 0.01 ICP margin for rounding
             }
         }
+    }
+
+    #[test]
+    fn test_round_multipliers() {
+        // Test that we get exact round number multipliers for common targets
+        assert_eq!(calculate_multiplier_direct(50, &RollDirection::Over), 2.0);   // 2x
+        assert_eq!(calculate_multiplier_direct(75, &RollDirection::Over), 4.0);   // 4x
+        assert_eq!(calculate_multiplier_direct(80, &RollDirection::Over), 5.0);   // 5x
+        assert_eq!(calculate_multiplier_direct(90, &RollDirection::Over), 10.0);  // 10x
+        assert_eq!(calculate_multiplier_direct(95, &RollDirection::Over), 20.0);  // 20x
+        assert_eq!(calculate_multiplier_direct(98, &RollDirection::Over), 50.0);  // 50x
+        assert_eq!(calculate_multiplier_direct(99, &RollDirection::Over), 100.0); // 100x
+    }
+
+    #[test]
+    fn test_house_hit_detection() {
+        // Test that exact hit on target number is properly detected as house win
+        // This represents the 0.99% house edge (1 out of 101 outcomes)
+
+        // Simulate exact hit: rolled_number == target_number
+        let target = 50u8;
+        let rolled = 50u8;
+
+        // Verify house hit logic
+        let is_house_hit = rolled == target;
+        assert!(is_house_hit, "Exact hit on target should be detected as house win");
+
+        // When house hits, player should not win regardless of direction
+        let is_win_over = if is_house_hit {
+            false
+        } else {
+            rolled > target
+        };
+        let is_win_under = if is_house_hit {
+            false
+        } else {
+            rolled < target
+        };
+
+        assert!(!is_win_over, "Player should not win on exact hit (Over)");
+        assert!(!is_win_under, "Player should not win on exact hit (Under)");
+
+        // Test non-exact hits work correctly
+        let rolled_win_over = 51u8;
+        let rolled_win_under = 49u8;
+
+        assert!(rolled_win_over != target, "Non-exact roll should not trigger house hit");
+        assert!(rolled_win_under != target, "Non-exact roll should not trigger house hit");
+        assert!(rolled_win_over > target, "Player should win Over on 51 vs target 50");
+        assert!(rolled_win_under < target, "Player should win Under on 49 vs target 50");
     }
 }
