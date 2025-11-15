@@ -105,7 +105,7 @@ export const Plinko: React.FC = () => {
       description="Drop the ball and watch it bounce to a multiplier!"
       minBet={1}
       maxWin={1000}
-      houseEdge={3}
+      houseEdge={1}
     >
       {/* CONNECTION STATUS */}
       <ConnectionStatus game="plinko" />

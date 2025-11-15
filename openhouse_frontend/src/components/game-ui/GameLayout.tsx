@@ -17,7 +17,7 @@ export const GameLayout: React.FC<GameLayoutProps> = ({
   children,
   minBet = 1,
   maxWin = 1000,
-  houseEdge = 3,
+  houseEdge = 1,
 }) => {
   return (
     <div className="space-y-6">

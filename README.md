@@ -19,10 +19,10 @@ The name "OpenHouse" is a play on words - we're the house (casino), but everythi
 
 | Game | Description | House Edge | Max Win | Play Now |
 |------|-------------|------------|---------|----------|
-| **Crash** | Multiplier rises until crash - cash out before it's too late | 3% | 1000x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/crash) |
-| **Plinko** | Drop a ball through pegs into multiplier slots | 3% | 1000x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/plinko) |
-| **Mines** | Navigate a 5x5 minefield, cash out before hitting a mine | 3% | 5000x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/mines) |
-| **Dice** | Roll over or under your target number | 3% | 100x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/dice) |
+| **Crash** | Multiplier rises until crash - cash out before it's too late | 1% | 1000x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/crash) |
+| **Plinko** | Drop a ball through pegs into multiplier slots | 1% | 1000x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/plinko) |
+| **Mines** | Navigate a 5x5 minefield, cash out before hitting a mine | 1% | 5000x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/mines) |
+| **Dice** | Roll over or under your target number | 1% | 100x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/dice) |
 
 **Frontend**: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
 
@@ -79,7 +79,7 @@ The house edge is hardcoded in the game logic and visible in the source code:
 
 ```rust
 // Example from Plinko
-const HOUSE_EDGE: f64 = 0.03; // 3% house edge
+const HOUSE_EDGE: f64 = 0.01; // 1% house edge
 
 fn calculate_payout(multiplier: f64, bet: u64) -> u64 {
     let payout = (bet as f64) * multiplier * (1.0 - HOUSE_EDGE);
