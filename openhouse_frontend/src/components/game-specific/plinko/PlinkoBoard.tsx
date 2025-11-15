@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import './PlinkoBoard.css';
 
 interface PlinkoBoardProps {
@@ -22,75 +22,60 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
   finalPosition,
 }) => {
   const [ballPosition, setBallPosition] = useState<BallPosition | null>(null);
-  const [animationPhase, setAnimationPhase] = useState<'idle' | 'dropping' | 'complete'>('idle');
-  const animationRef = useRef<number | null>(null);
+  const [animationKey, setAnimationKey] = useState(0);
 
-  // Reset animation phase when new path arrives
+  // Simple effect: When new path arrives, increment key to force fresh animation
   useEffect(() => {
     if (path && isDropping) {
-      // Cancel any ongoing animation
-      if (animationRef.current) {
-        clearTimeout(animationRef.current);
-        animationRef.current = null;
-      }
-      // Reset to idle so the animation can start fresh
-      setAnimationPhase('idle');
-      setBallPosition(null);
+      setAnimationKey(prev => prev + 1);
     }
-  }, [path]); // Only depend on path changes
+  }, [path, isDropping]); // Proper dependencies
 
-  // Animate ball drop
+  // Refactored animation effect - single source of truth
   useEffect(() => {
-    if (path && isDropping && animationPhase === 'idle') {
-      setAnimationPhase('dropping');
-      let currentRow = 0;
-      let currentColumn = 0; // Start at center (column 0)
+    // Don't start if no path or not dropping
+    if (!path || !isDropping) {
+      return;
+    }
 
-      setBallPosition({ row: 0, column: 0 });
+    // Start animation immediately
+    let currentRow = 0;
+    let currentColumn = 0;
+    const timeouts: number[] = [];
 
-      const animateStep = () => {
-        if (currentRow < path.length) {
-          // Move to next row
-          currentRow++;
-          // Update column based on path (true = right, false = left)
-          if (path[currentRow - 1]) {
-            currentColumn++;
-          }
-          // If false (left), column stays the same
+    setBallPosition({ row: 0, column: 0 });
 
-          setBallPosition({ row: currentRow, column: currentColumn });
+    const animateStep = () => {
+      if (currentRow < path.length) {
+        currentRow++;
+        if (path[currentRow - 1]) {
+          currentColumn++;
+        }
 
-          // Continue animation
-          animationRef.current = window.setTimeout(animateStep, 150);
-        } else {
-          // Animation complete
-          setAnimationPhase('complete');
+        setBallPosition({ row: currentRow, column: currentColumn });
+        const timeoutId = window.setTimeout(animateStep, 150);
+        timeouts.push(timeoutId);
+      } else {
+        // Animation complete - call callback after short delay
+        const completeTimeout = window.setTimeout(() => {
           if (onAnimationComplete) {
-            setTimeout(onAnimationComplete, 500);
+            onAnimationComplete();
           }
-        }
-      };
+        }, 500);
+        timeouts.push(completeTimeout);
+      }
+    };
 
-      // Start animation with initial delay
-      animationRef.current = window.setTimeout(animateStep, 200);
+    // Start animation
+    const initialTimeout = window.setTimeout(animateStep, 200);
+    timeouts.push(initialTimeout);
 
-      return () => {
-        if (animationRef.current) {
-          clearTimeout(animationRef.current);
-        }
-      };
-    }
-  }, [path, isDropping, animationPhase, onAnimationComplete]);
-
-  // Reset when not dropping
-  useEffect(() => {
-    if (!isDropping && animationPhase !== 'idle') {
-      setTimeout(() => {
-        setBallPosition(null);
-        setAnimationPhase('idle');
-      }, 1000);
-    }
-  }, [isDropping, animationPhase]);
+    // Cleanup: ALWAYS cancel all timeouts
+    return () => {
+      timeouts.forEach(clearTimeout);
+      setBallPosition(null);
+    };
+  }, [animationKey]); // Only depend on animationKey - guaranteed to change for each drop
 
   // Generate pegs for the board
   const renderPegs = () => {
@@ -139,7 +124,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
         {/* Ball */}
         {ballPosition && (
           <div
-            className={`plinko-ball ${animationPhase === 'complete' ? 'plinko-ball-complete' : ''}`}
+            className="plinko-ball"
             style={getBallStyle()}
           />
         )}
@@ -152,7 +137,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
           {Array.from({ length: rows + 1 }, (_, i) => (
             <div
               key={`slot-${i}`}
-              className={`plinko-slot ${finalPosition === i && animationPhase === 'complete' ? 'plinko-slot-active' : ''}`}
+              className={`plinko-slot ${finalPosition === i && !isDropping ? 'plinko-slot-active' : ''}`}
               style={{
                 left: `calc(50% + ${(i - rows / 2) * 40}px)`,
               }}
