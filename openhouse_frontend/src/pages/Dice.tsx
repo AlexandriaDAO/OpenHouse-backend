@@ -69,9 +69,11 @@ export const Dice: React.FC = () => {
   const [multiplier, setMultiplier] = useState(0);
   const [animatingResult, setAnimatingResult] = useState<number | null>(null);
 
-  // State for detailed history
+  // State for detailed history (TODO: implement when backend methods are available)
+  // @ts-ignore - Keeping for future implementation
   const [detailedHistory, setDetailedHistory] = useState<DetailedGameHistory[]>([]);
   const [showDetailedView, setShowDetailedView] = useState(false);
+  // @ts-ignore - Keeping for future implementation
   const [csvExport, setCsvExport] = useState<string>('');
 
   // Calculate odds when target or direction changes
@@ -135,13 +137,13 @@ export const Dice: React.FC = () => {
           gameState.addToHistory(game);
         });
 
-        // Load detailed history for display
-        const detailed = await actor.get_detailed_history(20);
-        setDetailedHistory(detailed);
+        // TODO: Load detailed history for display (method not yet implemented)
+        // const detailed = await actor.get_detailed_history(20);
+        // setDetailedHistory(detailed);
 
-        // Get CSV export
-        const csv = await actor.export_history_csv(100);
-        setCsvExport(csv);
+        // TODO: Get CSV export (method not yet implemented)
+        // const csv = await actor.export_history_csv(100);
+        // setCsvExport(csv);
       } catch (err) {
         console.error('Failed to load game history:', err);
       }
@@ -225,13 +227,13 @@ export const Dice: React.FC = () => {
         setAnimatingResult(result.Ok.rolled_number);
         gameState.addToHistory(result.Ok);
 
-        // Refresh detailed history after each game
-        const detailed = await actor.get_detailed_history(20);
-        setDetailedHistory(detailed);
+        // TODO: Refresh detailed history after each game (method not yet implemented)
+        // const detailed = await actor.get_detailed_history(20);
+        // setDetailedHistory(detailed);
 
-        // Refresh CSV export
-        const csv = await actor.export_history_csv(100);
-        setCsvExport(csv);
+        // TODO: Refresh CSV export (method not yet implemented)
+        // const csv = await actor.export_history_csv(100);
+        // setCsvExport(csv);
 
         // P1 fix: Refresh balance after game completes (non-blocking to avoid UI delay)
         refreshBalance().catch(console.error);

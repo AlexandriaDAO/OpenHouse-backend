@@ -25,6 +25,20 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
   const [animationPhase, setAnimationPhase] = useState<'idle' | 'dropping' | 'complete'>('idle');
   const animationRef = useRef<number | null>(null);
 
+  // Reset animation phase when new path arrives
+  useEffect(() => {
+    if (path && isDropping) {
+      // Cancel any ongoing animation
+      if (animationRef.current) {
+        clearTimeout(animationRef.current);
+        animationRef.current = null;
+      }
+      // Reset to idle so the animation can start fresh
+      setAnimationPhase('idle');
+      setBallPosition(null);
+    }
+  }, [path]); // Only depend on path changes
+
   // Animate ball drop
   useEffect(() => {
     if (path && isDropping && animationPhase === 'idle') {
