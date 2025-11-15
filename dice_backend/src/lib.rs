@@ -116,7 +116,8 @@ pub enum RollDirection {
 // Dice game result
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub struct DiceResult {
-    pub game_id: u64,  // NEW: Add unique game ID
+    #[serde(default)]
+    pub game_id: u64,  // Unique game ID (default to 0 for backward compatibility)
     pub player: Principal,
     pub bet_amount: u64,
     pub target_number: u8,
@@ -173,11 +174,7 @@ thread_local! {
 fn init() {
     ic_cdk::println!("Dice Game Backend Initialized");
     // Seed will be initialized on first game or in post_upgrade
-
-    // P1 fix: Refresh balance cache on initialization to ensure it's current
-    ic_cdk::spawn(async {
-        accounting::refresh_canister_balance().await;
-    });
+    // Note: Cannot call async functions in init(), balance will be refreshed on first heartbeat
 }
 
 // Initialize the seed with VRF randomness (with lock to prevent race conditions)
@@ -280,10 +277,7 @@ fn post_upgrade() {
     // Restore accounting state
     accounting::post_upgrade_accounting();
 
-    // P1 fix: Refresh balance cache on upgrade to ensure it's current
-    ic_cdk::spawn(async {
-        accounting::refresh_canister_balance().await;
-    });
+    // Note: Cannot call async functions in post_upgrade(), balance will be refreshed on first heartbeat
 }
 
 // Calculate win chance and multiplier based on target and direction
