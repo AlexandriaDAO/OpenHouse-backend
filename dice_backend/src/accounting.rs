@@ -58,6 +58,9 @@ thread_local! {
 
     // Cached canister balance (updated after deposits/withdrawals)
     static CACHED_CANISTER_BALANCE: RefCell<u64> = RefCell::new(0);
+
+    // Track when the balance was last refreshed (for cache validation)
+    static LAST_BALANCE_REFRESH: RefCell<u64> = RefCell::new(0);
 }
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -89,10 +92,38 @@ pub async fn refresh_canister_balance() -> u64 {
             CACHED_CANISTER_BALANCE.with(|cache| {
                 *cache.borrow_mut() = balance_u64;
             });
+            // Update the timestamp when balance is refreshed
+            LAST_BALANCE_REFRESH.with(|timestamp| {
+                *timestamp.borrow_mut() = ic_cdk::api::time();
+            });
             balance_u64
         }
         Err(e) => {
             ic_cdk::println!("Failed to refresh canister balance: {:?}", e);
+            0
+        }
+    }
+}
+
+/// Check if the cached balance is stale (older than max_age_nanos)
+pub fn is_balance_cache_stale(max_age_nanos: u64) -> bool {
+    let last_refresh = LAST_BALANCE_REFRESH.with(|timestamp| *timestamp.borrow());
+    let current_time = ic_cdk::api::time();
+
+    // If never refreshed or older than max age, it's stale
+    last_refresh == 0 || (current_time > last_refresh && current_time - last_refresh > max_age_nanos)
+}
+
+/// Get the age of the cached balance in nanoseconds
+pub fn get_balance_cache_age() -> u64 {
+    let last_refresh = LAST_BALANCE_REFRESH.with(|timestamp| *timestamp.borrow());
+    if last_refresh == 0 {
+        u64::MAX // Never refreshed
+    } else {
+        let current_time = ic_cdk::api::time();
+        if current_time > last_refresh {
+            current_time - last_refresh
+        } else {
             0
         }
     }
