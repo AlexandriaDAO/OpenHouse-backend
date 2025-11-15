@@ -86,14 +86,7 @@ pub async fn play_dice(
     client_seed: String,
     caller: Principal
 ) -> Result<DiceResult, String> {
-    // P0-2 FIX OPTIMIZED: Only force refresh if cache is stale (>60 seconds)
-    // This reduces dice roll time from 9s to <500ms while maintaining security
-    const MAX_CACHE_AGE_NANOS: u64 = 60_000_000_000; // 60 seconds
-    if accounting::is_balance_cache_stale(MAX_CACHE_AGE_NANOS) {
-        // Cache is too old, force a blocking refresh for safety
-        ic_cdk::println!("Balance cache stale, forcing refresh");
-        accounting::refresh_canister_balance().await;
-    }
+    // Note: Balance is now calculated on-demand, no cache to manage
 
     // Check user has sufficient internal balance
     let user_balance = accounting::get_balance(caller);
@@ -143,7 +136,8 @@ pub async fn play_dice(
     let multiplier = calculate_multiplier_direct(target_number, &direction);
 
     // Calculate max bet based on house balance using ACTUAL multiplier
-    let house_balance = accounting::get_house_balance();
+    let house_balance = accounting::get_house_balance().await
+        .map_err(|e| format!("Failed to get house balance: {}", e))?;
     let max_payout = (bet_amount as f64 * multiplier) as u64;
     if max_payout > house_balance {
         return Err(format!("Bet too large. House only has {} e8s, max payout would be {} e8s ({}x multiplier)",

@@ -22,7 +22,6 @@ mod heartbeat_impl;
 pub use accounting::{
     deposit, withdraw, get_balance, get_my_balance, get_house_balance,
     get_accounting_stats, audit_balances, refresh_canister_balance,
-    is_balance_cache_stale, get_balance_cache_age,
     AccountingStats, Account,
 };
 pub use types::{RollDirection, DiceResult, GameStats, DetailedGameHistory, SeedRotationRecord};
