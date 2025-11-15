@@ -18,6 +18,7 @@ import type { Principal } from '@dfinity/principal';
 const E8S_PER_ICP = 100_000_000; // 1 ICP = 100,000,000 e8s
 
 interface DiceGameResult {
+  game_id?: bigint;  // Add game_id field
   player: Principal;
   bet_amount: bigint;
   target_number: number;
@@ -29,6 +30,24 @@ interface DiceGameResult {
   is_win: boolean;
   timestamp: bigint;
   clientId?: string;
+}
+
+// Add new interface for detailed history
+interface DetailedGameHistory {
+  game_id: bigint;
+  player: string;
+  bet_icp: number;
+  won_icp: number;
+  target_number: number;
+  direction: string;
+  rolled_number: number;
+  win_chance: number;
+  multiplier: number;
+  is_win: boolean;
+  timestamp: bigint;
+  profit_loss: bigint;
+  expected_value: number;
+  house_edge_actual: number;
 }
 
 export const Dice: React.FC = () => {
@@ -50,6 +69,11 @@ export const Dice: React.FC = () => {
   const [winChance, setWinChance] = useState(0);
   const [multiplier, setMultiplier] = useState(0);
   const [animatingResult, setAnimatingResult] = useState<number | null>(null);
+
+  // State for detailed history
+  const [detailedHistory, setDetailedHistory] = useState<DetailedGameHistory[]>([]);
+  const [showDetailedView, setShowDetailedView] = useState(false);
+  const [csvExport, setCsvExport] = useState<string>('');
 
   // Calculate odds when target or direction changes
   useEffect(() => {
@@ -99,6 +123,7 @@ export const Dice: React.FC = () => {
       if (!actor) return;
 
       try {
+        // Load regular history for animation
         const games = await actor.get_recent_games(10);
         // Process all games at once to avoid multiple state updates
         const processedGames = games.map((game: DiceGameResult) => ({
@@ -107,9 +132,17 @@ export const Dice: React.FC = () => {
         }));
 
         // Add all games in a single batch if we have a batch method
-        processedGames.forEach((game) => {
+        processedGames.forEach((game: DiceGameResult) => {
           gameState.addToHistory(game);
         });
+
+        // Load detailed history for display
+        const detailed = await actor.get_detailed_history(20);
+        setDetailedHistory(detailed);
+
+        // Get CSV export
+        const csv = await actor.export_history_csv(100);
+        setCsvExport(csv);
       } catch (err) {
         console.error('Failed to load game history:', err);
       }
@@ -174,6 +207,14 @@ export const Dice: React.FC = () => {
       if ('Ok' in result) {
         setAnimatingResult(result.Ok.rolled_number);
         gameState.addToHistory(result.Ok);
+
+        // Refresh detailed history after each game
+        const detailed = await actor.get_detailed_history(20);
+        setDetailedHistory(detailed);
+
+        // Refresh CSV export
+        const csv = await actor.export_history_csv(100);
+        setCsvExport(csv);
 
         // Refresh balance after game completes
         await refreshBalance();
@@ -291,13 +332,104 @@ export const Dice: React.FC = () => {
         )}
       </div>
 
-      {/* Game History */}
-      <GameHistory<DiceGameResult>
-        items={gameState.history}
-        maxDisplay={5}
-        title="Recent Rolls"
-        renderCustom={renderHistoryItem}
-      />
+      {/* Game History Section */}
+      <div className="card max-w-4xl mx-auto">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-xl font-bold">Game History</h3>
+          <div className="flex gap-2">
+            <button
+              className="btn btn-sm"
+              onClick={() => setShowDetailedView(!showDetailedView)}
+            >
+              {showDetailedView ? 'Simple' : 'Detailed'} View
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={() => {
+                navigator.clipboard.writeText(csvExport);
+                alert('History copied to clipboard!');
+              }}
+            >
+              Copy CSV
+            </button>
+          </div>
+        </div>
+
+        {showDetailedView ? (
+          // Detailed table view
+          <div className="overflow-x-auto">
+            <table className="table table-sm">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Bet (ICP)</th>
+                  <th>Target</th>
+                  <th>Dir</th>
+                  <th>Roll</th>
+                  <th>Chance</th>
+                  <th>Multi</th>
+                  <th>Won (ICP)</th>
+                  <th>P/L</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detailedHistory.slice(0, 10).map((game) => (
+                  <tr key={String(game.game_id)} className={game.is_win ? 'text-green-400' : 'text-red-400'}>
+                    <td>{String(game.game_id)}</td>
+                    <td>{game.bet_icp.toFixed(4)}</td>
+                    <td>{game.target_number}</td>
+                    <td>{game.direction}</td>
+                    <td>{game.rolled_number}</td>
+                    <td>{game.win_chance.toFixed(1)}%</td>
+                    <td>{game.multiplier.toFixed(2)}x</td>
+                    <td>{game.won_icp.toFixed(4)}</td>
+                    <td>{game.is_win ? '+' : '-'}{Math.abs(Number(game.profit_loss) / E8S_PER_ICP).toFixed(4)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Summary Stats */}
+            <div className="mt-4 p-4 bg-gray-800 rounded">
+              <h4 className="font-bold mb-2">Session Statistics</h4>
+              <div className="grid grid-cols-3 gap-4 text-sm">
+                <div>
+                  Total Games: {detailedHistory.length}
+                </div>
+                <div>
+                  Win Rate: {detailedHistory.length > 0 ? ((detailedHistory.filter(g => g.is_win).length / detailedHistory.length) * 100).toFixed(1) : '0.0'}%
+                </div>
+                <div>
+                  Total P/L: {(detailedHistory.reduce((sum, g) => sum + Number(g.profit_loss), 0) / E8S_PER_ICP).toFixed(4)} ICP
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          // Simple view (existing)
+          <GameHistory<DiceGameResult>
+            items={gameState.history}
+            maxDisplay={5}
+            title="Recent Rolls"
+            renderCustom={renderHistoryItem}
+          />
+        )}
+
+        {/* Copy-pasteable text area for analysis */}
+        {showDetailedView && (
+          <details className="mt-4">
+            <summary className="cursor-pointer text-sm text-gray-400">
+              Raw Data for Analysis (Click to expand)
+            </summary>
+            <textarea
+              className="w-full h-32 mt-2 p-2 bg-gray-900 text-xs font-mono"
+              readOnly
+              value={csvExport}
+              onClick={(e) => e.currentTarget.select()}
+            />
+          </details>
+        )}
+      </div>
     </GameLayout>
   );
 };
