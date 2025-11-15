@@ -11,6 +11,7 @@ import {
 import { DiceAnimation, DiceControls, DiceAccountingPanel, type DiceDirection } from '../components/game-specific/dice';
 import { useGameMode, useGameState } from '../hooks/games';
 import { useGameBalance } from '../providers/GameBalanceProvider';
+import { useAuth } from '../providers/AuthProvider';
 import type { Principal } from '@dfinity/principal';
 
 // ICP conversion constant
@@ -52,6 +53,7 @@ interface DetailedGameHistory {
 
 export const Dice: React.FC = () => {
   const { actor } = useDiceActor();
+  const { isAuthenticated } = useAuth();
   const gameMode = useGameMode();
   // Initialize with conservative default, will be updated dynamically
   const [maxBet, setMaxBet] = useState(10); // Dynamic max bet in ICP
@@ -69,6 +71,7 @@ export const Dice: React.FC = () => {
   const [winChance, setWinChance] = useState(0);
   const [multiplier, setMultiplier] = useState(0);
   const [animatingResult, setAnimatingResult] = useState<number | null>(null);
+  const [showDepositAnimation, setShowDepositAnimation] = useState(false);
 
   // State for detailed history (TODO: implement when backend methods are available)
   // @ts-ignore - Keeping for future implementation
@@ -183,11 +186,32 @@ export const Dice: React.FC = () => {
     await refreshBalance();
   }, [refreshBalance]);
 
+  // Clear deposit animation when balance changes
+  useEffect(() => {
+    if (balance.game > 0n) {
+      setShowDepositAnimation(false);
+    }
+  }, [balance.game]);
+
   // Handle dice roll
   const rollDice = async () => {
+    // Step 1: Check authentication FIRST (before actor check)
+    if (!isAuthenticated) {
+      gameState.setGameError('Please log in to play. Click the "Login" button in the top right.');
+      return;
+    }
+
+    // Step 2: Existing checks (actor, bet validation)
     if (!actor || !gameState.validateBet()) return;
 
-    // Frontend validation: Check if house can afford the potential payout BEFORE starting animation
+    // Step 3: Check for zero balance and trigger deposit animation
+    if (balance.game === 0n) {
+      gameState.setGameError('Your dice game balance is empty. Please deposit ICP using the panel above.');
+      setShowDepositAnimation(true);
+      return;
+    }
+
+    // Step 4: Frontend validation: Check if house can afford the potential payout BEFORE starting animation
     const maxPayout = BigInt(Math.floor(gameState.betAmount * multiplier * E8S_PER_ICP));
     if (maxPayout > balance.house) {
       const houseBalanceICP = Number(balance.house) / E8S_PER_ICP;
@@ -284,6 +308,7 @@ export const Dice: React.FC = () => {
       <DiceAccountingPanel
         gameBalance={balance.game}
         onBalanceChange={handleBalanceChange}
+        showDepositAnimation={showDepositAnimation}
       />
 
       {/* BETTING CONTROLS */}

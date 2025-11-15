@@ -8,11 +8,13 @@ import useDiceActor from '../../../hooks/actors/useDiceActor';
 interface DiceAccountingPanelProps {
   gameBalance: bigint;  // Now required, not nullable
   onBalanceChange: () => void;
+  showDepositAnimation?: boolean;  // NEW: Animation prop for deposit prompt
 }
 
 export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
   gameBalance,
   onBalanceChange,
+  showDepositAnimation = false,
 }) => {
   const { isAuthenticated } = useAuth();
   const { balance: walletBalance, refreshBalance } = useBalance();
@@ -145,7 +147,9 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
           <button
             onClick={() => setShowDepositModal(true)}
             disabled={isDepositing}
-            className="flex-1 px-4 py-2 bg-purple-600/80 hover:bg-purple-600 rounded text-sm font-bold disabled:opacity-50 transition"
+            className={`flex-1 px-4 py-2 bg-purple-600/80 hover:bg-purple-600 rounded text-sm font-bold disabled:opacity-50 transition ${
+              showDepositAnimation ? 'animate-pulse ring-4 ring-purple-400 ring-opacity-75' : ''
+            }`}
             title="Deposit ICP to Dice Game"
           >
             {isDepositing ? '↓ Depositing...' : '↓ Deposit'}
@@ -160,6 +164,13 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
             {isWithdrawing ? '↑ Withdrawing...' : '↑ Withdraw All'}
           </button>
         </div>
+
+        {/* Attention text when animation active */}
+        {showDepositAnimation && (
+          <p className="text-purple-400 animate-pulse font-semibold text-sm text-center mb-2">
+            ☝️ Deposit ICP here to start playing
+          </p>
+        )}
 
         {/* Refresh Balances Button */}
         <button
