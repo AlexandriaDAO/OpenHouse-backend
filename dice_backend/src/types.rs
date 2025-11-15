@@ -1,0 +1,139 @@
+use candid::{CandidType, Deserialize, Principal};
+use serde::Serialize;
+use ic_stable_structures::Storable;
+use std::borrow::Cow;
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+pub const E8S_PER_ICP: u64 = 100_000_000; // 1 ICP = 100,000,000 e8s
+pub const MIN_BET: u64 = 1_000_000; // 0.01 ICP
+pub const MAX_WIN: u64 = 10 * E8S_PER_ICP; // 10 ICP max win
+pub const MAX_NUMBER: u8 = 100; // Dice rolls 0-100
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+// Direction to predict
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
+pub enum RollDirection {
+    Over,   // Roll will be greater than target
+    Under,  // Roll will be less than target
+}
+
+// =============================================================================
+// SEED MANAGEMENT STRUCTURES
+// =============================================================================
+
+#[derive(Clone, Debug, Serialize, Deserialize, CandidType, Default)]
+pub struct RandomnessSeed {
+    pub current_seed: [u8; 32],
+    pub creation_time: u64,
+    pub games_used: u64,
+    pub max_games: u64,
+    pub nonce: u64,
+}
+
+impl Storable for RandomnessSeed {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(serde_json::to_vec(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    const BOUND: ic_stable_structures::storable::Bound = ic_stable_structures::storable::Bound::Bounded {
+        max_size: 256,
+        is_fixed_size: false,
+    };
+}
+
+// Rotation history for verification
+#[derive(Clone, Debug, Serialize, Deserialize, CandidType)]
+pub struct SeedRotationRecord {
+    pub seed_hash: String,
+    pub start_nonce: u64,
+    pub end_nonce: u64,
+    pub timestamp: u64,
+}
+
+impl Storable for SeedRotationRecord {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(serde_json::to_vec(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    const BOUND: ic_stable_structures::storable::Bound = ic_stable_structures::storable::Bound::Unbounded;
+}
+
+// =============================================================================
+// GAME STRUCTURES
+// =============================================================================
+
+// Dice game result
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
+pub struct DiceResult {
+    #[serde(default)]
+    pub game_id: u64,  // Unique game ID (default to 0 for backward compatibility)
+    pub player: Principal,
+    pub bet_amount: u64,
+    pub target_number: u8,
+    pub direction: RollDirection,
+    pub rolled_number: u8,
+    pub win_chance: f64,
+    pub multiplier: f64,
+    pub payout: u64,
+    pub is_win: bool,
+    pub timestamp: u64,
+    #[serde(default)]
+    pub is_house_hit: bool,  // True when house wins on exact target hit (0.99% edge)
+    // Verification fields for provable fairness
+    pub client_seed: String,
+    pub nonce: u64,
+    pub server_seed_hash: String,
+}
+
+impl Storable for DiceResult {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(serde_json::to_vec(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    const BOUND: ic_stable_structures::storable::Bound = ic_stable_structures::storable::Bound::Unbounded;
+}
+
+#[derive(CandidType, Deserialize, Clone, Default)]
+pub struct GameStats {
+    pub total_games: u64,
+    pub total_volume: u64,
+    pub total_payouts: u64,
+    pub house_profit: i64,
+}
+
+// Detailed history for analytics
+#[derive(CandidType, Deserialize, Serialize)]
+pub struct DetailedGameHistory {
+    pub game_id: u64,
+    pub player: String,
+    pub bet_icp: f64,
+    pub won_icp: f64,
+    pub target_number: u8,
+    pub direction: String,
+    pub rolled_number: u8,
+    pub win_chance: f64,
+    pub multiplier: f64,
+    pub is_win: bool,
+    pub timestamp: u64,
+    pub profit_loss: i64,  // e8s
+    pub expected_value: f64,  // e8s
+    pub house_edge_actual: f64,  // percentage
+}
