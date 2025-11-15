@@ -1,6 +1,6 @@
 # OpenHouse Casino - Project Structure
 
-Generated on: 2025-11-14T14:13:22.277Z
+Generated on: 2025-11-15T10:01:32.309Z
 
 ```
 ├── crash_backend/
@@ -10,15 +10,15 @@ Generated on: 2025-11-14T14:13:22.277Z
 │       └── lib.rs (291 lines)
 ├── dice_backend/
 │   ├── Cargo.toml (19 lines)
-│   ├── dice_backend.did (62 lines)
+│   ├── dice_backend.did (83 lines)
 │   └── src/
-│       ├── accounting.rs (380 lines)
-│       └── lib.rs (724 lines)
+│       ├── accounting.rs (432 lines)
+│       └── lib.rs (1055 lines)
 ├── mines_backend/
-│   ├── Cargo.toml (16 lines)
-│   ├── mines_backend.did (49 lines)
+│   ├── Cargo.toml (17 lines)
+│   ├── mines_backend.did (69 lines)
 │   └── src/
-│       └── lib.rs (630 lines)
+│       └── lib.rs (847 lines)
 ├── openhouse_frontend/
 │   ├── BALANCE_GUIDE.md (297 lines)
 │   ├── build-auth.js (16 lines)
@@ -35,12 +35,18 @@ Generated on: 2025-11-14T14:13:22.277Z
 │   │   │   ├── GameCard.tsx (42 lines)
 │   │   │   ├── Layout.tsx (77 lines)
 │   │   │   ├── game-specific/
-│   │   │   │   └── dice/
-│   │   │   │       ├── DiceAccountingPanel.tsx (221 lines)
-│   │   │   │       ├── DiceAnimation.css (171 lines)
-│   │   │   │       ├── DiceAnimation.tsx (207 lines)
-│   │   │   │       ├── DiceControls.tsx (67 lines)
-│   │   │   │       └── index.ts (4 lines)
+│   │   │   │   ├── dice/
+│   │   │   │   │   ├── DiceAccountingPanel.tsx (233 lines)
+│   │   │   │   │   ├── DiceAnimation.css (171 lines)
+│   │   │   │   │   ├── DiceAnimation.tsx (234 lines)
+│   │   │   │   │   ├── DiceControls.tsx (67 lines)
+│   │   │   │   │   └── index.ts (4 lines)
+│   │   │   │   └── plinko/
+│   │   │   │       ├── PlinkoBoard.css (111 lines)
+│   │   │   │       ├── PlinkoBoard.tsx (166 lines)
+│   │   │   │       ├── PlinkoControls.tsx (90 lines)
+│   │   │   │       ├── PlinkoMultipliers.tsx (39 lines)
+│   │   │   │       └── index.ts (5 lines)
 │   │   │   ├── game-ui/
 │   │   │   │   ├── AuthNotice.tsx (27 lines)
 │   │   │   │   ├── BetAmountInput.tsx (97 lines)
@@ -48,9 +54,8 @@ Generated on: 2025-11-14T14:13:22.277Z
 │   │   │   │   ├── GameButton.tsx (67 lines)
 │   │   │   │   ├── GameHistory.tsx (69 lines)
 │   │   │   │   ├── GameLayout.tsx (40 lines)
-│   │   │   │   ├── GameModeToggle.tsx (58 lines)
 │   │   │   │   ├── GameStats.tsx (73 lines)
-│   │   │   │   └── index.ts (9 lines)
+│   │   │   │   └── index.ts (12 lines)
 │   │   │   └── ui/
 │   │   │       └── ConnectionStatus.tsx (196 lines)
 │   │   ├── hooks/
@@ -64,22 +69,21 @@ Generated on: 2025-11-14T14:13:22.277Z
 │   │   │       ├── index.ts (5 lines)
 │   │   │       ├── useBetValidation.ts (70 lines)
 │   │   │       ├── useGameHistory.ts (47 lines)
-│   │   │       ├── useGameMode.ts (30 lines)
+│   │   │       ├── useGameMode.ts (16 lines)
 │   │   │       └── useGameState.ts (106 lines)
 │   │   ├── index.css (89 lines)
 │   │   ├── main.tsx (11 lines)
 │   │   ├── pages/
 │   │   │   ├── Crash.tsx (140 lines)
-│   │   │   ├── Dice.backup.tsx (225 lines)
-│   │   │   ├── Dice.tsx (273 lines)
+│   │   │   ├── Dice.tsx (452 lines)
 │   │   │   ├── Home.tsx (61 lines)
-│   │   │   ├── Mines.tsx (144 lines)
-│   │   │   └── Plinko.tsx (148 lines)
+│   │   │   ├── Mines.tsx (355 lines)
+│   │   │   └── Plinko.tsx (204 lines)
 │   │   ├── providers/
 │   │   │   ├── ActorProvider.tsx (106 lines)
 │   │   │   ├── AuthProvider.tsx (127 lines)
 │   │   │   ├── BalanceProvider.tsx (85 lines)
-│   │   │   └── GameBalanceProvider.tsx (470 lines)
+│   │   │   └── GameBalanceProvider.tsx (486 lines)
 │   │   ├── types/
 │   │   │   ├── balance.ts (85 lines)
 │   │   │   └── ledger.ts (35 lines)
