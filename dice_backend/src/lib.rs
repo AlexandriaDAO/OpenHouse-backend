@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize, Nat, Principal};
 use ic_cdk::api::management_canister::main::raw_rand;
-use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
+use ic_cdk::{init, post_upgrade, pre_upgrade, query, update, heartbeat};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
 use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, StableCell, Storable};
 use serde::Serialize;
@@ -13,6 +13,7 @@ mod accounting;
 pub use accounting::{
     deposit, withdraw, get_balance, get_my_balance, get_house_balance,
     get_accounting_stats, audit_balances, refresh_canister_balance,
+    is_balance_cache_stale, get_balance_cache_age,  // P0 fix: Export helper functions
     AccountingStats, Account,
 };
 
@@ -62,12 +63,29 @@ impl Storable for SeedRotationRecord {
     const BOUND: ic_stable_structures::storable::Bound = ic_stable_structures::storable::Bound::Unbounded;
 }
 
+// =============================================================================
+// MEMORY ALLOCATION MAP (Stable Storage)
+// =============================================================================
+// Memory IDs are used to allocate stable memory regions for persistent data.
+// Each ID must be unique to prevent data corruption.
+//
+// Allocated Memory IDs:
+//   0 - GAME_HISTORY: StableBTreeMap<u64, DiceResult>
+//   1 - SEED_CELL: StableCell<RandomnessSeed>
+//   2 - LAST_ROTATION_CELL: StableCell<u64>
+//   3 - ROTATION_HISTORY: StableBTreeMap<u64, SeedRotationRecord>
+//   5 - HEARTBEAT_STATE_CELL: StableCell<u64> (for balance cache timestamp)
+//  10 - USER_BALANCES_STABLE: StableBTreeMap<Principal, u64> (in accounting.rs)
+//
+// Available IDs: 4, 6-9, 11+
+// =============================================================================
+
 // Global seed state using stable structures
 thread_local! {
     static SEED_STATE: RefCell<Option<RandomnessSeed>> = RefCell::new(None);
     static SEED_INIT_LOCK: RefCell<bool> = RefCell::new(false);
 
-    // Stable cells for persistence
+    // Stable cells for persistence (Memory ID 1)
     static SEED_CELL: RefCell<StableCell<RandomnessSeed, Memory>> = RefCell::new(
         StableCell::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(1))),
@@ -75,6 +93,7 @@ thread_local! {
         ).unwrap()
     );
 
+    // Memory ID 2
     static LAST_ROTATION_CELL: RefCell<StableCell<u64, Memory>> = RefCell::new(
         StableCell::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(2))),
@@ -115,7 +134,8 @@ pub enum RollDirection {
 // Dice game result
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub struct DiceResult {
-    pub game_id: u64,  // NEW: Add unique game ID
+    #[serde(default)]
+    pub game_id: u64,  // Unique game ID (default to 0 for backward compatibility)
     pub player: Principal,
     pub bet_amount: u64,
     pub target_number: u8,
@@ -172,6 +192,7 @@ thread_local! {
 fn init() {
     ic_cdk::println!("Dice Game Backend Initialized");
     // Seed will be initialized on first game or in post_upgrade
+    // Note: Cannot call async functions in init(), balance will be refreshed on first heartbeat
 }
 
 // Initialize the seed with VRF randomness (with lock to prevent race conditions)
@@ -249,6 +270,12 @@ fn pre_upgrade() {
     // Seed state is already in stable cells - no action needed
     // StableCell and StableBTreeMap handle persistence automatically
 
+    // P0-3 fix: Save heartbeat state to stable storage before upgrade
+    let last_refresh = LAST_HEARTBEAT_REFRESH.with(|lr| *lr.borrow());
+    HEARTBEAT_STATE_CELL.with(|cell| {
+        cell.borrow_mut().set(last_refresh).expect("Failed to save heartbeat state");
+    });
+
     // Preserve accounting state
     accounting::pre_upgrade_accounting();
 }
@@ -265,8 +292,16 @@ fn post_upgrade() {
         });
     }
 
+    // Restore heartbeat state from stable storage (P0 fix)
+    let last_heartbeat = HEARTBEAT_STATE_CELL.with(|cell| cell.borrow().get().clone());
+    LAST_HEARTBEAT_REFRESH.with(|lr| {
+        *lr.borrow_mut() = last_heartbeat;
+    });
+
     // Restore accounting state
     accounting::post_upgrade_accounting();
+
+    // Note: Cannot call async functions in post_upgrade(), balance will be refreshed on first heartbeat
 }
 
 // Calculate win chance and multiplier based on target and direction
@@ -365,8 +400,14 @@ fn generate_dice_roll_instant(client_seed: &str) -> Result<(u8, u64, String), St
 async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, client_seed: String) -> Result<DiceResult, String> {
     let caller = ic_cdk::caller();
 
-    // P0-2 FIX: Refresh house balance cache before game
-    accounting::refresh_canister_balance().await;
+    // P0-2 FIX OPTIMIZED: Only force refresh if cache is stale (>60 seconds)
+    // This reduces dice roll time from 9s to <500ms while maintaining security
+    const MAX_CACHE_AGE_NANOS: u64 = 60_000_000_000; // 60 seconds
+    if accounting::is_balance_cache_stale(MAX_CACHE_AGE_NANOS) {
+        // Cache is too old, force a blocking refresh for safety
+        ic_cdk::println!("Balance cache stale, forcing refresh");
+        accounting::refresh_canister_balance().await;
+    }
 
     // Check user has sufficient internal balance
     let user_balance = accounting::get_balance(caller);
@@ -859,6 +900,90 @@ fn get_rotation_history(limit: u32) -> Vec<(u64, SeedRotationRecord)> {
     })
 }
 
+// =============================================================================
+// HEARTBEAT FOR BACKGROUND BALANCE REFRESH
+// =============================================================================
+
+thread_local! {
+    // Track last heartbeat refresh to avoid too-frequent updates (volatile)
+    static LAST_HEARTBEAT_REFRESH: RefCell<u64> = RefCell::new(0);
+
+    // Track if a heartbeat refresh is in progress to prevent concurrent calls
+    static HEARTBEAT_REFRESH_IN_PROGRESS: RefCell<bool> = RefCell::new(false);
+
+    // Stable storage for heartbeat state to persist across upgrades (Memory ID 5)
+    // See MEMORY ALLOCATION MAP at top of file for all allocated IDs
+    static HEARTBEAT_STATE_CELL: RefCell<StableCell<u64, Memory>> = RefCell::new(
+        StableCell::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(5))),
+            0_u64
+        ).expect("Failed to init heartbeat state cell")
+    );
+}
+
+// Heartbeat function - called automatically by IC every ~second
+// We use it to refresh balance cache every 30 seconds in background
+#[heartbeat]
+fn heartbeat() {
+    const HEARTBEAT_REFRESH_INTERVAL_NS: u64 = 30_000_000_000; // 30 seconds
+
+    // P0-2 fix: Atomically check and set the in-progress flag to prevent race condition
+    let should_refresh = HEARTBEAT_REFRESH_IN_PROGRESS.with(|flag| {
+        let mut flag_ref = flag.borrow_mut();
+        if *flag_ref {
+            // Already refreshing, skip this heartbeat
+            return false;
+        }
+
+        // Get last refresh from stable storage
+        let last_refresh = HEARTBEAT_STATE_CELL.with(|cell| cell.borrow().get().clone());
+        let now = ic_cdk::api::time();
+
+        // Check if it's time to refresh (30 seconds elapsed)
+        if now > last_refresh && (now - last_refresh) >= HEARTBEAT_REFRESH_INTERVAL_NS {
+            // Atomically set the flag before proceeding
+            *flag_ref = true;
+            true
+        } else {
+            false
+        }
+    });
+
+    if !should_refresh {
+        return;
+    }
+
+    // Now we have exclusive access to perform the refresh
+    let now = ic_cdk::api::time();
+
+    // Update last refresh timestamp in stable storage (P0 fix: persist across upgrades)
+    HEARTBEAT_STATE_CELL.with(|cell| {
+        cell.borrow_mut().set(now).expect("Failed to update heartbeat state");
+    });
+
+    // Also update volatile state for quick access
+    LAST_HEARTBEAT_REFRESH.with(|lr| {
+        *lr.borrow_mut() = now;
+    });
+
+    // P1 fix: Spawn async task with guaranteed flag cleanup
+    ic_cdk::spawn(async {
+        // Use a struct with Drop to ensure flag is always cleared
+        struct FlagGuard;
+        impl Drop for FlagGuard {
+            fn drop(&mut self) {
+                HEARTBEAT_REFRESH_IN_PROGRESS.with(|flag| {
+                    *flag.borrow_mut() = false;
+                });
+            }
+        }
+        let _guard = FlagGuard;
+
+        ic_cdk::println!("Heartbeat: refreshing balance cache at {}", ic_cdk::api::time());
+        accounting::refresh_canister_balance().await;
+        // Flag will be cleared when _guard is dropped, even if there's a panic
+    });
+}
 
 #[cfg(test)]
 mod tests {

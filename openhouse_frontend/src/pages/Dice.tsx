@@ -151,10 +151,28 @@ export const Dice: React.FC = () => {
     loadHistory();
   }, [actor]); // Only depend on actor, not gameState to avoid loops
 
-  // Load initial balances on mount
+  // Load initial balances on mount and set up periodic refresh
   useEffect(() => {
     if (actor) {
+      // Pre-fetch balances immediately on mount
       refreshBalance().catch(console.error);
+
+      // Set up periodic refresh every 30 seconds
+      const intervalId = setInterval(() => {
+        refreshBalance().catch(console.error);
+      }, 30000);
+
+      // Refresh when tab regains focus
+      const handleFocus = () => {
+        refreshBalance().catch(console.error);
+      };
+      window.addEventListener('focus', handleFocus);
+
+      // Cleanup
+      return () => {
+        clearInterval(intervalId);
+        window.removeEventListener('focus', handleFocus);
+      };
     }
   }, [actor]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -216,8 +234,8 @@ export const Dice: React.FC = () => {
         const csv = await actor.export_history_csv(100);
         setCsvExport(csv);
 
-        // Refresh balance after game completes
-        await refreshBalance();
+        // P1 fix: Refresh balance after game completes (non-blocking to avoid UI delay)
+        refreshBalance().catch(console.error);
       } else {
         gameState.setGameError(result.Err);
         gameState.setIsPlaying(false);
