@@ -1,3 +1,12 @@
+// ============================================================
+// ⚠️ DEMO MODE - NO REAL ICP TRANSFERS ⚠️
+// ============================================================
+// This canister is in DEMO MODE for testing game mechanics.
+// ICP transfers are SIMULATED - no real funds are transferred.
+// Bankroll tracking is for DEMONSTRATION purposes only.
+// DO NOT use with real funds until ledger integration is complete.
+// ============================================================
+
 use candid::{CandidType, Deserialize, Principal};
 use ic_cdk::api::management_canister::main::raw_rand;
 use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
@@ -119,12 +128,14 @@ pub struct GameStats {
     pub total_busted: u64,
 }
 
+// DEMO MODE: Bankroll tracking for demonstration only
+// These values do NOT represent real ICP balances
 #[derive(CandidType, Deserialize, Serialize, Clone, Default)]
 pub struct Bankroll {
-    pub total_wagered: u64,
-    pub total_paid_out: u64,
-    pub house_profit: i64, // Can be negative
-    pub balance: u64, // Canister ICP balance
+    pub total_wagered: u64,      // DEMO: Simulated total bets
+    pub total_paid_out: u64,     // DEMO: Simulated total payouts
+    pub house_profit: i64,       // DEMO: Simulated profit (can be negative)
+    pub balance: u64,            // DEMO: Simulated balance (NOT real ICP)
 }
 
 #[derive(CandidType, Deserialize)]
@@ -295,27 +306,39 @@ async fn generate_mines(num_mines: u8) -> Result<[bool; GRID_SIZE], String> {
     Ok(mines)
 }
 
-// Transfer ICP from player to canister
-async fn transfer_from_player(_player: Principal, _amount: u64) -> Result<(), String> {
-    // NOTE: ICP transfer functionality not implemented in this version
-    // In production, this would use the ICP ledger canister
-    // For now, we'll simulate successful transfers
-    // TODO: Implement actual ICP ledger transfers
+// ============ DEMO MODE - NO REAL ICP TRANSFERS ============
+// WARNING: These functions DO NOT perform actual ICP transfers!
+// This is a DEMO implementation for testing game mechanics only.
+// DO NOT use with real funds until ledger integration is complete.
+// ============================================================
+
+// Transfer ICP from player to canister (DEMO MODE - ALWAYS SUCCEEDS)
+async fn transfer_from_player(_player: Principal, amount: u64) -> Result<(), String> {
+    ic_cdk::println!("⚠️ DEMO MODE: Simulating transfer of {} e8s from player", amount);
+    ic_cdk::println!("⚠️ WARNING: No actual ICP transfer occurred!");
+    // In production, this should call the ICP ledger canister
+    // TODO: Implement actual ledger transfer before production use
     Ok(())
 }
 
-// Transfer ICP from canister to player
-async fn transfer_to_player(_player: Principal, _amount: u64) -> Result<(), String> {
-    // NOTE: ICP transfer functionality not implemented in this version
-    // In production, this would use the ICP ledger canister
-    // For now, we'll simulate successful transfers
-    // TODO: Implement actual ICP ledger transfers
+// Transfer ICP from canister to player (DEMO MODE - ALWAYS SUCCEEDS)
+async fn transfer_to_player(_player: Principal, amount: u64) -> Result<(), String> {
+    ic_cdk::println!("⚠️ DEMO MODE: Simulating payout of {} e8s to player", amount);
+    ic_cdk::println!("⚠️ WARNING: No actual ICP transfer occurred!");
+    // In production, this should call the ICP ledger canister
+    // TODO: Implement actual ledger transfer before production use
     Ok(())
 }
 
 #[init]
 fn init() {
-    ic_cdk::println!("Mines Game Backend Initialized");
+    ic_cdk::println!("================================================");
+    ic_cdk::println!("⚠️  MINES GAME BACKEND - DEMO MODE  ⚠️");
+    ic_cdk::println!("================================================");
+    ic_cdk::println!("WARNING: ICP transfers are SIMULATED");
+    ic_cdk::println!("This is for TESTING game mechanics only");
+    ic_cdk::println!("DO NOT use with real funds!");
+    ic_cdk::println!("================================================");
 }
 
 #[pre_upgrade]

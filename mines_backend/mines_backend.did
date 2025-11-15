@@ -4,11 +4,12 @@ type GameStats = record {
   total_busted: nat64;
 };
 
+// ⚠️ DEMO MODE: These values are SIMULATED, not real ICP balances
 type Bankroll = record {
-  total_wagered: nat64;
-  total_paid_out: nat64;
-  house_profit: int64;
-  balance: nat64;
+  total_wagered: nat64;    // DEMO: Simulated total bets
+  total_paid_out: nat64;   // DEMO: Simulated total payouts
+  house_profit: int64;     // DEMO: Simulated profit
+  balance: nat64;          // DEMO: Simulated balance (NOT real ICP)
 };
 
 type RevealResult = record {
@@ -31,14 +32,20 @@ type GameSummary = record {
   timestamp: nat64;
 };
 
+// ============================================================
+// ⚠️ DEMO MODE - NO REAL ICP TRANSFERS ⚠️
+// All ICP amounts are SIMULATED for testing only
+// DO NOT use with real funds until ledger integration is complete
+// ============================================================
+
 service : {
-  // Start a new mines game (now takes bet_amount in e8s)
+  // ⚠️ DEMO: Start a new mines game (bet_amount in e8s - SIMULATED)
   start_game: (nat64) -> (variant { Ok: nat64; Err: text });
 
   // Reveal a tile (position 0-24)
   reveal_tile: (nat64, nat8) -> (variant { Ok: RevealResult; Err: text });
 
-  // Cash out and get ICP payout (returns amount in e8s)
+  // ⚠️ DEMO: Cash out and get payout (returns SIMULATED amount in e8s)
   cash_out: (nat64) -> (variant { Ok: nat64; Err: text });
 
   // Query game state (without revealing mines)

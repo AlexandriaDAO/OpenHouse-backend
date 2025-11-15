@@ -143,10 +143,25 @@ export const Mines: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* DEMO MODE Warning Banner */}
+      <div className="card max-w-4xl mx-auto bg-red-900/30 border-2 border-red-500">
+        <div className="flex items-center gap-3">
+          <span className="text-3xl">⚠️</span>
+          <div className="flex-1">
+            <h3 className="font-bold text-red-400 text-lg mb-1">DEMO MODE - NO REAL ICP TRANSFERS</h3>
+            <p className="text-sm text-red-300">
+              This is a demonstration version for testing game mechanics only.
+              All ICP transfers are SIMULATED. Balances shown are fictional.
+              <strong className="text-red-200"> DO NOT use with real funds!</strong>
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Game Header */}
       <div className="text-center">
         <div className="text-6xl mb-4">💣</div>
-        <h1 className="text-4xl font-bold mb-2">Mines Game</h1>
+        <h1 className="text-4xl font-bold mb-2">Mines Game <span className="text-sm text-red-400">(DEMO)</span></h1>
         <p className="text-gray-400">Navigate the minefield to increase your multiplier!</p>
       </div>
 
@@ -302,7 +317,7 @@ export const Mines: React.FC = () => {
 
       {/* Game Info */}
       <div className="card max-w-2xl mx-auto">
-        <h3 className="font-bold mb-4">Game Information</h3>
+        <h3 className="font-bold mb-4">Game Information <span className="text-xs text-red-400">(DEMO VALUES)</span></h3>
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
             <span className="text-gray-400">Min Bet:</span>
