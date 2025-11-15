@@ -63,12 +63,29 @@ impl Storable for SeedRotationRecord {
     const BOUND: ic_stable_structures::storable::Bound = ic_stable_structures::storable::Bound::Unbounded;
 }
 
+// =============================================================================
+// MEMORY ALLOCATION MAP (Stable Storage)
+// =============================================================================
+// Memory IDs are used to allocate stable memory regions for persistent data.
+// Each ID must be unique to prevent data corruption.
+//
+// Allocated Memory IDs:
+//   0 - GAME_HISTORY: StableBTreeMap<u64, DiceResult>
+//   1 - SEED_CELL: StableCell<RandomnessSeed>
+//   2 - LAST_ROTATION_CELL: StableCell<u64>
+//   3 - ROTATION_HISTORY: StableBTreeMap<u64, SeedRotationRecord>
+//   5 - HEARTBEAT_STATE_CELL: StableCell<u64> (for balance cache timestamp)
+//  10 - USER_BALANCES_STABLE: StableBTreeMap<Principal, u64> (in accounting.rs)
+//
+// Available IDs: 4, 6-9, 11+
+// =============================================================================
+
 // Global seed state using stable structures
 thread_local! {
     static SEED_STATE: RefCell<Option<RandomnessSeed>> = RefCell::new(None);
     static SEED_INIT_LOCK: RefCell<bool> = RefCell::new(false);
 
-    // Stable cells for persistence
+    // Stable cells for persistence (Memory ID 1)
     static SEED_CELL: RefCell<StableCell<RandomnessSeed, Memory>> = RefCell::new(
         StableCell::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(1))),
@@ -76,6 +93,7 @@ thread_local! {
         ).unwrap()
     );
 
+    // Memory ID 2
     static LAST_ROTATION_CELL: RefCell<StableCell<u64, Memory>> = RefCell::new(
         StableCell::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(2))),
@@ -893,7 +911,8 @@ thread_local! {
     // Track if a heartbeat refresh is in progress to prevent concurrent calls
     static HEARTBEAT_REFRESH_IN_PROGRESS: RefCell<bool> = RefCell::new(false);
 
-    // Stable storage for heartbeat state to persist across upgrades
+    // Stable storage for heartbeat state to persist across upgrades (Memory ID 5)
+    // See MEMORY ALLOCATION MAP at top of file for all allocated IDs
     static HEARTBEAT_STATE_CELL: RefCell<StableCell<u64, Memory>> = RefCell::new(
         StableCell::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(5))),
