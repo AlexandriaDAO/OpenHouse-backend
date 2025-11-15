@@ -4,6 +4,13 @@ type GameStats = record {
   total_busted: nat64;
 };
 
+type Bankroll = record {
+  total_wagered: nat64;
+  total_paid_out: nat64;
+  house_profit: int64;
+  balance: nat64;
+};
+
 type RevealResult = record {
   busted: bool;
   multiplier: float64;
@@ -25,20 +32,26 @@ type GameSummary = record {
 };
 
 service : {
-  // Start a new mines game
-  start_game: (nat8) -> (variant { Ok: nat64; Err: text });
+  // Start a new mines game (now takes bet_amount in e8s)
+  start_game: (nat64) -> (variant { Ok: nat64; Err: text });
 
   // Reveal a tile (position 0-24)
   reveal_tile: (nat64, nat8) -> (variant { Ok: RevealResult; Err: text });
 
-  // Cash out and get final score
-  cash_out: (nat64) -> (variant { Ok: float64; Err: text });
+  // Cash out and get ICP payout (returns amount in e8s)
+  cash_out: (nat64) -> (variant { Ok: nat64; Err: text });
 
   // Query game state (without revealing mines)
   get_game: (nat64) -> (variant { Ok: GameInfo; Err: text }) query;
 
   // Query statistics
   get_stats: () -> (GameStats) query;
+
+  // Query bankroll
+  get_bankroll: () -> (Bankroll) query;
+
+  // Deposit to bankroll (amount in e8s)
+  deposit_to_bankroll: (nat64) -> (variant { Ok; Err: text });
 
   // Get recent games for caller
   get_recent_games: (nat32) -> (vec GameSummary) query;

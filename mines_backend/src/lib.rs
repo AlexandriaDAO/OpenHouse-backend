@@ -3,6 +3,10 @@ use ic_cdk::api::management_canister::main::raw_rand;
 use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
 use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, StableCell, Storable};
+use ic_ledger_types::{
+    AccountIdentifier, Memo, Tokens, TransferArgs,
+    DEFAULT_SUBACCOUNT, MAINNET_LEDGER_CANISTER_ID, TransferResult,
+};
 use serde::Serialize;
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -11,20 +15,28 @@ type Memory = VirtualMemory<DefaultMemoryImpl>;
 
 // Constants
 const GRID_SIZE: usize = 25; // 5x5
-const HOUSE_EDGE: f64 = 0.97; // 3% house edge
+const FIXED_MINES: u8 = 5; // Fixed 5 mines
+const HOUSE_EDGE: f64 = 0.99; // 1% house edge
+const MIN_BET: u64 = 10_000_000; // 0.1 ICP
+const MAX_BET: u64 = 100_000_000; // 1 ICP
+const MAX_WIN: u64 = 1_000_000_000; // 10 ICP
 const MIN_TILES_FOR_CASHOUT: usize = 1; // Must reveal at least 1 tile
 const MAX_ACTIVE_GAMES_PER_PLAYER: usize = 5; // DoS protection
+const MAX_MULTIPLIER: f64 = 10.0; // Cap at 10x
+const ICP_FEE: u64 = 10_000; // 0.0001 ICP transaction fee
 
 // ============ CORE GAME LOGIC ============
 
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub struct MinesGame {
     pub player: Principal,
+    pub bet_amount: u64, // Bet amount in e8s
     pub mines: [bool; GRID_SIZE], // true = mine, false = safe
     pub revealed: [bool; GRID_SIZE], // true = revealed
     pub num_mines: u8,
     pub is_active: bool,
     pub timestamp: u64,
+    pub payout_sent: bool, // Track if payout already sent
 }
 
 impl MinesGame {
@@ -35,7 +47,7 @@ impl MinesGame {
             return 1.0;
         }
 
-        let safe_tiles = (GRID_SIZE - self.num_mines as usize) as f64;
+        let safe_tiles = (GRID_SIZE - FIXED_MINES as usize) as f64;
         let mut multiplier = 1.0;
 
         for i in 0..revealed_count {
@@ -44,7 +56,13 @@ impl MinesGame {
             multiplier *= remaining_total / remaining_safe;
         }
 
-        multiplier * HOUSE_EDGE
+        // Apply 1% house edge and cap at 10x
+        let final_multiplier = multiplier * HOUSE_EDGE;
+        if final_multiplier > MAX_MULTIPLIER {
+            MAX_MULTIPLIER
+        } else {
+            final_multiplier
+        }
     }
 
     // Reveal a tile - returns (busted, new_multiplier)
@@ -101,6 +119,14 @@ pub struct GameStats {
     pub total_busted: u64,
 }
 
+#[derive(CandidType, Deserialize, Serialize, Clone, Default)]
+pub struct Bankroll {
+    pub total_wagered: u64,
+    pub total_paid_out: u64,
+    pub house_profit: i64, // Can be negative
+    pub balance: u64, // Canister ICP balance
+}
+
 #[derive(CandidType, Deserialize)]
 pub struct RevealResult {
     pub busted: bool,
@@ -138,6 +164,22 @@ impl Storable for MinesGame {
 }
 
 impl Storable for GameStats {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(serde_json::to_vec(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    const BOUND: ic_stable_structures::storable::Bound =
+        ic_stable_structures::storable::Bound::Bounded {
+            max_size: 128,
+            is_fixed_size: false,
+        };
+}
+
+impl Storable for Bankroll {
     fn to_bytes(&self) -> Cow<[u8]> {
         Cow::Owned(serde_json::to_vec(self).unwrap())
     }
@@ -195,6 +237,13 @@ thread_local! {
             GameId(0)
         ).expect("Failed to initialize NEXT_ID")
     );
+
+    static BANKROLL: RefCell<StableCell<Bankroll, Memory>> = RefCell::new(
+        StableCell::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(3))),
+            Bankroll::default()
+        ).expect("Failed to initialize BANKROLL")
+    );
 }
 
 // Generate random mines using IC VRF with unbiased Fisher-Yates shuffle
@@ -246,6 +295,24 @@ async fn generate_mines(num_mines: u8) -> Result<[bool; GRID_SIZE], String> {
     Ok(mines)
 }
 
+// Transfer ICP from player to canister
+async fn transfer_from_player(_player: Principal, _amount: u64) -> Result<(), String> {
+    // NOTE: ICP transfer functionality not implemented in this version
+    // In production, this would use the ICP ledger canister
+    // For now, we'll simulate successful transfers
+    // TODO: Implement actual ICP ledger transfers
+    Ok(())
+}
+
+// Transfer ICP from canister to player
+async fn transfer_to_player(_player: Principal, _amount: u64) -> Result<(), String> {
+    // NOTE: ICP transfer functionality not implemented in this version
+    // In production, this would use the ICP ledger canister
+    // For now, we'll simulate successful transfers
+    // TODO: Implement actual ICP ledger transfers
+    Ok(())
+}
+
 #[init]
 fn init() {
     ic_cdk::println!("Mines Game Backend Initialized");
@@ -263,9 +330,19 @@ fn post_upgrade() {
 
 // Start new game
 #[update]
-async fn start_game(num_mines: u8) -> Result<u64, String> {
-    if num_mines < 1 || num_mines > 24 {
-        return Err("Mines must be between 1 and 24".to_string());
+async fn start_game(bet_amount: u64) -> Result<u64, String> {
+    // Validate bet amount
+    if bet_amount < MIN_BET {
+        return Err(format!(
+            "Minimum bet is {} ICP",
+            MIN_BET as f64 / 100_000_000.0
+        ));
+    }
+    if bet_amount > MAX_BET {
+        return Err(format!(
+            "Maximum bet is {} ICP",
+            MAX_BET as f64 / 100_000_000.0
+        ));
     }
 
     let caller = ic_cdk::caller();
@@ -286,15 +363,29 @@ async fn start_game(num_mines: u8) -> Result<u64, String> {
         ));
     }
 
-    let mines = generate_mines(num_mines).await?;
+    // Check bankroll can cover max payout
+    let max_payout = (bet_amount as f64 * MAX_MULTIPLIER) as u64;
+    let canister_balance = ic_cdk::api::canister_balance128() as u64;
+
+    if canister_balance < max_payout {
+        return Err("Insufficient house bankroll".to_string());
+    }
+
+    // Transfer ICP from player to canister
+    transfer_from_player(caller, bet_amount).await?;
+
+    // Generate mines (fixed 5 mines)
+    let mines = generate_mines(FIXED_MINES).await?;
 
     let game = MinesGame {
         player: caller,
+        bet_amount,
         mines,
         revealed: [false; GRID_SIZE],
-        num_mines,
+        num_mines: FIXED_MINES,
         is_active: true,
         timestamp: ic_cdk::api::time(),
+        payout_sent: false,
     };
 
     let game_id = NEXT_ID.with(|id| {
@@ -307,6 +398,15 @@ async fn start_game(num_mines: u8) -> Result<u64, String> {
     });
 
     GAMES.with(|games| games.borrow_mut().insert(game_id, game));
+
+    // Update bankroll
+    BANKROLL.with(|bankroll| {
+        let mut br = bankroll.borrow_mut();
+        let mut current = br.get().clone();
+        current.total_wagered += bet_amount;
+        current.balance += bet_amount;
+        br.set(current).expect("Failed to update bankroll");
+    });
 
     STATS.with(|stats| {
         let mut stats_cell = stats.borrow_mut();
@@ -323,7 +423,7 @@ async fn start_game(num_mines: u8) -> Result<u64, String> {
 // Reveal a tile
 #[update]
 fn reveal_tile(game_id: u64, position: u8) -> Result<RevealResult, String> {
-    GAMES.with(|games| {
+    let (busted, bet_amount) = GAMES.with(|games| {
         let mut games = games.borrow_mut();
         let mut game = games.get(&game_id).ok_or("Game not found")?;
 
@@ -331,50 +431,120 @@ fn reveal_tile(game_id: u64, position: u8) -> Result<RevealResult, String> {
             return Err("Not your game".to_string());
         }
 
-        let (busted, multiplier) = game.reveal_tile(position)?;
-
-        if busted {
-            STATS.with(|stats| {
-                let mut stats_cell = stats.borrow_mut();
-                let mut current_stats = stats_cell.get().clone();
-                current_stats.total_busted += 1;
-                stats_cell
-                    .set(current_stats)
-                    .expect("Failed to update stats");
-            });
-        }
+        let (busted, _multiplier) = game.reveal_tile(position)?;
+        let bet_amount = game.bet_amount;
 
         games.insert(game_id, game);
+        Ok((busted, bet_amount))
+    })?;
 
-        Ok(RevealResult { busted, multiplier })
-    })
-}
-
-// Cash out
-#[update]
-fn cash_out(game_id: u64) -> Result<f64, String> {
-    GAMES.with(|games| {
-        let mut games = games.borrow_mut();
-        let mut game = games.get(&game_id).ok_or("Game not found")?;
-
-        if game.player != ic_cdk::caller() {
-            return Err("Not your game".to_string());
-        }
-
-        let score = game.cash_out()?;
-
+    if busted {
+        // Update stats for bust
         STATS.with(|stats| {
             let mut stats_cell = stats.borrow_mut();
             let mut current_stats = stats_cell.get().clone();
-            current_stats.total_completed += 1;
+            current_stats.total_busted += 1;
             stats_cell
                 .set(current_stats)
                 .expect("Failed to update stats");
         });
 
+        // Update bankroll (house keeps the bet)
+        BANKROLL.with(|bankroll| {
+            let mut br = bankroll.borrow_mut();
+            let mut current = br.get().clone();
+            current.house_profit += bet_amount as i64;
+            br.set(current).expect("Failed to update bankroll");
+        });
+
+        Ok(RevealResult {
+            busted: true,
+            multiplier: 0.0,
+        })
+    } else {
+        let multiplier = GAMES.with(|games| {
+            games
+                .borrow()
+                .get(&game_id)
+                .unwrap()
+                .calculate_multiplier()
+        });
+
+        Ok(RevealResult {
+            busted: false,
+            multiplier,
+        })
+    }
+}
+
+// Cash out
+#[update]
+async fn cash_out(game_id: u64) -> Result<u64, String> {
+    let (player, bet_amount, multiplier) = GAMES.with(|games| {
+        let mut games = games.borrow_mut();
+        let mut game = games.get(&game_id).ok_or("Game not found")?;
+
+        if game.player != ic_cdk::caller() {
+            return Err("Not your game".to_string());
+        }
+
+        if game.payout_sent {
+            return Err("Payout already sent".to_string());
+        }
+
+        let revealed_count = game.revealed.iter().filter(|&&r| r).count();
+        if revealed_count < MIN_TILES_FOR_CASHOUT {
+            return Err(format!(
+                "Must reveal at least {} tile(s) before cashing out",
+                MIN_TILES_FOR_CASHOUT
+            ));
+        }
+
+        if !game.is_active {
+            return Err("Game is not active".to_string());
+        }
+
+        let multiplier = game.calculate_multiplier();
+        game.is_active = false;
+        game.payout_sent = true;
+
+        let player = game.player;
+        let bet_amount = game.bet_amount;
+
         games.insert(game_id, game);
-        Ok(score)
-    })
+        Ok((player, bet_amount, multiplier))
+    })?;
+
+    // Calculate payout
+    let payout = (bet_amount as f64 * multiplier) as u64;
+    let capped_payout = if payout > MAX_WIN { MAX_WIN } else { payout };
+
+    // Send ICP to player
+    if capped_payout > ICP_FEE {
+        transfer_to_player(player, capped_payout).await?;
+    }
+
+    // Update stats and bankroll
+    STATS.with(|stats| {
+        let mut stats_cell = stats.borrow_mut();
+        let mut current_stats = stats_cell.get().clone();
+        current_stats.total_completed += 1;
+        stats_cell
+            .set(current_stats)
+            .expect("Failed to update stats");
+    });
+
+    BANKROLL.with(|bankroll| {
+        let mut br = bankroll.borrow_mut();
+        let mut current = br.get().clone();
+        current.total_paid_out += capped_payout;
+        current.balance = current.balance.saturating_sub(capped_payout);
+        current.house_profit =
+            (current.total_wagered as i64) - (current.total_paid_out as i64);
+        br.set(current).expect("Failed to update bankroll");
+    });
+
+    Ok(capped_payout)
 }
 
 // Query game state (without revealing mines)
@@ -424,6 +594,30 @@ fn get_recent_games(limit: u32) -> Vec<GameSummary> {
 #[query]
 fn greet(name: String) -> String {
     format!("Welcome to OpenHouse Mines, {}!", name)
+}
+
+// Get bankroll statistics
+#[query]
+fn get_bankroll() -> Bankroll {
+    BANKROLL.with(|br| br.borrow().get().clone())
+}
+
+// Deposit to bankroll (admin/seed function)
+#[update]
+async fn deposit_to_bankroll(amount: u64) -> Result<(), String> {
+    let caller = ic_cdk::caller();
+
+    // Transfer ICP from caller to canister
+    transfer_from_player(caller, amount).await?;
+
+    BANKROLL.with(|bankroll| {
+        let mut br = bankroll.borrow_mut();
+        let mut current = br.get().clone();
+        current.balance += amount;
+        br.set(current).expect("Failed to update bankroll");
+    });
+
+    Ok(())
 }
 
 // ============ UNIT TESTS ============
