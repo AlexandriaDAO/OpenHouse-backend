@@ -33,7 +33,7 @@ export const GameLayout: React.FC<GameLayoutProps> = ({
 
       {/* Game Info Footer */}
       <div className="text-center text-xs text-gray-500 mt-6">
-        Min: {minBet} ICP • Max Win: {maxWin}x • House Edge: {houseEdge}%
+        Min: {minBet} ICP • Max Win: {maxWin}{title === 'Dice' ? ' ICP' : 'x'} • House Edge: {houseEdge}%
       </div>
     </div>
   );

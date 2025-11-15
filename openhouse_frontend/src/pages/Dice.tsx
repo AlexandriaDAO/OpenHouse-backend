@@ -27,6 +27,7 @@ interface DiceGameResult {
   multiplier: number;
   payout: bigint;
   is_win: boolean;
+  is_house_hit?: boolean;  // Tracks when roll == target (exact hit = house wins) - optional for backward compatibility
   timestamp: bigint;
   clientId?: string;
 }
@@ -274,10 +275,10 @@ export const Dice: React.FC = () => {
     <GameLayout
       title="Dice"
       icon="🎲"
-      description="Roll the dice and predict over or under!"
-      minBet={1}
-      maxWin={100}
-      houseEdge={3}
+      description="Roll 0-100, predict over or under. Exact hit = house wins!"
+      minBet={0.01}
+      maxWin={10}
+      houseEdge={0.99}
     >
       {/* ACCOUNTING PANEL */}
       <DiceAccountingPanel
@@ -307,6 +308,14 @@ export const Dice: React.FC = () => {
         />
 
         <GameStats stats={stats} />
+
+        {/* Help text explaining simplified odds */}
+        <div className="text-xs text-gray-400 text-center mt-2 p-2 bg-gray-800/50 rounded">
+          💡 <strong>How it works:</strong> Choose a target number and direction.
+          If you roll exactly on the target, the house wins (0.99% edge).
+          Otherwise, standard over/under rules apply.
+          Clean multiplier: {multiplier.toFixed(2)}x = 100 ÷ {direction === 'Over' ? (100 - targetNumber) : targetNumber} winning numbers.
+        </div>
 
         <GameButton
           onClick={rollDice}
@@ -340,11 +349,27 @@ export const Dice: React.FC = () => {
             <div className="text-3xl font-bold mb-2">
               {gameState.lastResult.is_win ? '🎉 WIN!' : '😢 LOSE'}
             </div>
-            {gameState.lastResult.is_win && (
-              <div className="text-xl">
-                +{(Number(gameState.lastResult.payout) / 100_000_000).toFixed(2)} ICP
+
+            {/* Show exact hit message */}
+            {!gameState.lastResult.is_win && gameState.lastResult.is_house_hit && (
+              <div className="text-lg text-yellow-400 mb-2">
+                🎯 Exact Hit! (House Wins)
               </div>
             )}
+
+            {/* Show payout for wins */}
+            {gameState.lastResult.is_win && (
+              <div className="text-xl">
+                +{(Number(gameState.lastResult.payout) / 100_000_000).toFixed(4)} ICP
+              </div>
+            )}
+
+            {/* Show roll details */}
+            <div className="text-sm text-gray-400 mt-2">
+              Rolled: {gameState.lastResult.rolled_number} |
+              Target: {gameState.lastResult.target_number} |
+              Direction: {'Over' in gameState.lastResult.direction ? 'Over' : 'Under'}
+            </div>
           </div>
         )}
       </div>
