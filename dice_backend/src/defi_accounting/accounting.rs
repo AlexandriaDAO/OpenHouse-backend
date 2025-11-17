@@ -334,19 +334,6 @@ pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
 }
 
 // =============================================================================
-// UPGRADE HOOKS
-// =============================================================================
-
-pub fn pre_upgrade_accounting() {
-    // Nothing needed - StableBTreeMap handles persistence
-}
-
-pub fn post_upgrade_accounting() {
-    // Nothing needed - we calculate totals on-demand now
-    // Note: Cache will be refreshed by first heartbeat (within 1 hour)
-}
-
-// =============================================================================
 // COMPATIBILITY FUNCTION
 // =============================================================================
 
@@ -380,3 +367,4 @@ pub async fn refresh_canister_balance() -> u64 {
         }
     }
 }
+

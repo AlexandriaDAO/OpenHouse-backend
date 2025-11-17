@@ -8,18 +8,17 @@ use std::cell::RefCell;
 // MODULE DECLARATIONS
 // =============================================================================
 
-mod accounting;
+mod defi_accounting;
 pub mod types;
 pub mod seed;
 pub mod game;
 mod analytics;
-mod heartbeat_impl;
 
 // =============================================================================
 // RE-EXPORTS
 // =============================================================================
 
-pub use accounting::{
+pub use defi_accounting::{
     deposit, withdraw, withdraw_all, get_balance, get_my_balance, get_house_balance,
     get_max_allowed_payout, get_accounting_stats, audit_balances, refresh_canister_balance,
     AccountingStats, Account,
@@ -44,21 +43,21 @@ thread_local! {
 #[init]
 fn init() {
     ic_cdk::println!("Dice Game Backend Initialized");
-    heartbeat_impl::init_heartbeat();
+    defi_accounting::init_heartbeat();
 }
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    heartbeat_impl::save_heartbeat_state();
-    accounting::pre_upgrade_accounting();
+    defi_accounting::save_heartbeat_state();
+    // Note: StableBTreeMap persists automatically, no accounting upgrade needed
 }
 
 #[post_upgrade]
 fn post_upgrade() {
     seed::restore_seed_state();
-    heartbeat_impl::restore_heartbeat_state();
-    accounting::post_upgrade_accounting();
-    heartbeat_impl::init_heartbeat();
+    defi_accounting::restore_heartbeat_state();
+    defi_accounting::init_heartbeat();
+    // Note: StableBTreeMap restores automatically, no accounting restore needed
 }
 
 // =============================================================================
@@ -148,5 +147,5 @@ fn greet(name: String) -> String {
 
 #[heartbeat]
 fn heartbeat() {
-    heartbeat_impl::heartbeat();
+    defi_accounting::heartbeat();
 }

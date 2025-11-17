@@ -1,6 +1,6 @@
 use crate::types::{DiceResult, GameStats, RollDirection, E8S_PER_ICP, MIN_BET, MAX_NUMBER};
 use crate::seed::{generate_dice_roll_instant, maybe_schedule_seed_rotation};
-use crate::accounting;
+use crate::defi_accounting as accounting;
 use candid::Principal;
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::StableBTreeMap;
