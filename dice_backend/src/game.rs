@@ -1,6 +1,6 @@
 use crate::types::{DiceResult, GameStats, RollDirection, E8S_PER_ICP, MIN_BET, MAX_NUMBER};
 use crate::seed::{generate_dice_roll_instant, maybe_schedule_seed_rotation};
-use crate::defi_accounting as accounting;
+use crate::defi_accounting::{self as accounting, liquidity_pool};
 use candid::Principal;
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::StableBTreeMap;
@@ -235,13 +235,28 @@ pub async fn play_dice(
     // Update user balance based on game result
     // Bet was already deducted before game logic (P0-3 fix)
     // Now only add winnings if player won
+
+    // After determining outcome
+    let house_mode = accounting::get_house_mode();
+
     if is_win {
         let current_balance = accounting::get_balance(caller);
         let new_balance = current_balance.checked_add(payout)
             .ok_or("Balance overflow when adding winnings")?;
         accounting::update_balance(caller, new_balance)?;
+
+        let profit = payout.saturating_sub(bet_amount);
+
+        // Update pool only if in LP mode
+        if house_mode == "liquidity_pool" {
+            liquidity_pool::update_pool_on_win(profit);
+        }
+    } else {
+        // Player lost
+        if house_mode == "liquidity_pool" {
+            liquidity_pool::update_pool_on_loss(bet_amount);
+        }
     }
-    // If loss, balance was already deducted - nothing more to do
 
     Ok(result)
 }
@@ -293,4 +308,12 @@ pub fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Res
     let win_chance = calculate_win_chance(target_number, &direction);
     let multiplier = calculate_multiplier_direct(target_number, &direction);
     Ok((win_chance, multiplier))
+}
+
+// Get total active bets (for LP withdrawal solvency check)
+// Currently dice game doesn't have pending bets (instant settlement)
+// so we return 0. Future implementations with delayed settlement
+// would track active bets here.
+pub fn get_total_active_bets() -> u64 {
+    0 // Instant settlement - no active bets
 }

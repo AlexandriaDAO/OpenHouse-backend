@@ -5,6 +5,7 @@ use ic_stable_structures::StableBTreeMap;
 use std::cell::RefCell;
 
 use crate::{MEMORY_MANAGER, Memory};
+use super::liquidity_pool;
 
 // Constants
 const ICP_TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP in e8s
@@ -256,18 +257,34 @@ pub fn get_max_allowed_payout() -> u64 {
     (house_balance as f64 * MAX_PAYOUT_PERCENTAGE) as u64
 }
 
-/// Get house balance using cached canister balance
-/// Fast query - no ledger call needed
+// Keep legacy calculation available
+pub fn get_legacy_house_balance() -> u64 {
+    let canister_balance = CACHED_CANISTER_BALANCE.with(|b| *b.borrow());
+    let total_user_deposits = get_total_user_deposits();
+    canister_balance.saturating_sub(total_user_deposits)
+}
+
+// Update main house balance function for dual-mode
 #[query]
 pub fn get_house_balance() -> u64 {
-    // Use cached canister balance (refreshed hourly by heartbeat)
-    let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
-    let total_deposits = calculate_total_deposits();
+    // Check LP pool first
+    if liquidity_pool::is_pool_initialized() {
+        let pool_reserve = liquidity_pool::get_pool_reserve();
+        if pool_reserve > 0 {
+            return pool_reserve;
+        }
+    }
 
-    if canister_balance > total_deposits {
-        canister_balance - total_deposits
+    // Fall back to legacy
+    get_legacy_house_balance()
+}
+
+// Add helper for mode detection
+pub fn get_house_mode() -> String {
+    if liquidity_pool::is_pool_initialized() && liquidity_pool::get_pool_reserve() > 0 {
+        "liquidity_pool".to_string()
     } else {
-        0 // Should never happen unless exploited
+        "legacy".to_string()
     }
 }
 
@@ -365,6 +382,43 @@ pub async fn refresh_canister_balance() -> u64 {
             ic_cdk::println!("⚠️ Failed to refresh balance, using cache: {:?}", e);
             CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow())
         }
+    }
+}
+
+// Public accessors needed by liquidity_pool
+pub fn get_canister_balance() -> u64 {
+    CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow())
+}
+
+pub fn get_total_user_deposits() -> u64 {
+    calculate_total_deposits()
+}
+
+// Keep existing transfer_to_user function for withdrawals
+pub async fn transfer_to_user(recipient: Principal, amount: u64) -> Result<(), String> {
+    // Existing ICRC-1 transfer logic
+    let ledger_canister_id = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
+
+    let transfer_args = TransferArg {
+        from_subaccount: None,
+        to: Account {
+            owner: recipient,
+            subaccount: None,
+        },
+        amount: Nat::from(amount),
+        fee: Some(Nat::from(10_000u64)),
+        memo: None,
+        created_at_time: None,
+    };
+
+    let (result,): (Result<Nat, TransferErrorIcrc>,) =
+        ic_cdk::call(ledger_canister_id, "icrc1_transfer", (transfer_args,))
+        .await
+        .map_err(|e| format!("Transfer call failed: {:?}", e))?;
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Transfer failed: {:?}", e)),
     }
 }
 
