@@ -256,19 +256,12 @@ pub fn get_max_allowed_payout() -> u64 {
     (house_balance as f64 * MAX_PAYOUT_PERCENTAGE) as u64
 }
 
-/// Get house balance using cached canister balance
+/// Get house balance using liquidity pool reserve
 /// Fast query - no ledger call needed
 #[query]
 pub fn get_house_balance() -> u64 {
-    // Use cached canister balance (refreshed hourly by heartbeat)
-    let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
-    let total_deposits = calculate_total_deposits();
-
-    if canister_balance > total_deposits {
-        canister_balance - total_deposits
-    } else {
-        0 // Should never happen unless exploited
-    }
+    // NEW: Use pool reserve directly from liquidity pool
+    super::liquidity_pool::get_pool_reserve()
 }
 
 #[query]
