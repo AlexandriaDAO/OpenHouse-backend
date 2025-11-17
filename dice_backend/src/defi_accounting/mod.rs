@@ -25,7 +25,6 @@
 // - No expensive ledger calls during gameplay
 
 pub mod accounting;
-pub mod heartbeat;
 
 // Re-export the main public interface
 pub use accounting::{
@@ -49,12 +48,23 @@ pub use accounting::{
     AccountingStats,
 };
 
-pub use heartbeat::{
-    init_heartbeat,
-    save_heartbeat_state,
-    restore_heartbeat_state,
-    heartbeat,
-};
+// =============================================================================
+// TIMER INITIALIZATION
+// =============================================================================
+
+use std::time::Duration;
+
+/// Initialize periodic timer for balance cache refresh
+/// Call this in init() and post_upgrade()
+pub fn init_balance_refresh_timer() {
+    // Set timer to fire every hour
+    ic_cdk_timers::set_timer_interval(Duration::from_secs(3600), || {
+        ic_cdk::spawn(async {
+            ic_cdk::println!("DeFi Accounting: refreshing balance cache at {}", ic_cdk::api::time());
+            accounting::refresh_canister_balance().await;
+        });
+    });
+}
 
 // =============================================================================
 // MODULE CONFIGURATION
@@ -81,27 +91,21 @@ pub use heartbeat::{
 //
 // 3. In your init() function:
 //    ```
-//    accounting::init_heartbeat();
+//    accounting::init_balance_refresh_timer();
 //    ```
 //
 // 4. In your pre_upgrade():
 //    ```
-//    accounting::save_heartbeat_state();
+//    // No accounting calls needed - StableBTreeMap persists automatically
 //    ```
 //
 // 5. In your post_upgrade():
 //    ```
-//    accounting::restore_heartbeat_state();
-//    accounting::init_heartbeat();
+//    accounting::init_balance_refresh_timer();
+//    // StableBTreeMap restores automatically
 //    ```
 //
-// 6. Export the heartbeat:
-//    ```
-//    #[heartbeat]
-//    fn heartbeat() {
-//        accounting::heartbeat();
-//    }
-//    ```
+// 6. No heartbeat function needed - timers handle refresh automatically
 //
 // 7. In your game logic, check max bets:
 //    ```

@@ -28,9 +28,8 @@ This module provides complete DeFi functionality for any ICP-based game, handlin
 
 ```
 defi_accounting/
-├── mod.rs           # Public interface and integration guide
+├── mod.rs           # Public interface, integration guide, timer initialization
 ├── accounting.rs    # Core deposit/withdrawal/balance logic
-├── heartbeat.rs     # Hourly cache refresh mechanism
 └── README.md        # This file
 ```
 
@@ -55,29 +54,23 @@ pub use defi_accounting::{
 // In init()
 #[init]
 fn init() {
-    defi_accounting::init_heartbeat();
+    defi_accounting::init_balance_refresh_timer();
 }
 
 // In pre_upgrade()
 #[pre_upgrade]
 fn pre_upgrade() {
-    defi_accounting::save_heartbeat_state();
-    defi_accounting::pre_upgrade_accounting();
+    // StableBTreeMap persists automatically
 }
 
 // In post_upgrade()
 #[post_upgrade]
 fn post_upgrade() {
-    defi_accounting::restore_heartbeat_state();
-    defi_accounting::post_upgrade_accounting();
-    defi_accounting::init_heartbeat();
+    defi_accounting::init_balance_refresh_timer();
+    // StableBTreeMap restores automatically
 }
 
-// Export heartbeat
-#[heartbeat]
-fn heartbeat() {
-    defi_accounting::heartbeat();
-}
+// No heartbeat function needed - timers handle refresh automatically
 ```
 
 ### Step 3: Use in Game Logic

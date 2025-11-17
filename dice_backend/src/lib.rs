@@ -1,5 +1,5 @@
 use candid::{Nat, Principal};
-use ic_cdk::{init, post_upgrade, pre_upgrade, query, update, heartbeat};
+use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
 use ic_stable_structures::memory_manager::{MemoryManager, VirtualMemory};
 use ic_stable_structures::DefaultMemoryImpl;
 use std::cell::RefCell;
@@ -43,20 +43,18 @@ thread_local! {
 #[init]
 fn init() {
     ic_cdk::println!("Dice Game Backend Initialized");
-    defi_accounting::init_heartbeat();
+    defi_accounting::init_balance_refresh_timer();
 }
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    defi_accounting::save_heartbeat_state();
     // Note: StableBTreeMap persists automatically, no accounting upgrade needed
 }
 
 #[post_upgrade]
 fn post_upgrade() {
     seed::restore_seed_state();
-    defi_accounting::restore_heartbeat_state();
-    defi_accounting::init_heartbeat();
+    defi_accounting::init_balance_refresh_timer();
     // Note: StableBTreeMap restores automatically, no accounting restore needed
 }
 
@@ -145,7 +143,3 @@ fn greet(name: String) -> String {
     format!("Welcome to OpenHouse Dice, {}! Roll the dice and test your luck!", name)
 }
 
-#[heartbeat]
-fn heartbeat() {
-    defi_accounting::heartbeat();
-}
