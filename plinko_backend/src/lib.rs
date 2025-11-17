@@ -1,166 +1,148 @@
-//! Plinko Game Logic Canister
+//! Pure Mathematical Plinko - Transparent Formula Casino Game
 //!
-//! **Architecture Philosophy:**
-//! This canister implements ONLY the core Plinko game mechanics:
-//! - Generate random ball path using IC VRF
-//! - Map final position to multiplier based on risk/rows
+//! **Design Philosophy:**
+//! Every multiplier is derived from a single transparent mathematical formula,
+//! not arbitrary values. This ensures complete transparency and verifiability.
 //!
-//! **What this canister does NOT do:**
-//! - ICP betting/transfers (handled by frontend or separate accounting canister)
-//! - Game history storage (can be added as separate layer if needed)
-//! - Player balance management
+//! **The Formula:**
+//! M(k) = 0.2 + 6.32 × ((k - 4) / 4)²
 //!
-//! **Why this separation?**
-//! 1. Reusability: Game logic can be used by multiple betting interfaces
-//! 2. Verifiability: Core randomness algorithm is simple and auditable
-//! 3. Modularity: Betting logic can evolve independently
-//! 4. Cost: Less state = lower storage costs
+//! Where:
+//! - k is the position (0 to 8 for 8 rows)
+//! - 0.2 is the center multiplier (80% loss at most probable position)
+//! - 6.32 is the scaling factor to achieve exactly 0.99 expected value
+//! - The quadratic curve mirrors the binomial probability distribution
 //!
 //! **Transparency & Fairness:**
-//! - Randomness source: IC VRF (raw_rand) with SHA256 fallback
-//! - Multiplier tables are public and fixed (query `get_multipliers`)
-//! - Game logic is deterministic: same path -> same multiplier
-//! - Frontend should log all game results for user verification
+//! - Randomness: IC VRF (raw_rand) - no fallback
+//! - Expected value: Exactly 0.99 (1% house edge)
+//! - All multipliers calculable by players
+//! - No hidden mechanics or arbitrary values
 
 use candid::{CandidType, Deserialize};
-use ic_cdk::{query, update};
+use ic_cdk::{init, pre_upgrade, post_upgrade, query, update};
 use ic_cdk::api::management_canister::main::raw_rand;
-use sha2::{Digest, Sha256};
-
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub enum RiskLevel { Low, Medium, High }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct PlinkoResult {
     pub path: Vec<bool>,        // true = right, false = left
-    pub final_position: u8,     // 0 to rows (number of rights)
+    pub final_position: u8,     // 0 to 8
     pub multiplier: f64,
+    pub win: bool,              // true if multiplier >= 1.0
 }
 
-// Drop a ball down the Plinko board
-// Architecture: This canister provides ONLY game logic (random path + multiplier lookup).
-// Frontend or a separate accounting canister handles betting/ICP transfers.
-// This separation allows the game logic to be reusable and independently verifiable.
-//
-// Performance Note: This uses raw_rand() on every call (~500ms latency).
-// Alternative approach: Dice backend uses seed rotation (faster but more complex state).
-// Tradeoff: Simplicity vs latency. For async games like Plinko, latency is acceptable.
+// Memory management for future upgrades
+#[init]
+fn init() {
+    ic_cdk::println!("Pure Mathematical Plinko initialized");
+}
+
+#[pre_upgrade]
+fn pre_upgrade() {
+    // Currently stateless - ready for future state
+    ic_cdk::println!("Pre-upgrade: No state to preserve");
+}
+
+#[post_upgrade]
+fn post_upgrade() {
+    // Currently stateless - ready for future state
+    ic_cdk::println!("Post-upgrade: No state to restore");
+}
+
+/// Drop a ball down the 8-row Plinko board
+/// Uses pure mathematical formula for multipliers
+/// No parameters - fixed configuration for simplicity
 #[update]
-async fn drop_ball(rows: u8, risk: RiskLevel) -> Result<PlinkoResult, String> {
-    if ![8, 12, 16].contains(&rows) {
-        return Err("Rows must be 8, 12, or 16".to_string());
-    }
+async fn drop_ball() -> Result<PlinkoResult, String> {
+    const ROWS: u8 = 8;
 
-    // Generate random path using IC VRF with secure fallback
-    let random_bytes = match raw_rand().await {
-        Ok((bytes,)) => bytes,
-        Err(_) => {
-            // Secure fallback: Hash timestamp + caller principal
-            // This maintains randomness even if VRF fails
-            let time = ic_cdk::api::time();
-            let caller = ic_cdk::caller();
-            let mut hasher = Sha256::new();
-            hasher.update(time.to_be_bytes());
-            hasher.update(caller.as_slice());
-            hasher.finalize().to_vec()
-        }
-    };
+    // Get randomness - fail safely if unavailable
+    let random_bytes = raw_rand().await
+        .map_err(|e| format!("Randomness unavailable: {:?}", e))?
+        .0;
 
-    // Ensure we have enough entropy: need at least `rows` bits
-    // VRF returns 32 bytes (256 bits), enough for up to 256 rows
-    if random_bytes.len() * 8 < rows as usize {
-        return Err("Insufficient randomness".to_string());
-    }
+    // For 8 rows, use single byte (efficient)
+    let random_byte = random_bytes.get(0)
+        .ok_or("Insufficient randomness")?;
 
-    // Generate path: each row is an independent coin flip
-    // Extract one bit per row to avoid bias from byte reuse
-    let path: Vec<bool> = (0..rows)
-        .map(|i| {
-            let bit_index = i as usize;
-            let byte_index = bit_index / 8;
-            let bit_offset = bit_index % 8;
-            (random_bytes[byte_index] >> bit_offset) & 1 == 1
-        })
+    // Generate path: 8 independent coin flips
+    let path: Vec<bool> = (0..ROWS)
+        .map(|i| (random_byte >> i) & 1 == 1)
         .collect();
 
-    // Final position = count of right moves
+    // Count rights to get final position
     let final_position = path.iter().filter(|&&d| d).count() as u8;
-    let multiplier = get_multiplier(rows, &risk, final_position)?;
 
-    Ok(PlinkoResult { path, final_position, multiplier })
+    // Calculate multiplier using pure formula
+    let multiplier = calculate_multiplier(final_position);
+    let win = multiplier >= 1.0;
+
+    Ok(PlinkoResult {
+        path,
+        final_position,
+        multiplier,
+        win,
+    })
 }
 
-// Get multiplier table for frontend display
+/// Get all multipliers for display
+/// Returns exactly 9 values for positions 0-8
 #[query]
-fn get_multipliers(rows: u8, risk: RiskLevel) -> Vec<f64> {
-    if ![8, 12, 16].contains(&rows) { return vec![]; }
-    (0..=rows)
-        .filter_map(|pos| get_multiplier(rows, &risk, pos).ok())
-        .collect()
+fn get_multipliers() -> Vec<f64> {
+    (0..=8).map(calculate_multiplier).collect()
 }
 
-fn get_multiplier(rows: u8, risk: &RiskLevel, pos: u8) -> Result<f64, String> {
-    // Validate position is within bounds
-    if pos > rows {
-        return Err(format!("Invalid position {} for {} rows", pos, rows));
+/// Get the mathematical formula as a string
+/// Allows frontend to display the formula
+#[query]
+fn get_formula() -> String {
+    "M(k) = 0.2 + 6.32 × ((k - 4) / 4)²".to_string()
+}
+
+/// Get expected value for transparency
+/// Should always return 0.99 (1% house edge)
+#[query]
+fn get_expected_value() -> f64 {
+    // Binomial coefficients for 8 rows
+    let coefficients = [1, 8, 28, 56, 70, 56, 28, 8, 1];
+    let total_paths = 256.0;
+
+    coefficients.iter()
+        .enumerate()
+        .map(|(pos, &coeff)| {
+            let probability = coeff as f64 / total_paths;
+            let multiplier = calculate_multiplier(pos as u8);
+            probability * multiplier
+        })
+        .sum()
+}
+
+/// Calculate multiplier using pure mathematical formula
+/// M(k) = 0.2 + 6.32 × ((k - 4) / 4)²
+///
+/// This formula creates a quadratic distribution where:
+/// - Center (k=4) has minimum multiplier of 0.2 (80% loss)
+/// - Edges (k=0,8) have maximum multiplier of 6.52 (big win)
+/// - Expected value is exactly 0.99 (1% house edge)
+fn calculate_multiplier(position: u8) -> f64 {
+    // Validate position
+    if position > 8 {
+        return 0.0; // Invalid position
     }
 
-    let multiplier = match rows {
-        8 => match risk {
-            RiskLevel::Low => match pos {
-                0 | 8 => 5.6, 1 | 7 => 2.1, 2 | 6 => 1.1, 3 | 5 => 1.0, 4 => 0.5, _ => 0.0,
-            },
-            RiskLevel::Medium => match pos {
-                0 | 8 => 13.0, 1 | 7 => 3.0, 2 | 6 => 1.3, 3 | 5 => 0.7, 4 => 0.4, _ => 0.0,
-            },
-            RiskLevel::High => match pos {
-                0 | 8 => 29.0, 1 | 7 => 4.0, 2 | 6 => 1.5, 3 | 5 => 0.3, 4 => 0.2, _ => 0.0,
-            },
-        },
-        12 => match risk {
-            RiskLevel::Low => match pos {
-                0 | 12 => 10.0, 1 | 11 => 3.0, 2 | 10 => 1.6, 3 | 9 => 1.4,
-                4 | 8 => 1.1, 5 | 7 => 1.0, 6 => 0.5, _ => 0.0,
-            },
-            RiskLevel::Medium => match pos {
-                0 | 12 => 33.0, 1 | 11 => 11.0, 2 | 10 => 4.0, 3 | 9 => 2.0,
-                4 | 8 => 1.1, 5 | 7 => 0.6, 6 => 0.3, _ => 0.0,
-            },
-            RiskLevel::High => match pos {
-                0 | 12 => 170.0, 1 | 11 => 24.0, 2 | 10 => 8.1, 3 | 9 => 2.0,
-                4 | 8 => 0.7, 5 | 7 => 0.2, 6 => 0.2, _ => 0.0,
-            },
-        },
-        16 => match risk {
-            RiskLevel::Low => match pos {
-                0 | 16 => 16.0, 1 | 15 => 9.0, 2 | 14 => 2.0, 3 | 13 => 1.4,
-                4 | 12 => 1.4, 5 | 11 => 1.2, 6 | 10 => 1.1, 7 | 9 => 1.0, 8 => 0.5, _ => 0.0,
-            },
-            RiskLevel::Medium => match pos {
-                0 | 16 => 110.0, 1 | 15 => 41.0, 2 | 14 => 10.0, 3 | 13 => 5.0,
-                4 | 12 => 3.0, 5 | 11 => 1.5, 6 | 10 => 1.0, 7 | 9 => 0.5, 8 => 0.3, _ => 0.0,
-            },
-            RiskLevel::High => match pos {
-                0 | 16 => 1000.0, 1 | 15 => 130.0, 2 | 14 => 26.0, 3 | 13 => 9.0,
-                4 | 12 => 4.0, 5 | 11 => 2.0, 6 | 10 => 0.2, 7 | 9 => 0.2, 8 => 0.2, _ => 0.0,
-            },
-        },
-        _ => return Err(format!("Invalid rows: {}", rows)),
-    };
+    // Pure mathematical formula
+    let k = position as f64;
+    let center = 4.0;
+    let distance = (k - center).abs();
+    let normalized = distance / 4.0; // Normalize to [0, 1]
 
-    Ok(multiplier)
-}
-
-// Backwards compatibility: Legacy function name
-// TODO: Remove after frontend migration to drop_ball()
-#[update]
-async fn play_plinko(rows: u8, risk: RiskLevel) -> Result<PlinkoResult, String> {
-    drop_ball(rows, risk).await
+    // Quadratic formula with precise constants
+    0.2 + 6.32 * normalized * normalized
 }
 
 #[query]
 fn greet(name: String) -> String {
-    format!("Plinko: Drop a ball, get a multiplier. Hi {}!", name)
+    format!("Pure Mathematical Plinko: Transparent odds, {} wins or loses fairly!", name)
 }
 
 #[cfg(test)]
@@ -168,104 +150,78 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_multiplier_valid_positions() {
-        // Test 8 rows, Low risk
-        assert_eq!(get_multiplier(8, &RiskLevel::Low, 0).unwrap(), 5.6);
-        assert_eq!(get_multiplier(8, &RiskLevel::Low, 4).unwrap(), 0.5);
-        assert_eq!(get_multiplier(8, &RiskLevel::Low, 8).unwrap(), 5.6);
+    fn test_exact_multipliers() {
+        // Test each position matches expected values
+        let expected = [6.52, 3.755, 1.78, 0.595, 0.2, 0.595, 1.78, 3.755, 6.52];
 
-        // Test 16 rows, High risk (max payout)
-        assert_eq!(get_multiplier(16, &RiskLevel::High, 0).unwrap(), 1000.0);
-        assert_eq!(get_multiplier(16, &RiskLevel::High, 16).unwrap(), 1000.0);
+        for (pos, &expected_mult) in expected.iter().enumerate() {
+            let calculated = calculate_multiplier(pos as u8);
+            assert!(
+                (calculated - expected_mult).abs() < 0.001,
+                "Position {}: expected {}, got {}",
+                pos, expected_mult, calculated
+            );
+        }
+    }
 
-        // Test symmetry: left edge = right edge
-        assert_eq!(
-            get_multiplier(12, &RiskLevel::Medium, 0).unwrap(),
-            get_multiplier(12, &RiskLevel::Medium, 12).unwrap()
+    #[test]
+    fn test_expected_value_exactly_point_99() {
+        let ev = get_expected_value();
+        assert!(
+            (ev - 0.99).abs() < 0.000001,
+            "Expected value should be exactly 0.99, got {}",
+            ev
         );
     }
 
     #[test]
-    fn test_multiplier_invalid_positions() {
-        // Position out of bounds
-        assert!(get_multiplier(8, &RiskLevel::Low, 9).is_err());
-        assert!(get_multiplier(16, &RiskLevel::High, 17).is_err());
+    fn test_house_edge_exactly_one_percent() {
+        let ev = get_expected_value();
+        let house_edge = 1.0 - ev;
+        assert!(
+            (house_edge - 0.01).abs() < 0.000001,
+            "House edge should be exactly 1%, got {}%",
+            house_edge * 100.0
+        );
     }
 
     #[test]
-    fn test_multiplier_invalid_rows() {
-        // Invalid row count
-        assert!(get_multiplier(5, &RiskLevel::Low, 0).is_err());
-        assert!(get_multiplier(20, &RiskLevel::High, 0).is_err());
+    fn test_multiplier_symmetry() {
+        // Verify perfect symmetry
+        for i in 0..=4 {
+            let left = calculate_multiplier(i);
+            let right = calculate_multiplier(8 - i);
+            assert!(
+                (left - right).abs() < 0.0001,
+                "Asymmetry at position {}: {} != {}",
+                i, left, right
+            );
+        }
     }
 
     #[test]
-    fn test_get_multipliers_table() {
-        // 8 rows should return 9 values (0..=8)
-        let table = get_multipliers(8, RiskLevel::Low);
-        assert_eq!(table.len(), 9);
+    fn test_win_loss_positions() {
+        let multipliers = get_multipliers();
 
-        // 16 rows should return 17 values
-        let table = get_multipliers(16, RiskLevel::High);
-        assert_eq!(table.len(), 17);
+        // Count winning and losing positions
+        let winners = multipliers.iter().filter(|&&m| m >= 1.0).count();
+        let losers = multipliers.iter().filter(|&&m| m < 1.0).count();
 
-        // Invalid rows should return empty
-        let table = get_multipliers(7, RiskLevel::Low);
-        assert_eq!(table.len(), 0);
+        assert_eq!(winners, 4, "Should have 4 winning positions");
+        assert_eq!(losers, 5, "Should have 5 losing positions");
     }
 
     #[test]
-    fn test_risk_levels_increase_variance() {
-        // Low risk should have lower max multiplier than High
-        let low_max = get_multiplier(16, &RiskLevel::Low, 0).unwrap();
-        let high_max = get_multiplier(16, &RiskLevel::High, 0).unwrap();
-        assert!(high_max > low_max);
+    fn test_variance_ratio() {
+        let multipliers = get_multipliers();
+        let max = multipliers.iter().fold(0.0, |a, &b| a.max(b));
+        let min = multipliers.iter().fold(f64::MAX, |a, &b| a.min(b));
 
-        // Center positions should be higher in Low risk
-        let low_center = get_multiplier(16, &RiskLevel::Low, 8).unwrap();
-        let high_center = get_multiplier(16, &RiskLevel::High, 8).unwrap();
-        assert!(low_center > high_center);
-    }
-
-    #[test]
-    fn test_final_position_calculation() {
-        // All left moves -> position 0
-        let path = vec![false, false, false, false];
-        let pos = path.iter().filter(|&&d| d).count();
-        assert_eq!(pos, 0);
-
-        // All right moves -> position = rows
-        let path = vec![true, true, true, true];
-        let pos = path.iter().filter(|&&d| d).count();
-        assert_eq!(pos, 4);
-
-        // Mixed: 2 right, 2 left -> position 2
-        let path = vec![true, false, true, false];
-        let pos = path.iter().filter(|&&d| d).count();
-        assert_eq!(pos, 2);
-    }
-
-    #[test]
-    fn test_house_edge_approximate() {
-        // Calculate expected value for 8 rows, Low risk
-        // Assuming binomial distribution, center positions more likely
-        let table = get_multipliers(8, RiskLevel::Low);
-
-        // Probabilities for 8 rows (binomial coefficients / 2^8)
-        let probs = [1.0/256.0, 8.0/256.0, 28.0/256.0, 56.0/256.0,
-                     70.0/256.0, 56.0/256.0, 28.0/256.0, 8.0/256.0, 1.0/256.0];
-
-        let expected_value: f64 = table.iter()
-            .zip(probs.iter())
-            .map(|(mult, prob)| mult * prob)
-            .sum();
-
-        // Expected value should be < 1.0 (house edge)
-        assert!(expected_value < 1.0, "Expected value: {}", expected_value);
-
-        // House edge should be reasonable (2-5%)
-        let house_edge = 1.0 - expected_value;
-        assert!(house_edge > 0.01 && house_edge < 0.10,
-                "House edge: {}%", house_edge * 100.0);
+        let variance_ratio = max / min;
+        assert!(
+            (variance_ratio - 32.6).abs() < 0.1,
+            "Variance ratio should be ~32.6:1, got {}:1",
+            variance_ratio
+        );
     }
 }

@@ -3,36 +3,54 @@ import React from 'react';
 interface PlinkoMultipliersProps {
   multipliers: number[];
   highlightedIndex?: number;
+  showWinLoss?: boolean;
 }
 
 export const PlinkoMultipliers: React.FC<PlinkoMultipliersProps> = ({
   multipliers,
   highlightedIndex,
+  showWinLoss = false
 }) => {
-  const getMultiplierColor = (multiplier: number) => {
-    if (multiplier >= 100) return 'text-purple-400 font-bold';
-    if (multiplier >= 10) return 'text-dfinity-red font-bold';
-    if (multiplier >= 3) return 'text-yellow-500';
-    if (multiplier >= 1) return 'text-dfinity-turquoise';
-    return 'text-gray-400';
-  };
-
   return (
-    <div className="mt-4">
-      <div className="flex items-center justify-center gap-1 flex-wrap">
-        {multipliers.map((mult, index) => (
+    <div className="flex justify-center gap-1 mt-4">
+      {multipliers.map((mult, index) => {
+        const isHighlighted = highlightedIndex === index;
+        const isWin = mult >= 1.0;
+        const isBigWin = mult >= 3.0;
+
+        return (
           <div
             key={index}
             className={`
-              px-2 py-1 rounded text-xs font-mono transition-all
-              ${getMultiplierColor(mult)}
-              ${highlightedIndex === index ? 'bg-white/20 scale-125 ring-2 ring-dfinity-turquoise' : 'bg-casino-primary/50'}
+              px-3 py-2 text-sm font-mono rounded relative
+              transition-all duration-300
+              ${isHighlighted
+                ? 'scale-110 z-10 ring-2 ring-pure-white'
+                : ''}
+              ${isBigWin && showWinLoss
+                ? 'bg-gradient-to-b from-dfinity-red to-red-900 text-pure-white'
+                : isWin && showWinLoss
+                ? 'bg-gradient-to-b from-green-600 to-green-900 text-pure-white'
+                : showWinLoss
+                ? 'bg-gradient-to-b from-gray-700 to-gray-900 text-gray-400'
+                : 'bg-casino-primary text-pure-white/60'}
             `}
           >
-            {mult.toFixed(mult >= 10 ? 0 : 1)}x
+            <div className="font-bold">
+              {mult >= 1 ? mult.toFixed(2) : mult.toFixed(3)}x
+            </div>
+            {showWinLoss && (
+              <div className="text-xs mt-1">
+                {isWin ? `+${((mult - 1) * 100).toFixed(0)}%` : `-${((1 - mult) * 100).toFixed(0)}%`}
+              </div>
+            )}
+            {/* Position indicator */}
+            <div className="text-xs text-pure-white/30 mt-1">
+              {index}
+            </div>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 };

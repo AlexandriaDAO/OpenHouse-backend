@@ -1,24 +1,22 @@
-type RiskLevel = variant {
-  Low;
-  Medium;
-  High;
-};
-
 type PlinkoResult = record {
   path: vec bool;
   final_position: nat8;
   multiplier: float64;
+  win: bool;
 };
 
 service : {
-  // Drop a ball and get the result (path + multiplier)
-  drop_ball: (nat8, RiskLevel) -> (variant { Ok: PlinkoResult; Err: text });
+  // Drop a ball - no parameters needed (fixed 8 rows)
+  drop_ball: () -> (variant { Ok: PlinkoResult; Err: text });
 
-  // Backwards compatibility - legacy function name (deprecated)
-  play_plinko: (nat8, RiskLevel) -> (variant { Ok: PlinkoResult; Err: text });
+  // Get all 9 multipliers (positions 0-8)
+  get_multipliers: () -> (vec float64) query;
 
-  // Get multiplier table for a given configuration
-  get_multipliers: (nat8, RiskLevel) -> (vec float64) query;
+  // Get the mathematical formula
+  get_formula: () -> (text) query;
+
+  // Get expected value (should be 0.99)
+  get_expected_value: () -> (float64) query;
 
   // Test function
   greet: (text) -> (text) query;
