@@ -26,9 +26,8 @@ defi_accounting::update_balance(player, is_win, amount)?;
 ```
 
 ## Module Structure
-- `mod.rs` - Public interface
+- `mod.rs` - Public interface, timer initialization
 - `accounting.rs` - Core logic (ICP transfers, balances)
-- `heartbeat.rs` - Hourly cache refresh
 
 ## Important Constants
 - Min deposit/withdraw: 0.1 ICP
