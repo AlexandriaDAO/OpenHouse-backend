@@ -22,6 +22,8 @@ pub use defi_accounting::{
     deposit, withdraw, withdraw_all, get_balance, get_my_balance, get_house_balance,
     get_max_allowed_payout, get_accounting_stats, audit_balances, refresh_canister_balance,
     AccountingStats, Account,
+    // Liquidity Pool types only
+    LPPosition, PoolStats,
 };
 pub use types::{RollDirection, DiceResult, GameStats, DetailedGameHistory, SeedRotationRecord};
 
@@ -42,19 +44,23 @@ thread_local! {
 
 #[init]
 fn init() {
+    // Initialize game state
     ic_cdk::println!("Dice Game Backend Initialized");
-    defi_accounting::init_balance_refresh_timer();
+
+    // NO TIMER INITIALIZATION - removed completely
 }
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    // Note: StableBTreeMap persists automatically, no accounting upgrade needed
+    // Note: StableBTreeMap persists automatically, no special handling needed
 }
 
 #[post_upgrade]
 fn post_upgrade() {
+    // Restore game state
     seed::restore_seed_state();
-    defi_accounting::init_balance_refresh_timer();
+
+    // NO TIMER INITIALIZATION - removed completely
     // Note: StableBTreeMap restores automatically, no accounting restore needed
 }
 
@@ -141,5 +147,55 @@ async fn get_canister_balance() -> u64 {
 #[query]
 fn greet(name: String) -> String {
     format!("Welcome to OpenHouse Dice, {}! Roll the dice and test your luck!", name)
+}
+
+// =============================================================================
+// LIQUIDITY POOL API ENDPOINTS
+// =============================================================================
+
+// Pool initialization
+
+#[update]
+async fn initialize_pool_from_house() -> Result<String, String> {
+    defi_accounting::initialize_pool_from_house().await
+}
+
+// Liquidity Pool Management
+
+#[update]
+async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
+    defi_accounting::deposit_liquidity(amount).await
+}
+
+#[update]
+async fn withdraw_liquidity(shares: Nat) -> Result<u64, String> {
+    defi_accounting::withdraw_liquidity(shares).await
+}
+
+#[update]
+async fn withdraw_all_liquidity() -> Result<u64, String> {
+    defi_accounting::withdraw_all_liquidity().await
+}
+
+// LP Queries
+
+#[query]
+fn get_lp_position(user: Principal) -> LPPosition {
+    defi_accounting::get_lp_position(user)
+}
+
+#[query]
+fn get_pool_stats() -> PoolStats {
+    defi_accounting::get_pool_stats()
+}
+
+#[query]
+fn get_house_mode() -> String {
+    defi_accounting::get_house_mode()
+}
+
+#[query]
+fn can_accept_bets() -> bool {
+    defi_accounting::can_accept_bets()
 }
 
