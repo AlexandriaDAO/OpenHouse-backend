@@ -1,57 +1,10 @@
-use dice_backend::game::{calculate_max_bet, calculate_multiplier_direct};
-use dice_backend::types::{RollDirection, MAX_WIN};
+use dice_backend::game::calculate_multiplier_direct;
+use dice_backend::types::RollDirection;
 
-#[test]
-fn test_max_bet_high_multiplier() {
-    // 99 Over = 0.99% win chance = exactly 100x multiplier (0.99% house edge)
-    // Max bet should be 0.1 ICP (10 ICP max win / 100x)
-    let max_bet = calculate_max_bet(99, &RollDirection::Over);
-    assert_eq!(max_bet, 10_000_000); // Exactly 0.1 ICP
-}
-
-#[test]
-fn test_max_bet_medium_multiplier() {
-    // 50 Over = 49.5% win chance = exactly 2x multiplier (0.99% house edge)
-    // Max bet should be 5 ICP (10 ICP max win / 2x)
-    let max_bet = calculate_max_bet(50, &RollDirection::Over);
-    assert_eq!(max_bet, 500_000_000); // Exactly 5 ICP
-}
-
-#[test]
-fn test_max_bet_low_multiplier() {
-    // 1 Over = 98.02% win chance = exactly 1.0101x multiplier (0.99% house edge)
-    // Max bet should be ~9.9 ICP (10 ICP max win / 1.0101x)
-    let max_bet = calculate_max_bet(1, &RollDirection::Over);
-    assert_eq!(max_bet, 989_999_999); // 9.9 ICP (floor of 10B / 1.0101)
-}
-
-#[test]
-fn test_max_bet_edge_cases() {
-    // 99 Under = 98.02% win chance = exactly 1.0101x multiplier
-    let max_bet_99_under = calculate_max_bet(99, &RollDirection::Under);
-    assert_eq!(max_bet_99_under, 989_999_999); // 9.9 ICP
-
-    // 1 Over = 98.02% win chance = exactly 1.0101x multiplier
-    let max_bet_1_over = calculate_max_bet(1, &RollDirection::Over);
-    assert_eq!(max_bet_1_over, 989_999_999); // 9.9 ICP
-}
-
-#[test]
-fn test_max_bet_never_exceeds_max_win() {
-    // Test all possible target numbers and directions with new 0.99% edge system
-    for target in 1..=99 {
-        for direction in [RollDirection::Over, RollDirection::Under] {
-            let max_bet = calculate_max_bet(target, &direction);
-
-            // Calculate what the actual payout would be
-            let multiplier = calculate_multiplier_direct(target, &direction);
-            let max_payout = (max_bet as f64 * multiplier) as u64;
-
-            // Ensure max payout never exceeds MAX_WIN (with small margin for rounding)
-            assert!(max_payout <= MAX_WIN + 1_000_000); // Allow 0.01 ICP margin for rounding
-        }
-    }
-}
+// Note: Tests for calculate_max_bet() and MAX_WIN removed as we simplified
+// to a dynamic 10% house limit instead of a fixed 10 ICP max win.
+// The new system uses get_max_allowed_payout() which calculates limits
+// based on current house balance.
 
 #[test]
 fn test_round_multipliers() {

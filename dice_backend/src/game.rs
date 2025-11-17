@@ -114,11 +114,35 @@ pub async fn play_dice(
     let multiplier = calculate_multiplier_direct(target_number, &direction);
 
     // NEW SIMPLIFIED CHECK - 10% house limit (uses cached balance for speed)
-    // NOTE: Race condition exists - house balance could change between check and execution
-    // from concurrent games. This is accepted behavior because:
-    // 1. Damage is self-limiting (max loss = current house balance)
-    // 2. Cache refreshes hourly to stay reasonably accurate
-    // 3. Simplicity and performance outweigh perfect atomicity
+    //
+    // DESIGN DECISIONS & TRADE-OFFS:
+    //
+    // 1. Cache Staleness (Accepted):
+    //    - Cache refreshes ONLY via hourly heartbeat, NOT after deposits/withdrawals
+    //    - Max payout could be stale up to 1 hour after balance changes
+    //    - WHY: Performance > perfect accuracy. Deposit/withdrawal UX stays fast.
+    //    - Impact: After large deposit, max bet stays low temporarily. Self-corrects hourly.
+    //
+    // 2. Race Condition (Accepted):
+    //    - Multiple concurrent bets could collectively exceed 10% house limit
+    //    - Example: 10 players simultaneously bet max, actual total payout > 10%
+    //    - WHY: Complexity of atomic locks would hurt performance significantly
+    //    - Mitigation: Damage is self-limiting (can't lose more than house balance)
+    //
+    // 3. 10% Limit Rationale:
+    //    - Conservative enough to protect house from single large loss
+    //    - Flexible enough to scale with house balance growth
+    //    - Self-adjusting: Small house = smaller limits, large house = larger limits
+    //
+    // This is a CONSCIOUS SIMPLIFICATION that prioritizes:
+    // - Performance (fast queries, no locks)
+    // - Simplicity (one cache, straightforward logic)
+    // - Good-enough accuracy (hourly refresh sufficient for most cases)
+    //
+    // Over theoretical perfection that would require:
+    // - Atomic locks (complex, slower)
+    // - Real-time balance queries (500ms per bet)
+    // - Perfect synchronization (hard to maintain)
     let max_payout = (bet_amount as f64 * multiplier) as u64;
     let max_allowed = accounting::get_max_allowed_payout();
     if max_allowed == 0 {
