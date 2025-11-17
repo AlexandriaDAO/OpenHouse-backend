@@ -286,3 +286,52 @@ When a change affects multiple games:
 - **Isolation mandatory**: Multiple agents work in parallel
 - **VRF for randomness**: Never use weak randomness sources
 - **3% house edge**: Maintain across all games for consistency
+
+## Security Issues from PR #42 - Dice Liquidity Pool
+
+### Context
+PR #42 (https://github.com/AlexandriaDAO/OpenHouse/pull/42#issuecomment-3543859689) identified critical security issues in the liquidity pool implementation that need addressing.
+
+### P0 Issues That MUST Be Fixed
+1. **Race Condition in Concurrent Operations** - Multiple deposits/withdrawals from same caller can corrupt share calculations
+2. **Pool Underflow Silent Failure** - System logs but doesn't update state when reserves go negative
+3. **Missing Authorization** - `initialize_pool_from_house` can be called by anyone
+4. **Hardcoded Admin Principal** - No upgrade mechanism for admin changes
+
+### Recommended Solution: Guard Pattern
+Based on Alexandria's `icp_swap` implementation (`/home/theseus/alexandria/core/src/icp_swap/src/guard.rs`):
+
+```rust
+// PSEUDOCODE - Guard pattern for concurrent operations
+pub struct LiquidityGuard {
+    caller: Principal,
+}
+
+impl LiquidityGuard {
+    pub fn new() -> Result<Self, String> {
+        // Check if caller already has pending operation
+        // If yes, return error
+        // If no, add to pending set
+    }
+}
+
+impl Drop for LiquidityGuard {
+    // Remove caller from pending set when guard drops
+}
+
+// Usage in critical functions:
+pub async fn deposit_liquidity() {
+    let _guard = LiquidityGuard::new()?;  // Blocks concurrent calls
+    // ... deposit logic
+}
+```
+
+### Issues NOT Worth Fixing (Over-engineering)
+1. **Integer overflow at 184M ICP** - Unrealistic scenario
+2. **Complex solvency checks** - Would block legitimate gameplay
+3. **Cross-caller synchronization** - Too complex for experimental casino
+
+### Implementation Notes
+- Only guard deposit/withdraw operations, not game plays
+- Keep it simple - ~50 lines of code prevents real issues
+- Full analysis available in: `/home/theseus/alexandria/openhouse/DICE_LIQUIDITY_SECURITY_ANALYSIS.md`
