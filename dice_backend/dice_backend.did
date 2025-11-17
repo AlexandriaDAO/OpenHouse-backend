@@ -47,6 +47,21 @@ type DetailedGameHistory = record {
   house_edge_actual: float64;
 };
 
+type LPPosition = record {
+  shares: nat;
+  pool_ownership_percent: float64;
+  redeemable_icp: nat;
+};
+
+type PoolStats = record {
+  total_shares: nat;
+  pool_reserve: nat;
+  share_price: nat;
+  total_liquidity_providers: nat64;
+  minimum_liquidity_burned: nat;
+  is_initialized: bool;
+};
+
 service : {
   // Play a game of dice - now with client seed for instant randomness
   play_dice: (nat64, nat8, RollDirection, text) -> (variant { Ok: DiceResult; Err: text });
@@ -76,6 +91,15 @@ service : {
   get_accounting_stats: () -> (AccountingStats) query;
   audit_balances: () -> (variant { Ok: text; Err: text }) query;
   refresh_canister_balance: () -> (nat64);
+
+  // Liquidity Pool Management
+  deposit_liquidity_endpoint: (nat64) -> (variant { Ok: nat; Err: text });
+  withdraw_liquidity_endpoint: (nat) -> (variant { Ok: nat64; Err: text });
+  withdraw_all_liquidity_endpoint: () -> (variant { Ok: nat64; Err: text });
+
+  // LP Queries
+  get_lp_position_endpoint: (principal) -> (LPPosition) query;
+  get_pool_stats_endpoint: () -> (PoolStats) query;
 
   // Test function
   greet: (text) -> (text) query;

@@ -25,6 +25,8 @@
 // - No expensive ledger calls during gameplay
 
 pub mod accounting;
+pub mod nat_helpers;
+pub mod liquidity_pool;
 
 // Re-export the main public interface
 pub use accounting::{
@@ -46,6 +48,30 @@ pub use accounting::{
     // Types
     Account,
     AccountingStats,
+};
+
+// Re-export liquidity pool interface
+pub use liquidity_pool::{
+    // Core LP functions
+    deposit_liquidity,
+    withdraw_liquidity,
+    withdraw_all_liquidity,
+
+    // Query functions
+    get_lp_position,
+    get_pool_stats,
+
+    // Game integration
+    update_pool_on_win,
+    update_pool_on_loss,
+
+    // Upgrade hooks
+    pre_upgrade as lp_pre_upgrade,
+    post_upgrade as lp_post_upgrade,
+
+    // Types
+    LPPosition,
+    PoolStats,
 };
 
 // =============================================================================

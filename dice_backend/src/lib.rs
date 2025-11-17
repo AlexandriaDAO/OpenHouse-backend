@@ -22,6 +22,10 @@ pub use defi_accounting::{
     deposit, withdraw, withdraw_all, get_balance, get_my_balance, get_house_balance,
     get_max_allowed_payout, get_accounting_stats, audit_balances, refresh_canister_balance,
     AccountingStats, Account,
+    // Liquidity Pool
+    deposit_liquidity, withdraw_liquidity, withdraw_all_liquidity,
+    get_lp_position, get_pool_stats,
+    LPPosition, PoolStats,
 };
 pub use types::{RollDirection, DiceResult, GameStats, DetailedGameHistory, SeedRotationRecord};
 
@@ -49,12 +53,14 @@ fn init() {
 #[pre_upgrade]
 fn pre_upgrade() {
     // Note: StableBTreeMap persists automatically, no accounting upgrade needed
+    defi_accounting::lp_pre_upgrade();
 }
 
 #[post_upgrade]
 fn post_upgrade() {
     seed::restore_seed_state();
     defi_accounting::init_balance_refresh_timer();
+    defi_accounting::lp_post_upgrade();
     // Note: StableBTreeMap restores automatically, no accounting restore needed
 }
 
@@ -141,5 +147,34 @@ async fn get_canister_balance() -> u64 {
 #[query]
 fn greet(name: String) -> String {
     format!("Welcome to OpenHouse Dice, {}! Roll the dice and test your luck!", name)
+}
+
+// =============================================================================
+// LIQUIDITY POOL API ENDPOINTS
+// =============================================================================
+
+#[update]
+async fn deposit_liquidity_endpoint(amount: u64) -> Result<Nat, String> {
+    deposit_liquidity(amount).await
+}
+
+#[update]
+async fn withdraw_liquidity_endpoint(shares: Nat) -> Result<u64, String> {
+    withdraw_liquidity(shares).await
+}
+
+#[update]
+async fn withdraw_all_liquidity_endpoint() -> Result<u64, String> {
+    withdraw_all_liquidity().await
+}
+
+#[query]
+fn get_lp_position_endpoint(user: Principal) -> defi_accounting::LPPosition {
+    get_lp_position(user)
+}
+
+#[query]
+fn get_pool_stats_endpoint() -> defi_accounting::PoolStats {
+    get_pool_stats()
 }
 

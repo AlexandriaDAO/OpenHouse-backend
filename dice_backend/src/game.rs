@@ -240,8 +240,15 @@ pub async fn play_dice(
         let new_balance = current_balance.checked_add(payout)
             .ok_or("Balance overflow when adding winnings")?;
         accounting::update_balance(caller, new_balance)?;
+
+        // Update pool reserve - deduct profit from pool
+        let profit = payout.checked_sub(bet_amount)
+            .ok_or("Payout calculation error")?;
+        accounting::update_pool_on_win(profit);
+    } else {
+        // Player lost - bet goes to pool
+        accounting::update_pool_on_loss(bet_amount);
     }
-    // If loss, balance was already deducted - nothing more to do
 
     Ok(result)
 }
@@ -293,4 +300,12 @@ pub fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Res
     let win_chance = calculate_win_chance(target_number, &direction);
     let multiplier = calculate_multiplier_direct(target_number, &direction);
     Ok((win_chance, multiplier))
+}
+
+// Get total active bets (for LP withdrawal solvency check)
+// Currently dice game doesn't have pending bets (instant settlement)
+// so we return 0. Future implementations with delayed settlement
+// would track active bets here.
+pub fn get_total_active_bets() -> u64 {
+    0 // Instant settlement - no active bets
 }
