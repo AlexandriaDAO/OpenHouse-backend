@@ -124,7 +124,7 @@ fn get_expected_value() -> f64 {
 /// - Center (k=4) has minimum multiplier of 0.2 (80% loss)
 /// - Edges (k=0,8) have maximum multiplier of 6.52 (big win)
 /// - Expected value is exactly 0.99 (1% house edge)
-fn calculate_multiplier(position: u8) -> f64 {
+pub fn calculate_multiplier(position: u8) -> f64 {
     // Validate position
     if position > 8 {
         return 0.0; // Invalid position
@@ -145,83 +145,250 @@ fn greet(name: String) -> String {
     format!("Pure Mathematical Plinko: Transparent odds, {} wins or loses fairly!", name)
 }
 
+// ============================================================================
+// TESTS
+// ============================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_exact_multipliers() {
-        // Test each position matches expected values
-        let expected = [6.52, 3.755, 1.78, 0.595, 0.2, 0.595, 1.78, 3.755, 6.52];
+    // ------------------------------------------------------------------------
+    // Unit tests for multiplier formula and game properties
+    // ------------------------------------------------------------------------
+    mod multipliers {
+        use super::*;
 
-        for (pos, &expected_mult) in expected.iter().enumerate() {
-            let calculated = calculate_multiplier(pos as u8);
+        #[test]
+        fn test_exact_multipliers() {
+            // Test each position matches expected values
+            let expected = [6.52, 3.755, 1.78, 0.595, 0.2, 0.595, 1.78, 3.755, 6.52];
+
+            for (pos, &expected_mult) in expected.iter().enumerate() {
+                let calculated = calculate_multiplier(pos as u8);
+                assert!(
+                    (calculated - expected_mult).abs() < 0.001,
+                    "Position {}: expected {}, got {}",
+                    pos, expected_mult, calculated
+                );
+            }
+        }
+
+        #[test]
+        fn test_expected_value_exactly_point_99() {
+            let ev = get_expected_value();
             assert!(
-                (calculated - expected_mult).abs() < 0.001,
-                "Position {}: expected {}, got {}",
-                pos, expected_mult, calculated
+                (ev - 0.99).abs() < 0.000001,
+                "Expected value should be exactly 0.99, got {}",
+                ev
+            );
+        }
+
+        #[test]
+        fn test_house_edge_exactly_one_percent() {
+            let ev = get_expected_value();
+            let house_edge = 1.0 - ev;
+            assert!(
+                (house_edge - 0.01).abs() < 0.000001,
+                "House edge should be exactly 1%, got {}%",
+                house_edge * 100.0
+            );
+        }
+
+        #[test]
+        fn test_multiplier_symmetry() {
+            // Verify perfect symmetry
+            for i in 0..=4 {
+                let left = calculate_multiplier(i);
+                let right = calculate_multiplier(8 - i);
+                assert!(
+                    (left - right).abs() < 0.0001,
+                    "Asymmetry at position {}: {} != {}",
+                    i, left, right
+                );
+            }
+        }
+
+        #[test]
+        fn test_win_loss_positions() {
+            let multipliers = get_multipliers();
+
+            // Count winning and losing positions
+            let winners = multipliers.iter().filter(|&&m| m >= 1.0).count();
+            let losers = multipliers.iter().filter(|&&m| m < 1.0).count();
+
+            assert_eq!(winners, 6, "Should have 6 winning positions");
+            assert_eq!(losers, 3, "Should have 3 losing positions");
+        }
+
+        #[test]
+        fn test_variance_ratio() {
+            let multipliers = get_multipliers();
+            let max = multipliers.iter().fold(0.0_f64, |a, &b| a.max(b));
+            let min = multipliers.iter().fold(f64::MAX, |a, &b| a.min(b));
+
+            let variance_ratio = max / min;
+            assert!(
+                (variance_ratio - 32.6).abs() < 0.1,
+                "Variance ratio should be ~32.6:1, got {}:1",
+                variance_ratio
             );
         }
     }
 
-    #[test]
-    fn test_expected_value_exactly_point_99() {
-        let ev = get_expected_value();
-        assert!(
-            (ev - 0.99).abs() < 0.000001,
-            "Expected value should be exactly 0.99, got {}",
-            ev
-        );
-    }
+    // ------------------------------------------------------------------------
+    // Statistical verification tests using Monte Carlo simulation
+    // ------------------------------------------------------------------------
+    mod statistical_verification {
+        use super::*;
 
-    #[test]
-    fn test_house_edge_exactly_one_percent() {
-        let ev = get_expected_value();
-        let house_edge = 1.0 - ev;
-        assert!(
-            (house_edge - 0.01).abs() < 0.000001,
-            "House edge should be exactly 1%, got {}%",
-            house_edge * 100.0
-        );
-    }
+        /// Simulate a single plinko drop using randomness
+        /// Returns (final_position, multiplier, payout_for_1_unit_bet)
+        fn simulate_drop(random_byte: u8) -> (u8, f64, f64) {
+            const ROWS: u8 = 8;
 
-    #[test]
-    fn test_multiplier_symmetry() {
-        // Verify perfect symmetry
-        for i in 0..=4 {
-            let left = calculate_multiplier(i);
-            let right = calculate_multiplier(8 - i);
+            // Generate path from random byte (same logic as lib.rs)
+            let path: Vec<bool> = (0..ROWS)
+                .map(|i| (random_byte >> i) & 1 == 1)
+                .collect();
+
+            // Count rights to get final position
+            let final_position = path.iter().filter(|&&d| d).count() as u8;
+
+            // Calculate multiplier
+            let multiplier = calculate_multiplier(final_position);
+
+            // For 1 unit bet, payout is multiplier
+            let payout = multiplier;
+
+            (final_position, multiplier, payout)
+        }
+
+        #[test]
+        fn test_statistical_house_edge_verification() {
+            use rand::Rng;
+
+            // Run 10,000 simulations with TRUE randomness to verify house edge
+            const NUM_SIMULATIONS: usize = 10_000;
+            const BET_AMOUNT: f64 = 1.0;
+
+            let mut rng = rand::thread_rng();
+            let mut total_wagered = 0.0;
+            let mut total_returned = 0.0;
+            let mut position_counts = [0usize; 9];
+
+            // Use truly random bytes for Monte Carlo simulation
+            for _ in 0..NUM_SIMULATIONS {
+                let random_byte: u8 = rng.gen();
+                let (position, _multiplier, payout) = simulate_drop(random_byte);
+
+                total_wagered += BET_AMOUNT;
+                total_returned += payout * BET_AMOUNT;
+                position_counts[position as usize] += 1;
+            }
+
+            // Calculate actual return-to-player (RTP)
+            let actual_rtp = total_returned / total_wagered;
+            let actual_house_edge = 1.0 - actual_rtp;
+
+            // Get theoretical expected value
+            let expected_rtp = get_expected_value();
+            let expected_house_edge = 1.0 - expected_rtp;
+
+            // Print detailed results
+            println!("\n=== Statistical Verification (N={}) ===", NUM_SIMULATIONS);
+            println!("Total Wagered: {:.2} units", total_wagered);
+            println!("Total Returned: {:.2} units", total_returned);
+            println!("Actual RTP: {:.4} ({:.2}%)", actual_rtp, actual_rtp * 100.0);
+            println!("Actual House Edge: {:.4} ({:.2}%)", actual_house_edge, actual_house_edge * 100.0);
+            println!("Expected RTP: {:.4} ({:.2}%)", expected_rtp, expected_rtp * 100.0);
+            println!("Expected House Edge: {:.4} ({:.2}%)", expected_house_edge, expected_house_edge * 100.0);
+            println!("\nPosition Distribution:");
+            for (pos, count) in position_counts.iter().enumerate() {
+                let pct = (*count as f64 / NUM_SIMULATIONS as f64) * 100.0;
+                println!("  Position {}: {} drops ({:.2}%)", pos, count, pct);
+            }
+
+            // Assertions with reasonable tolerance for statistical variance
+            let tolerance = 0.02; // 2% tolerance
+
             assert!(
-                (left - right).abs() < 0.0001,
-                "Asymmetry at position {}: {} != {}",
-                i, left, right
+                (actual_rtp - expected_rtp).abs() < tolerance,
+                "Actual RTP ({:.4}) differs from expected ({:.4}) by more than {:.2}%",
+                actual_rtp, expected_rtp, tolerance * 100.0
+            );
+
+            assert!(
+                (actual_house_edge - expected_house_edge).abs() < tolerance,
+                "Actual house edge ({:.4}) differs from expected ({:.4}) by more than {:.2}%",
+                actual_house_edge, expected_house_edge, tolerance * 100.0
+            );
+
+            // Verify we're actually getting a house edge close to 1%
+            assert!(
+                (actual_house_edge - 0.01).abs() < tolerance,
+                "House edge should be approximately 1%, got {:.2}%",
+                actual_house_edge * 100.0
+            );
+
+            // Verify players are getting back approximately 99% of wagered amount
+            assert!(
+                (actual_rtp - 0.99).abs() < tolerance,
+                "RTP should be approximately 0.99, got {:.4}",
+                actual_rtp
             );
         }
-    }
 
-    #[test]
-    fn test_win_loss_positions() {
-        let multipliers = get_multipliers();
+        #[test]
+        fn test_position_distribution_matches_binomial() {
+            use rand::Rng;
 
-        // Count winning and losing positions
-        let winners = multipliers.iter().filter(|&&m| m >= 1.0).count();
-        let losers = multipliers.iter().filter(|&&m| m < 1.0).count();
+            // Verify the position distribution follows binomial probabilities
+            // Using larger sample size for statistical significance
+            const NUM_DROPS: usize = 25_600;
 
-        assert_eq!(winners, 4, "Should have 4 winning positions");
-        assert_eq!(losers, 5, "Should have 5 losing positions");
-    }
+            let mut rng = rand::thread_rng();
+            let mut position_counts = [0usize; 9];
 
-    #[test]
-    fn test_variance_ratio() {
-        let multipliers = get_multipliers();
-        let max = multipliers.iter().fold(0.0, |a, &b| a.max(b));
-        let min = multipliers.iter().fold(f64::MAX, |a, &b| a.min(b));
+            // Use truly random bytes for statistical testing
+            for _ in 0..NUM_DROPS {
+                let random_byte: u8 = rng.gen();
+                let (position, _, _) = simulate_drop(random_byte);
+                position_counts[position as usize] += 1;
+            }
 
-        let variance_ratio = max / min;
-        assert!(
-            (variance_ratio - 32.6).abs() < 0.1,
-            "Variance ratio should be ~32.6:1, got {}:1",
-            variance_ratio
-        );
+            // Expected binomial distribution for 8 rows
+            let expected_probabilities = [
+                1.0 / 256.0,   // Position 0
+                8.0 / 256.0,   // Position 1
+                28.0 / 256.0,  // Position 2
+                56.0 / 256.0,  // Position 3
+                70.0 / 256.0,  // Position 4 (center)
+                56.0 / 256.0,  // Position 5
+                28.0 / 256.0,  // Position 6
+                8.0 / 256.0,   // Position 7
+                1.0 / 256.0,   // Position 8
+            ];
+
+            println!("\n=== Position Distribution Test ===");
+            for (pos, &count) in position_counts.iter().enumerate() {
+                let actual_prob = count as f64 / NUM_DROPS as f64;
+                let expected_prob = expected_probabilities[pos];
+                let diff = (actual_prob - expected_prob).abs();
+
+                println!(
+                    "Position {}: actual={:.4} expected={:.4} diff={:.4}",
+                    pos, actual_prob, expected_prob, diff
+                );
+
+                // More lenient tolerance for truly random data
+                // With 25,600 samples, expect ~1.5% standard deviation
+                assert!(
+                    diff < 0.015,
+                    "Position {} probability deviates too much: {:.4} vs {:.4}",
+                    pos, actual_prob, expected_prob
+                );
+            }
+        }
     }
 }
