@@ -23,7 +23,7 @@ use ic_cdk::{init, pre_upgrade, post_upgrade, query, update};
 use ic_cdk::api::management_canister::main::raw_rand;
 
 // Constants
-const MAX_CRASH: f64 = 1000.0;  // Cap crash at 1000x
+const MAX_CRASH: f64 = 100.0;  // Cap crash at 100x
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct CrashResult {
@@ -344,9 +344,9 @@ mod tests {
         let crash_min = calculate_crash_point(0.0);
         assert!((crash_min - 0.99).abs() < 0.01);
 
-        // Test with random = 0.999 → crash = 0.99 / 0.001 = 990x
+        // Test with random = 0.999 → crash = 0.99 / 0.001 = 990x, capped at MAX_CRASH
         let crash_at_clamp = calculate_crash_point(0.999);
-        assert!(crash_at_clamp > 100.0 && crash_at_clamp <= MAX_CRASH);
+        assert!(crash_at_clamp <= MAX_CRASH);
 
         // Test with random > 0.99999 (should be clamped to 0.99999)
         // crash = 0.99 / 0.00001 = 99,000x (then capped at MAX_CRASH)
@@ -404,7 +404,7 @@ mod tests {
 
         let r1 = 0.0;   // crash = 0.99 / 1.0 = 0.99x
         let r2 = 0.5;   // crash = 0.99 / 0.5 = 1.98x
-        let r3 = 0.998; // crash = 0.99 / 0.002 = 495x
+        let r3 = 0.98;  // crash = 0.99 / 0.02 = 49.5x
 
         let c1 = calculate_crash_point(r1);
         let c2 = calculate_crash_point(r2);
@@ -422,7 +422,7 @@ mod tests {
         // Verify specific values
         assert!((c1 - 0.99).abs() < 0.01);
         assert!((c2 - 1.98).abs() < 0.01);
-        assert!((c3 - 495.0).abs() < 5.0);
+        assert!((c3 - 49.5).abs() < 1.0);
     }
 
     // ============================================================================
@@ -465,30 +465,39 @@ mod tests {
 
         #[test]
         fn test_house_edge_at_various_multipliers() {
-            println!("\n=== Crash Game House Edge Simulation ===\n");
+            println!("\n╔════════════════════════════════════════════════════════════════════╗");
+            println!("║         Crash Game House Edge Simulation (100K games each)        ║");
+            println!("╚════════════════════════════════════════════════════════════════════╝\n");
 
             const NUM_GAMES: usize = 100_000;
             const SEED: u64 = 12345;
 
-            let targets = vec![1.1, 2.0, 5.0, 10.0];
+            // Test comprehensive range of multipliers up to MAX_CRASH (100x)
+            let targets = vec![1.1, 1.5, 2.0, 3.0, 5.0, 10.0, 20.0, 50.0, 100.0];
             let mut all_returns = Vec::new();
+
+            println!("Target | Wins      | Win %   | Avg Return | House Edge | Theoretical");
+            println!("-------|-----------|---------|------------|------------|------------");
 
             for target in targets {
                 let avg_return = simulate_games_at_multiplier(target, NUM_GAMES, SEED);
                 all_returns.push(avg_return);
 
-                println!("Target: {:>6.1}x | Avg Return: {:.4}x | House Edge: {:.2}%",
-                         target, avg_return, (1.0 - avg_return) * 100.0);
+                // Calculate win count from average return
+                let win_rate = avg_return / target;
+                let wins = (win_rate * NUM_GAMES as f64) as usize;
+                let house_edge = (1.0 - avg_return) * 100.0;
+                let theoretical_edge = 1.0;
+
+                println!("{:>6.1}x | {:>9} | {:>6.2}% | {:>10.4}x | {:>9.2}% | {:>10.2}%",
+                         target, wins, win_rate * 100.0, avg_return, house_edge, theoretical_edge);
 
                 // Verify house edge exists (return < 1.0)
                 assert!(avg_return < 1.0, "House should have an edge");
 
-                // Verify it's reasonably close to 0.99x (allowing for variance and clamping)
-                let tolerance = match target {
-                    t if t <= 2.0 => 0.02,
-                    t if t <= 5.0 => 0.05,
-                    _ => 0.15,
-                };
+                // Verify it's reasonably close to 0.99x (allowing for statistical variance)
+                // Higher tolerance for extreme multipliers due to capping and variance
+                let tolerance = if target >= MAX_CRASH { 0.05 } else { 0.02 };
                 assert!(
                     (avg_return - 0.99).abs() < tolerance,
                     "Target {}x: expected return ≈ 0.99x, got {:.4}x",
@@ -497,8 +506,15 @@ mod tests {
             }
 
             let overall_avg = all_returns.iter().sum::<f64>() / all_returns.len() as f64;
-            println!("\nOverall Average Return: {:.4}x", overall_avg);
-            println!("Overall House Edge: {:.2}%\n", (1.0 - overall_avg) * 100.0);
+            let overall_edge = (1.0 - overall_avg) * 100.0;
+
+            println!("\n{}", "═".repeat(72));
+            println!("Overall Average Return: {:.4}x", overall_avg);
+            println!("Overall House Edge:     {:.2}%", overall_edge);
+            println!("Target House Edge:      1.00%");
+            println!("{}", "═".repeat(72));
+            println!("\n✓ All multipliers show consistent ~1% house edge");
+            println!("✓ Max crash capped at {:.0}x", MAX_CRASH);
         }
     }
 }
