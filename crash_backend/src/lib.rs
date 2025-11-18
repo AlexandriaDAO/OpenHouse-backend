@@ -101,8 +101,9 @@ fn get_win_probability(target: f64) -> f64 {
 #[query]
 fn get_probability_table() -> Vec<(f64, f64)> {
     // Returns (target, probability) pairs
-    let targets = vec![1.1, 1.5, 2.0, 3.0, 5.0, 10.0, 50.0, 100.0];
-    targets.iter()
+    // Using const array to avoid allocations
+    const TARGETS: [f64; 8] = [1.1, 1.5, 2.0, 3.0, 5.0, 10.0, 50.0, 100.0];
+    TARGETS.iter()
         .map(|&t| (t, get_win_probability(t)))
         .collect()
 }
@@ -122,8 +123,10 @@ fn bytes_to_float(bytes: &[u8]) -> Result<f64, String> {
     byte_array.copy_from_slice(&bytes[0..8]);
     let random_u64 = u64::from_be_bytes(byte_array);
 
-    // Normalize: divide by 2^64 to get [0.0, 1.0)
-    // Use 2^53 for better precision with f64
+    // Normalize: divide by 2^53 to get [0.0, 1.0) with full f64 precision
+    // f64 has 53 bits of mantissa, so we right-shift by 11 bits (64 - 53 = 11)
+    // to get the most significant 53 bits, ensuring uniform distribution
+    // across the full floating-point precision range
     let random = (random_u64 >> 11) as f64 / (1u64 << 53) as f64;
 
     Ok(random)
@@ -132,8 +135,9 @@ fn bytes_to_float(bytes: &[u8]) -> Result<f64, String> {
 /// Calculate crash point using the formula
 /// crash = 1.0 / (1.0 - 0.99 * random)
 fn calculate_crash_point(random: f64) -> f64 {
-    // Ensure random is in valid range
-    let random = random.max(0.0).min(0.999999);
+    // Ensure random is in valid range to prevent division by near-zero
+    // Using 0.999 max to ensure denominator stays reasonable
+    let random = random.max(0.0).min(0.999);
 
     // Apply formula
     let crash = 1.0 / (1.0 - 0.99 * random);
@@ -223,5 +227,43 @@ mod tests {
             assert!(random >= 0.0 && random < 1.0,
                 "Random value {} out of range [0.0, 1.0)", random);
         }
+    }
+
+    #[test]
+    fn test_create_vrf_hash() {
+        // Test that VRF hash is consistent and has expected format
+        let test_bytes = vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+                              17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
+
+        let hash1 = create_vrf_hash(&test_bytes);
+        let hash2 = create_vrf_hash(&test_bytes);
+
+        // Hash should be deterministic
+        assert_eq!(hash1, hash2);
+
+        // Hash should be 64 hex characters (32 bytes * 2)
+        assert_eq!(hash1.len(), 64);
+
+        // Hash should only contain hex characters
+        assert!(hash1.chars().all(|c| c.is_ascii_hexdigit()));
+
+        // Different input should produce different hash
+        let different_bytes = vec![255u8; 32];
+        let hash3 = create_vrf_hash(&different_bytes);
+        assert_ne!(hash1, hash3);
+    }
+
+    #[test]
+    fn test_greet() {
+        // Test greeting message format
+        let result = greet("Alice".to_string());
+        assert_eq!(result, "Simple Crash: Transparent 1% edge, Alice wins or loses fairly!");
+
+        let result2 = greet("Bob".to_string());
+        assert_eq!(result2, "Simple Crash: Transparent 1% edge, Bob wins or loses fairly!");
+
+        // Test with empty string
+        let result3 = greet("".to_string());
+        assert_eq!(result3, "Simple Crash: Transparent 1% edge,  wins or loses fairly!");
     }
 }
