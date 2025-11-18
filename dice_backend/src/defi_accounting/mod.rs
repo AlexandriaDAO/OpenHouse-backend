@@ -24,12 +24,11 @@ pub use accounting::{
     get_total_user_deposits,
     AccountingStats,
     Account,
+    HouseMode,  // Export the HouseMode enum
 };
 
 pub use liquidity_pool::{
-    initialize_pool_from_house,
     deposit_liquidity,
-    withdraw_liquidity,
     withdraw_all_liquidity,
     get_lp_position,
     get_pool_stats,

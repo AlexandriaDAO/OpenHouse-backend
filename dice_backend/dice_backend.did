@@ -92,12 +92,8 @@ service : {
   audit_balances: () -> (variant { Ok: text; Err: text }) query;
   refresh_canister_balance: () -> (nat64);
 
-  // Pool initialization
-  initialize_pool_from_house : () -> (variant { Ok: text; Err: text });
-
   // Liquidity Pool Management
   deposit_liquidity : (nat64) -> (variant { Ok: nat; Err: text });
-  withdraw_liquidity : (nat) -> (variant { Ok: nat64; Err: text });
   withdraw_all_liquidity : () -> (variant { Ok: nat64; Err: text });
 
   // LP Queries

@@ -2,10 +2,23 @@ use candid::{CandidType, Deserialize, Nat, Principal};
 use ic_cdk::{query, update};
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::StableBTreeMap;
+use serde::Serialize;
 use std::cell::RefCell;
 
 use crate::{MEMORY_MANAGER, Memory};
 use super::liquidity_pool;
+
+// ====================================================================
+// House Mode Enum - Type-safe mode detection
+// ====================================================================
+// Using an enum instead of strings prevents typos and enables
+// compile-time checking of all mode handling code.
+// ====================================================================
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum HouseMode {
+    Legacy,
+    LiquidityPool,
+}
 
 // Constants
 const ICP_TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP in e8s
@@ -280,11 +293,18 @@ pub fn get_house_balance() -> u64 {
 }
 
 // Add helper for mode detection
-pub fn get_house_mode() -> String {
+pub fn get_house_mode() -> HouseMode {
+    // ====================================================================
+    // House Mode Detection Logic
+    // ====================================================================
+    // Determines whether to use legacy house balance or liquidity pool.
+    // Using an enum instead of strings prevents typos and enables
+    // compile-time checking of all mode handling code.
+    // ====================================================================
     if liquidity_pool::is_pool_initialized() && liquidity_pool::get_pool_reserve() > 0 {
-        "liquidity_pool".to_string()
+        HouseMode::LiquidityPool
     } else {
-        "legacy".to_string()
+        HouseMode::Legacy
     }
 }
 
