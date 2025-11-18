@@ -5,12 +5,12 @@
 //! for provably fair 1% house edge.
 //!
 //! **The Formula:**
-//! crash = 1.0 / (1.0 - 0.99 × random)
+//! crash = 0.99 / (1.0 - random)
 //!
 //! Where:
 //! - random is uniform [0.0, 1.0) from IC VRF
-//! - 0.99 factor creates exactly 1% house edge
-//! - P(crash ≥ X) = 0.99 / X (constant edge for all strategies)
+//! - Formula mathematically guarantees exactly 1% house edge for ALL multipliers
+//! - P(crash ≥ X) = 0.99 / X (constant edge regardless of cash-out strategy)
 //!
 //! **Transparency & Fairness:**
 //! - Randomness: IC VRF (raw_rand) - no fallback
@@ -77,7 +77,7 @@ async fn simulate_crash() -> Result<CrashResult, String> {
 /// Get the crash formula as a string
 #[query]
 fn get_crash_formula() -> String {
-    "crash = 1.0 / (1.0 - 0.99 × random)".to_string()
+    "crash = 0.99 / (1.0 - random)".to_string()
 }
 
 /// Get expected value (should be 0.99)
@@ -143,25 +143,29 @@ fn bytes_to_float(bytes: &[u8]) -> Result<f64, String> {
 }
 
 /// Calculate crash point using the formula
-/// crash = 1.0 / (1.0 - 0.99 * random)
+/// crash = 0.99 / (1.0 - random)
+///
+/// **Mathematical Guarantee**: This formula provides exactly 1% house edge for ALL multipliers:
+/// - P(crash ≥ X) = 0.99 / X
+/// - Expected return = P(crash ≥ X) × X = 0.99 (constant 1% house edge)
+/// - This holds for ANY cash-out strategy or multiplier target
 ///
 /// **Distribution Note**: Random values are clamped to [0.0, 0.99999] before applying
-/// the formula. This creates a minimal discontinuity:
-/// - Values > 0.99999 (≈0.001% probability) map to crash ≈ 101,010x, then capped at 1000x
-/// - This minimally concentrates probability mass at MAX_CRASH
-/// - House edge remains ≈1% for all practical crash points below the cap
-/// - Tradeoff: Mathematical purity vs. preventing extreme/unstable values
+/// the formula to prevent division by zero:
+/// - Max crash = 0.99 / (1.0 - 0.99999) ≈ 99,000x (then capped at MAX_CRASH)
+/// - Clamping affects <0.001% of values, minimal impact on fairness
+/// - House edge remains exactly 1% for all practical multipliers
 ///
 /// **Precision Note**: For very high multipliers (>100x), floating-point
 /// rounding may introduce small deviations (<0.01%) from the theoretical
 /// distribution. This is acceptable for practical casino purposes.
 pub fn calculate_crash_point(random: f64) -> f64 {
-    // Ensure random is in valid range to prevent division by near-zero
-    // Using 0.99999 max to minimize distribution discontinuity (0.001% vs 0.1%)
+    // Ensure random is in valid range to prevent division by zero
+    // Clamping to 0.99999 allows max crash ≈ 99,000x before MAX_CRASH cap
     let random = random.max(0.0).min(0.99999);
 
-    // Apply formula
-    let crash = 1.0 / (1.0 - 0.99 * random);
+    // Apply corrected formula for constant 1% house edge
+    let crash = 0.99 / (1.0 - random);
 
     // Cap at maximum
     crash.min(MAX_CRASH)
@@ -211,17 +215,18 @@ mod tests {
 
     #[test]
     fn test_crash_formula_at_boundaries() {
-        // random = 0.0 → crash = 1.0 / 1.0 = 1.00x
-        assert!((calculate_crash_point(0.0) - 1.0).abs() < 0.01);
+        // random = 0.0 → crash = 0.99 / 1.0 = 0.99x
+        assert!((calculate_crash_point(0.0) - 0.99).abs() < 0.01);
 
-        // random = 0.5 → crash = 1.0 / 0.505 = 1.98x
+        // random = 0.5 → crash = 0.99 / 0.5 = 1.98x
         assert!((calculate_crash_point(0.5) - 1.98).abs() < 0.01);
 
-        // random = 0.9 → crash = 1.0 / 0.109 = 9.17x
-        assert!((calculate_crash_point(0.9) - 9.17).abs() < 0.1);
+        // random = 0.9 → crash = 0.99 / 0.1 = 9.9x
+        assert!((calculate_crash_point(0.9) - 9.9).abs() < 0.1);
 
-        // random = 0.99 → crash = 1.0 / 0.0099 = 101.01x (capped)
+        // random = 0.99 → crash = 0.99 / 0.01 = 99x
         let high_crash = calculate_crash_point(0.99);
+        assert!((high_crash - 99.0).abs() < 1.0);
         assert!(high_crash <= MAX_CRASH);
     }
 
@@ -335,19 +340,20 @@ mod tests {
 
     #[test]
     fn test_crash_point_extreme_values() {
-        // Test with random = 0.0 (minimum)
+        // Test with random = 0.0 (minimum) → crash = 0.99 / 1.0 = 0.99x
         let crash_min = calculate_crash_point(0.0);
-        assert!((crash_min - 1.0).abs() < 0.01);
+        assert!((crash_min - 0.99).abs() < 0.01);
 
-        // Test with random = 0.999 (at clamp boundary)
+        // Test with random = 0.999 → crash = 0.99 / 0.001 = 990x
         let crash_at_clamp = calculate_crash_point(0.999);
-        assert!(crash_at_clamp > 1.0 && crash_at_clamp <= MAX_CRASH);
+        assert!(crash_at_clamp > 100.0 && crash_at_clamp <= MAX_CRASH);
 
-        // Test with random > 0.999 (should be clamped)
+        // Test with random > 0.99999 (should be clamped to 0.99999)
+        // crash = 0.99 / 0.00001 = 99,000x (then capped at MAX_CRASH)
         let crash_above_clamp = calculate_crash_point(0.9999);
         assert!(crash_above_clamp <= MAX_CRASH);
 
-        // Test with random = 1.0 (should be clamped to 0.999)
+        // Test with random = 1.0 (should be clamped to 0.99999)
         let crash_at_one = calculate_crash_point(1.0);
         assert!(crash_at_one <= MAX_CRASH);
 
@@ -393,11 +399,12 @@ mod tests {
     #[test]
     fn test_clamping_preserves_distribution() {
         // Verify that clamping doesn't significantly distort the distribution
-        // Random values in [0, 0.999) should map linearly to crash points
+        // With new formula: crash = 0.99 / (1 - random)
+        // Higher random values produce higher crash points
 
-        let r1 = 0.0;
-        let r2 = 0.5;
-        let r3 = 0.998;
+        let r1 = 0.0;   // crash = 0.99 / 1.0 = 0.99x
+        let r2 = 0.5;   // crash = 0.99 / 0.5 = 1.98x
+        let r3 = 0.998; // crash = 0.99 / 0.002 = 495x
 
         let c1 = calculate_crash_point(r1);
         let c2 = calculate_crash_point(r2);
@@ -407,10 +414,15 @@ mod tests {
         assert!(c1 < c2);
         assert!(c2 < c3);
 
-        // All should be within valid range
-        assert!(c1 >= 1.0 && c1 <= MAX_CRASH);
-        assert!(c2 >= 1.0 && c2 <= MAX_CRASH);
-        assert!(c3 >= 1.0 && c3 <= MAX_CRASH);
+        // All should be within valid range (note: c1 can be < 1.0 with new formula)
+        assert!(c1 > 0.0 && c1 <= MAX_CRASH);
+        assert!(c2 > 0.0 && c2 <= MAX_CRASH);
+        assert!(c3 > 0.0 && c3 <= MAX_CRASH);
+
+        // Verify specific values
+        assert!((c1 - 0.99).abs() < 0.01);
+        assert!((c2 - 1.98).abs() < 0.01);
+        assert!((c3 - 495.0).abs() < 5.0);
     }
 
     // ============================================================================
