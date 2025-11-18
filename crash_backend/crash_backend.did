@@ -1,48 +1,23 @@
-type GameRound = record {
-  id: nat64;
+type CrashResult = record {
   crash_point: float64;
-  start_time: nat64;
-  end_time: opt nat64;
-  total_bets: nat64;
-  total_payouts: nat64;
-  status: RoundStatus;
-};
-
-type RoundStatus = variant {
-  Waiting;
-  Running;
-  Crashed;
-};
-
-type PlayerBet = record {
-  player: principal;
-  amount: nat64;
-  cash_out_multiplier: opt float64;
-  payout: opt nat64;
-  round_id: nat64;
-};
-
-type GameState = record {
-  current_round: opt GameRound;
-  next_round_id: nat64;
-  total_volume: nat64;
-  game_paused: bool;
+  randomness_hash: text;
 };
 
 service : {
-  // Game functions
-  start_new_round: () -> (variant { Ok: GameRound; Err: text });
-  place_bet: (nat64) -> (variant { Ok: PlayerBet; Err: text });
-  cash_out: () -> (variant { Ok: nat64; Err: text });
+  // Simulate a crash point
+  simulate_crash: () -> (variant { Ok: CrashResult; Err: text });
 
-  // Query functions
-  get_game_state: () -> (GameState) query;
-  get_round: (nat64) -> (opt GameRound) query;
-  get_recent_rounds: (nat32) -> (vec GameRound) query;
+  // Get the crash formula
+  get_crash_formula: () -> (text) query;
 
-  // Admin functions
-  pause_game: () -> (variant { Ok; Err: text });
-  resume_game: () -> (variant { Ok; Err: text });
+  // Get expected value (0.99)
+  get_expected_value: () -> (float64) query;
+
+  // Get probability of reaching target (validates input is finite)
+  get_win_probability: (float64) -> (variant { Ok: float64; Err: text }) query;
+
+  // Get probability table for common targets
+  get_probability_table: () -> (vec record { float64; float64 }) query;
 
   // Test function
   greet: (text) -> (text) query;
