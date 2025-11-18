@@ -2,7 +2,6 @@ use candid::{CandidType, Deserialize, Nat, Principal};
 use ic_cdk::{query, update};
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::StableBTreeMap;
-use serde::Serialize;
 use std::cell::RefCell;
 
 use crate::{MEMORY_MANAGER, Memory};
@@ -349,15 +348,6 @@ pub async fn refresh_canister_balance() -> u64 {
             CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow())
         }
     }
-}
-
-// Internal accessors used by liquidity_pool module
-pub(crate) fn get_canister_balance() -> u64 {
-    CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow())
-}
-
-pub(crate) fn get_total_user_deposits() -> u64 {
-    calculate_total_deposits()
 }
 
 // Internal transfer function for withdrawals (used by liquidity_pool)

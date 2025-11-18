@@ -1,7 +1,6 @@
 // Full implementation - Nat arithmetic helpers
 use candid::Nat;
 use num_bigint::BigUint;
-use num_traits::Zero;
 use ic_stable_structures::Storable;
 use std::borrow::Cow;
 
