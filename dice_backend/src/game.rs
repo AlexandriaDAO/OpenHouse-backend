@@ -247,14 +247,24 @@ pub async fn play_dice(
 
         let profit = payout.saturating_sub(bet_amount);
 
-        // Update pool only if in LP mode
-        if house_mode == "liquidity_pool" {
-            liquidity_pool::update_pool_on_win(profit);
+        // Update pool only if in LP mode (using type-safe enum)
+        match house_mode {
+            accounting::HouseMode::LiquidityPool => {
+                liquidity_pool::update_pool_on_win(profit);
+            }
+            accounting::HouseMode::Legacy => {
+                // Legacy mode: no pool update needed
+            }
         }
     } else {
         // Player lost
-        if house_mode == "liquidity_pool" {
-            liquidity_pool::update_pool_on_loss(bet_amount);
+        match house_mode {
+            accounting::HouseMode::LiquidityPool => {
+                liquidity_pool::update_pool_on_loss(bet_amount);
+            }
+            accounting::HouseMode::Legacy => {
+                // Legacy mode: no pool update needed
+            }
         }
     }
 

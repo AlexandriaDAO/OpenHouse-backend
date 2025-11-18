@@ -24,6 +24,7 @@ pub use accounting::{
     get_total_user_deposits,
     AccountingStats,
     Account,
+    HouseMode,  // Export the HouseMode enum
 };
 
 pub use liquidity_pool::{

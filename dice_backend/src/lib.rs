@@ -191,7 +191,11 @@ fn get_pool_stats() -> PoolStats {
 
 #[query]
 fn get_house_mode() -> String {
-    defi_accounting::get_house_mode()
+    // Convert enum to string for backward compatibility
+    match defi_accounting::get_house_mode() {
+        defi_accounting::HouseMode::LiquidityPool => "liquidity_pool".to_string(),
+        defi_accounting::HouseMode::Legacy => "legacy".to_string(),
+    }
 }
 
 #[query]
