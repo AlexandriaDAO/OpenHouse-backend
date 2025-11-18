@@ -271,11 +271,7 @@ pub fn get_accounting_stats() -> AccountingStats {
     );
 
     let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
-    let house_balance = if canister_balance > total_deposits {
-        canister_balance - total_deposits
-    } else {
-        0
-    };
+    let house_balance = liquidity_pool::get_pool_reserve();
 
     AccountingStats {
         total_user_deposits: total_deposits,
@@ -293,21 +289,16 @@ pub fn get_accounting_stats() -> AccountingStats {
 pub fn audit_balances() -> Result<String, String> {
     let total_deposits = calculate_total_deposits();
     let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
+    let pool_reserve = liquidity_pool::get_pool_reserve();
 
-    let house_balance = if canister_balance > total_deposits {
-        canister_balance - total_deposits
-    } else {
-        0
-    };
-
-    let calculated_total = house_balance + total_deposits;
+    let calculated_total = pool_reserve + total_deposits;
 
     if calculated_total == canister_balance {
-        Ok(format!("✅ Audit passed: house ({}) + deposits ({}) = canister ({})",
-                   house_balance, total_deposits, canister_balance))
+        Ok(format!("✅ Audit passed: pool_reserve ({}) + deposits ({}) = canister ({})",
+                   pool_reserve, total_deposits, canister_balance))
     } else {
-        Err(format!("❌ Audit FAILED: house ({}) + deposits ({}) = {} != canister ({})",
-                    house_balance, total_deposits, calculated_total, canister_balance))
+        Err(format!("❌ Audit FAILED: pool_reserve ({}) + deposits ({}) = {} != canister ({})",
+                    pool_reserve, total_deposits, calculated_total, canister_balance))
     }
 }
 
