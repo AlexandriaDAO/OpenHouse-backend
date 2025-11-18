@@ -3,8 +3,19 @@ type CrashResult = record {
   randomness_hash: text;
 };
 
+type PlayCrashResult = record {
+  crash_point: float64;
+  won: bool;
+  target_multiplier: float64;
+  payout: nat64;
+  randomness_hash: text;
+};
+
 service : {
-  // Simulate a crash point
+  // NEW: Secure pre-commitment method
+  play_crash: (float64) -> (variant { Ok: PlayCrashResult; Err: text });
+
+  // DEPRECATED: Old method (kept for compatibility)
   simulate_crash: () -> (variant { Ok: CrashResult; Err: text });
 
   // Get the crash formula

@@ -31,6 +31,15 @@ pub struct CrashResult {
     pub randomness_hash: String,    // IC randomness hash for audit/reference
 }
 
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct PlayCrashResult {
+    pub crash_point: f64,              // Where it crashed
+    pub won: bool,                     // Did user win?
+    pub target_multiplier: f64,        // User's target
+    pub payout: u64,                   // Payout in e8s (0 if lost)
+    pub randomness_hash: String,       // IC randomness hash
+}
+
 // Memory management for future upgrades
 #[init]
 fn init() {
@@ -51,6 +60,8 @@ fn post_upgrade() {
 
 /// Simulate a crash point using IC threshold randomness
 /// Returns crash point and randomness hash for audit/reference
+///
+/// DEPRECATED: Use play_crash() instead for secure pre-commitment model
 #[update]
 async fn simulate_crash() -> Result<CrashResult, String> {
     // Get randomness from IC's threshold randomness beacon (raw_rand)
@@ -70,6 +81,54 @@ async fn simulate_crash() -> Result<CrashResult, String> {
 
     Ok(CrashResult {
         crash_point,
+        randomness_hash,
+    })
+}
+
+/// Play crash game with pre-committed target
+/// User must set target before game starts (no mid-flight decisions)
+/// Returns outcome after rocket crashes
+#[update]
+async fn play_crash(target_multiplier: f64) -> Result<PlayCrashResult, String> {
+    // Validate target is in valid range
+    if target_multiplier < 1.01 {
+        return Err("Target must be at least 1.01x".to_string());
+    }
+    if target_multiplier > MAX_CRASH {
+        return Err(format!("Target cannot exceed {}x", MAX_CRASH));
+    }
+    if !target_multiplier.is_finite() {
+        return Err("Target must be a finite number".to_string());
+    }
+
+    // Get randomness from IC VRF
+    let random_bytes = raw_rand().await
+        .map_err(|e| format!("Randomness unavailable: {:?}", e))?
+        .0;
+
+    // Convert to float and calculate crash point
+    let random = bytes_to_float(&random_bytes)?;
+    let crash_point = calculate_crash_point(random);
+
+    // Determine outcome
+    let won = crash_point >= target_multiplier;
+
+    // Calculate payout (for now, simple 1 ICP bet)
+    // In future: integrate with actual betting system
+    let payout = if won {
+        (target_multiplier * 100_000_000.0) as u64  // Convert to e8s
+    } else {
+        0
+    };
+
+    // Create hash for provable fairness
+    let randomness_hash = create_randomness_hash(&random_bytes);
+
+    Ok(PlayCrashResult {
+        crash_point,
+        won,
+        target_multiplier,
+        payout,
         randomness_hash,
     })
 }

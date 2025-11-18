@@ -14,11 +14,17 @@ import {
 } from '../components/game-specific/crash';
 import { useAuth } from '../providers/AuthProvider';
 
-interface CrashGameResult {
+interface PlayCrashResult {
   crash_point: number;
+  won: boolean;
+  target_multiplier: number;
+  payout: bigint;
   randomness_hash: string;
-  timestamp?: number;
-  clientId?: string;
+}
+
+interface CrashGameResult extends PlayCrashResult {
+  timestamp: number;
+  clientId: string;
 }
 
 export const Crash: React.FC = () => {
@@ -29,11 +35,12 @@ export const Crash: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentMultiplier, setCurrentMultiplier] = useState(1.0);
   const [crashPoint, setCrashPoint] = useState<number | null>(null);
-  const [targetCashout, setTargetCashout] = useState(2.0);
-  const [autoCashout, setAutoCashout] = useState(false);
+  const [targetCashout, setTargetCashout] = useState(2.5);
   const [gameError, setGameError] = useState('');
   const [history, setHistory] = useState<CrashGameResult[]>([]);
   const [graphHistory, setGraphHistory] = useState<Array<{ multiplier: number; timestamp: number }>>([]);
+  const [gameResult, setGameResult] = useState<PlayCrashResult | null>(null);
+  const [passedTarget, setPassedTarget] = useState(false);
 
   // Start game
   const startGame = async () => {
@@ -43,30 +50,34 @@ export const Crash: React.FC = () => {
       return;
     }
 
+    // Reset state
     setIsPlaying(true);
     setGameError('');
     setCrashPoint(null);
     setCurrentMultiplier(1.0);
     setGraphHistory([]);
+    setPassedTarget(false);
+    setGameResult(null);
 
     try {
-      // Get crash point from backend
-      const result = await actor.simulate_crash();
+      // Call new secure method with pre-committed target
+      const result = await actor.play_crash(targetCashout);
 
       if ('Ok' in result) {
-        const crash = result.Ok.crash_point;
-        setCrashPoint(crash);
+        const gameData = result.Ok;
+        setCrashPoint(gameData.crash_point);
+        setGameResult(gameData);
 
-        // Animate multiplier rise
-        animateMultiplier(crash);
+        // Animate to conclusion
+        animateToConclusion(gameData.crash_point, gameData.target_multiplier, gameData.won);
 
         // Add to history
-        const gameResult: CrashGameResult = {
-          ...result.Ok,
+        const historyItem: CrashGameResult = {
+          ...gameData,
           timestamp: Date.now(),
           clientId: crypto.randomUUID()
         };
-        setHistory(prev => [gameResult, ...prev.slice(0, 19)]);
+        setHistory(prev => [historyItem, ...prev.slice(0, 19)]);
       } else {
         setGameError(result.Err);
         setIsPlaying(false);
@@ -77,51 +88,38 @@ export const Crash: React.FC = () => {
     }
   };
 
-  // Animate multiplier from 1.0 to crash point
-  const animateMultiplier = (crash: number) => {
+  // Animate to conclusion with milestone display
+  const animateToConclusion = (crashPoint: number, target: number, won: boolean) => {
     const startTime = Date.now();
-    const duration = Math.min(crash * 1000, 10000); // Max 10s animation
+    const duration = Math.min(crashPoint * 1000, 10000); // Max 10s
 
     const animate = () => {
       const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
 
-      // Exponential curve: mult = 1.0 * e^(k*t) where k chosen so mult(duration) = crash
-      const k = Math.log(crash) / duration;
+      // Exponential curve
+      const k = Math.log(crashPoint) / duration;
       const mult = Math.exp(k * elapsed);
 
       setCurrentMultiplier(mult);
       setGraphHistory(prev => [...prev, { multiplier: mult, timestamp: elapsed }]);
 
-      // Auto cash-out check
-      if (autoCashout && mult >= targetCashout) {
-        handleCashout();
-        return;
+      // Check if we passed the target (show milestone)
+      if (won && mult >= target && !passedTarget) {
+        setPassedTarget(true);
       }
 
-      // Check if crashed
-      if (mult >= crash || progress >= 1) {
-        setCurrentMultiplier(crash);
-        setTimeout(() => setIsPlaying(false), 1000);
-        return;
+      // Continue until crash
+      if (mult < crashPoint) {
+        requestAnimationFrame(animate);
+      } else {
+        setCurrentMultiplier(crashPoint);
+        setTimeout(() => {
+          setIsPlaying(false);
+        }, 2000); // Pause to show result
       }
-
-      requestAnimationFrame(animate);
     };
 
     requestAnimationFrame(animate);
-  };
-
-  // Manual cash-out
-  const handleCashout = () => {
-    if (!isPlaying || !crashPoint) return;
-
-    if (currentMultiplier < crashPoint) {
-      // Successful cash-out
-      setGameError('');
-      // TODO: Process payout
-      setIsPlaying(false);
-    }
   };
 
   const handleCrashComplete = useCallback(() => {
@@ -173,13 +171,26 @@ export const Crash: React.FC = () => {
       houseEdge={1}
     >
       {/* Rocket Animation */}
-      <div className="card max-w-4xl mx-auto">
+      <div className="card max-w-4xl mx-auto relative">
         <CrashRocket
           isLaunching={isPlaying}
           currentMultiplier={currentMultiplier}
           crashPoint={crashPoint}
           onCrashComplete={handleCrashComplete}
         />
+        {/* Milestone overlay when passing target */}
+        {passedTarget && isPlaying && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="bg-green-500/20 border-2 border-green-400 rounded-lg p-6 animate-pulse">
+              <div className="text-3xl font-bold text-green-400">
+                ✅ TARGET REACHED!
+              </div>
+              <div className="text-xl text-green-300 mt-2">
+                Cashed out at {targetCashout.toFixed(2)}x
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Multiplier Graph */}
@@ -197,7 +208,7 @@ export const Crash: React.FC = () => {
       <div className="card max-w-2xl mx-auto">
         <div className="mb-6">
           <label className="block text-sm font-bold mb-3 text-center text-dfinity-turquoise">
-            Target Cash-out Multiplier:
+            Set Your Target (before launch):
           </label>
           <input
             type="range"
@@ -214,38 +225,40 @@ export const Crash: React.FC = () => {
           </div>
         </div>
 
-        <div className="mb-6">
-          <label className="flex items-center justify-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={autoCashout}
-              onChange={(e) => setAutoCashout(e.target.checked)}
-              disabled={isPlaying}
-              className="w-4 h-4"
-            />
-            Auto cash-out at target
-          </label>
-        </div>
-
         <GameStats stats={stats} collapsible={false} />
 
-        {!isPlaying ? (
-          <GameButton
-            onClick={startGame}
-            disabled={!actor || !isAuthenticated}
-            loading={false}
-            label="LAUNCH ROCKET"
-            icon="🚀"
-          />
-        ) : (
-          <GameButton
-            onClick={handleCashout}
-            disabled={!crashPoint || currentMultiplier >= crashPoint}
-            loading={false}
-            label={`CASH OUT ${currentMultiplier.toFixed(2)}x`}
-            icon="💰"
-            variant="danger"
-          />
+        <GameButton
+          onClick={startGame}
+          disabled={!actor || !isAuthenticated || isPlaying}
+          loading={isPlaying}
+          label={isPlaying ? "ROCKET FLYING..." : "LAUNCH ROCKET"}
+          loadingLabel="FLYING..."
+          icon="🚀"
+        />
+
+        {/* Show result after crash */}
+        {gameResult && !isPlaying && (
+          <div className={`mt-4 p-4 rounded ${gameResult.won ? 'bg-green-900/20 border border-green-500' : 'bg-red-900/20 border border-red-500'}`}>
+            <div className="text-center">
+              {gameResult.won ? (
+                <>
+                  <div className="text-2xl mb-2">🎉 YOU WON!</div>
+                  <div>Cashed out at {gameResult.target_multiplier.toFixed(2)}x</div>
+                  <div className="text-sm text-gray-400">
+                    (Rocket crashed at {gameResult.crash_point.toFixed(2)}x)
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-2xl mb-2">💥 CRASHED!</div>
+                  <div>Rocket crashed at {gameResult.crash_point.toFixed(2)}x</div>
+                  <div className="text-sm text-gray-400">
+                    (Your target was {gameResult.target_multiplier.toFixed(2)}x)
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         )}
 
         {gameError && (
