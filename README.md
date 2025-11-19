@@ -1,19 +1,35 @@
 # 🎰 OpenHouse Casino
 
-**Open-source, transparent odds casino powered by Internet Computer**
+**The first casino where YOU can be the house**
 
-OpenHouse is an experiment in provably fair gaming. Every game is open-source with transparent house odds, powered by the Internet Computer's verifiable random function (VRF) for bot-resistant, tamper-proof randomness.
+Built by [Alexandria](https://alexandria.xyz) - an open-source gaming studio on the Internet Computer.
 
-## 🎯 The Vision
+## 🎯 What Makes OpenHouse Different
 
-Traditional online casinos are black boxes. You trust they're fair, but you can't verify it. OpenHouse flips this model:
+Traditional online casinos keep all the profits and hide their odds. OpenHouse flips this entirely:
 
-- **Provably Fair**: Every game result is verifiable using IC's VRF
-- **Transparent Odds**: House edge clearly displayed, calculated from open-source code
+### 💰 Revolutionary Economic Model
+
+**You can own the house** - Instead of playing against a faceless corporation, users provide the house liquidity and own shares of the games. The house money is provided by users like you, who earn a portion of the casino's profits.
+
+**Transparent 1% house edge** - Every game maintains exactly 1% house edge, verifiable through:
+- Open-source code you can audit
+- Internet Computer's VRF (Verifiable Random Function) for provably fair randomness
+- Publicly visible multiplier tables and payout calculations
+
+**$ALEX stakers earn 100% of revenue** - OpenHouse is built by Alexandria studio, and all revenue flows to $ALEX token stakers. The revenue model is beautifully simple: a 1% fee on house money withdrawals goes directly to $ALEX stakers.
+
+### ✨ Core Principles
+
+- **Provably Fair**: Every game result is cryptographically verifiable using IC's VRF
 - **Bot Resistant**: VRF randomness cannot be predicted or manipulated
-- **Open Source**: Anyone can audit the code and verify fairness
+- **Fully Transparent**: All code is open-source, all odds are public
+- **Community Owned**: Users provide liquidity, users own shares, users verify fairness
 
-The name "OpenHouse" is a play on words - we're the house (casino), but everything is open.
+The name "OpenHouse" is a triple play on words:
+- We're **the house** (casino)
+- Everything is **open-source** with transparent odds
+- The house is **open to everyone** - you can become the house
 
 ## 🎮 Live Games
 
@@ -25,6 +41,36 @@ The name "OpenHouse" is a play on words - we're the house (casino), but everythi
 | **Dice** | Roll over or under your target number | 1% | 100x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/dice) |
 
 **Frontend**: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
+
+## 💎 Economic Model & Revenue
+
+### How Being "The House" Works
+
+In traditional casinos, the house provides all liquidity and takes all profits. At OpenHouse:
+
+1. **Users provide house liquidity** - Deposit ICP to become a liquidity provider (LP)
+2. **Receive ownership shares** - Get LP tokens representing your share of the house
+3. **Earn from the edge** - The 1% house edge flows to LP holders proportionally
+4. **Withdraw anytime** - Pull your liquidity plus earnings whenever you want
+
+### Revenue Distribution
+
+OpenHouse has a transparent, simple revenue model:
+
+- **Players** play games with a transparent 1% house edge
+- **Liquidity providers** earn from the house edge on every bet
+- **$ALEX stakers** receive 100% of platform revenue via a 1% fee on LP withdrawals
+- **No hidden fees** - That's it. No rake, no VIP programs, no misleading promos
+
+### Built by Alexandria
+
+OpenHouse is created by [Alexandria](https://alexandria.xyz), an open-source gaming studio building on the Internet Computer. All OpenHouse revenue flows to $ALEX token stakers, making this casino a revenue-generating product for the Alexandria ecosystem.
+
+**Why this matters:**
+- Aligned incentives: Alexandria succeeds when OpenHouse succeeds
+- Long-term thinking: Not a cash grab, but ecosystem building
+- Open-source commitment: Transparency is core to Alexandria's mission
+- Community first: $ALEX stakers benefit from all Alexandria products
 
 ## 🏗️ Architecture
 
@@ -220,4 +266,6 @@ OpenHouse is open-source software. See LICENSE file for details.
 
 ---
 
-**The house always has an edge. At OpenHouse, that edge is transparent.**
+**The house always has an edge. At OpenHouse, that edge is transparent - and you can own it.**
+
+Built with ❤️ by [Alexandria](https://alexandria.xyz)
