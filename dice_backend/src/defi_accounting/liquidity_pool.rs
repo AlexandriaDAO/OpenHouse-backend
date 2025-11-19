@@ -309,7 +309,7 @@ pub async fn withdraw_all_liquidity() -> Result<u64, String> {
 
 // Query functions
 
-pub fn get_lp_position(user: Principal) -> LPPosition {
+pub(crate) fn get_lp_position_internal(user: Principal) -> LPPosition {
     let user_shares = LP_SHARES.with(|s| s.borrow().get(&user).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64)));
     let total_shares = calculate_total_supply();
     let pool_reserve = get_pool_reserve_nat();
@@ -338,7 +338,7 @@ pub fn get_lp_position(user: Principal) -> LPPosition {
     }
 }
 
-pub fn get_pool_stats() -> PoolStats {
+pub(crate) fn get_pool_stats_internal() -> PoolStats {
     let total_shares = calculate_total_supply();
     let pool_state = POOL_STATE.with(|s| s.borrow().get().clone());
     let pool_reserve = pool_state.reserve;

@@ -119,7 +119,7 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
     let caller = ic_cdk::caller();
 
     // STEP 2: Check user has sufficient balance
-    let user_balance = get_balance(caller);
+    let user_balance = get_balance_internal(caller);
     if user_balance < amount {
         return Err(format!("Insufficient balance. You have {} e8s, trying to withdraw {} e8s", user_balance, amount));
     }
@@ -168,7 +168,7 @@ pub async fn withdraw(amount: u64) -> Result<u64, String> {
 #[update]
 pub async fn withdraw_all() -> Result<u64, String> {
     let caller = ic_cdk::caller();
-    let user_balance = get_balance(caller);
+    let user_balance = get_balance_internal(caller);
 
     // Check if user has any balance to withdraw
     if user_balance == 0 {
@@ -186,36 +186,23 @@ pub async fn withdraw_all() -> Result<u64, String> {
 }
 
 // =============================================================================
-// BALANCE QUERIES
+// BALANCE QUERIES (INTERNAL)
 // =============================================================================
 
-#[query]
-pub fn get_balance(user: Principal) -> u64 {
+pub(crate) fn get_balance_internal(user: Principal) -> u64 {
     USER_BALANCES_STABLE.with(|balances| {
         balances.borrow().get(&user).unwrap_or(0)
     })
 }
 
-#[query]
-pub fn get_my_balance() -> u64 {
-    get_balance(ic_cdk::caller())
-}
-
 /// Get the maximum allowed payout (10% of house balance)
 /// Fast query using cached balance - no ledger call needed
-#[query]
-pub fn get_max_allowed_payout() -> u64 {
-    let house_balance = get_house_balance();
+pub(crate) fn get_max_allowed_payout_internal() -> u64 {
+    let house_balance = liquidity_pool::get_pool_reserve();
     (house_balance as f64 * MAX_PAYOUT_PERCENTAGE) as u64
 }
 
-#[query]
-pub fn get_house_balance() -> u64 {
-    liquidity_pool::get_pool_reserve()
-}
-
-#[query]
-pub fn get_accounting_stats() -> AccountingStats {
+pub(crate) fn get_accounting_stats_internal() -> AccountingStats {
     let total_deposits = calculate_total_deposits();
     let unique_depositors = USER_BALANCES_STABLE.with(|balances|
         balances.borrow().iter().count() as u64
@@ -233,11 +220,10 @@ pub fn get_accounting_stats() -> AccountingStats {
 }
 
 // =============================================================================
-// AUDIT FUNCTIONS
+// AUDIT FUNCTIONS (INTERNAL)
 // =============================================================================
 
-#[query]
-pub fn audit_balances() -> Result<String, String> {
+pub(crate) fn audit_balances_internal() -> Result<String, String> {
     let total_deposits = calculate_total_deposits();
     let canister_balance = CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow());
     let pool_reserve = liquidity_pool::get_pool_reserve();
@@ -315,4 +301,3 @@ pub(crate) async fn transfer_to_user(recipient: Principal, amount: u64) -> Resul
         Err((code, msg)) => Err(format!("Transfer call failed: {:?} {}", code, msg)),
     }
 }
-
