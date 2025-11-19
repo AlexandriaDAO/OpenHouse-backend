@@ -4,6 +4,7 @@ use ic_stable_structures::{StableBTreeMap, StableCell, memory_manager::VirtualMe
 use serde::Serialize;
 use std::cell::RefCell;
 use std::borrow::Cow;
+use std::sync::LazyLock;
 use num_traits::ToPrimitive;
 
 use super::nat_helpers::*;
@@ -17,6 +18,13 @@ const MIN_DEPOSIT: u64 = 100_000_000; // 1 ICP minimum for all deposits
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
 const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
 const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
+const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
+const LP_WITHDRAWAL_FEE_BPS: u64 = 100; // 1%
+
+static PARENT_PRINCIPAL: LazyLock<Principal> = LazyLock::new(|| {
+    Principal::from_text(PARENT_STAKER_CANISTER)
+        .expect("Invalid parent canister ID")
+});
 
 // Pool state for stable storage
 #[derive(Clone, CandidType, Deserialize, Serialize)]
@@ -227,7 +235,12 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         return Err(format!("Minimum withdrawal is {} e8s", MIN_WITHDRAWAL));
     }
 
-    // Update state BEFORE transfer (reentrancy protection)
+    // Calculate fee (1% using basis points for precision)
+    // SAFETY: We use integer math. 100 bps = 1%.
+    let fee_amount = (payout_u64 * LP_WITHDRAWAL_FEE_BPS) / 10_000;
+    let lp_amount = payout_u64 - fee_amount;
+
+    // Update shares BEFORE transfer (reentrancy protection)
     LP_SHARES.with(|shares| {
         let mut shares_map = shares.borrow_mut();
         let new_shares = nat_subtract(&user_shares, &shares_to_burn).unwrap();
@@ -238,24 +251,71 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         }
     });
 
+    // ====================================================================
+    // SAFETY VALVE ACCOUNTING:
+    // 1. Deduct ONLY the LP's portion from the reserve initially.
+    // 2. The fee portion remains in the reserve until it is successfully transferred.
+    // 3. If the fee transfer fails, we DO NOT deduct it.
+    //    Result: Reserve matches Balance. Fee is "refunded" to the pool.
+    // ====================================================================
+    
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
-        pool_state.reserve = new_reserve.clone();
+        // Deduct only what we are about to send to the LP
+        pool_state.reserve = nat_subtract(&pool_state.reserve, &u64_to_nat(lp_amount))
+            .ok_or("Insufficient pool reserve")?;
         state.borrow_mut().set(pool_state).unwrap();
-    });
+        Ok::<(), String>(())
+    })?;
 
-    // Transfer to user
-    match transfer_to_user(caller, payout_u64).await {
-        Ok(_) => Ok(payout_u64),
+    // CRITICAL: Transfer to LP first
+    match transfer_to_user(caller, lp_amount).await {
+        Ok(_) => {
+            // LP got paid successfully ✅
+            
+            // BEST EFFORT: Try to pay parent
+            // Only attempt if fee > transfer cost, otherwise it stays in pool
+            let net_fee = fee_amount.saturating_sub(TRANSFER_FEE);
+            
+            if net_fee > 0 {
+                match transfer_to_user(*PARENT_PRINCIPAL, net_fee).await {
+                    Ok(_) => {
+                        // Parent transfer succeeded - NOW we deduct the fee from reserve
+                        POOL_STATE.with(|state| {
+                            let mut pool_state = state.borrow().get().clone();
+                            pool_state.reserve = nat_subtract(&pool_state.reserve, &u64_to_nat(fee_amount))
+                                .unwrap_or(pool_state.reserve);
+                            state.borrow_mut().set(pool_state).unwrap();
+                        });
+                        ic_cdk::println!("LP withdrawal: {} got {} e8s, parent fee {} e8s", 
+                                       caller, lp_amount, fee_amount);
+                    }
+                    Err(e) => {
+                        // SAFETY VALVE: Parent transfer failed.
+                        // We do NOTHING. The fee remains in the reserve.
+                        // Reserve matches Balance. No floating funds.
+                        ic_cdk::println!("Parent fee transfer failed: {}, {} e8s remains in pool",
+                                       e, fee_amount);
+                    }
+                }
+            } else {
+                ic_cdk::println!("Fee {} e8s too small to transfer, remains in pool", fee_amount);
+            }
+
+            Ok(lp_amount)
+        }
         Err(e) => {
-            // ROLLBACK on failure
+            // LP transfer failed - ROLLBACK EVERYTHING
+            
+            // 1. Restore shares
             LP_SHARES.with(|shares| {
                 shares.borrow_mut().insert(caller, StorableNat(user_shares));
             });
 
+            // 2. Restore reserve (add back ONLY what we deducted: lp_amount)
             POOL_STATE.with(|state| {
                 let mut pool_state = state.borrow().get().clone();
-                pool_state.reserve = nat_add(&new_reserve, &payout_nat);
+                pool_state.reserve = nat_add(&pool_state.reserve, &u64_to_nat(lp_amount));
                 state.borrow_mut().set(pool_state).unwrap();
             });
 
