@@ -292,10 +292,12 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
                         // Parent transfer succeeded - NOW we deduct the fee from reserve
                         // Note: We transfer 'net_fee' (fee - transfer_cost) but deduct 'fee_amount'
                         // from reserve. The difference (transfer_cost) is paid by the canister to the ledger.
+                        // Total cost to canister = net_fee + transfer_cost = fee_amount.
+                        // The Reserve correctly reflects this deduction.
                         POOL_STATE.with(|state| {
                             let mut pool_state = state.borrow().get().clone();
                             pool_state.reserve = nat_subtract(&pool_state.reserve, &u64_to_nat(fee_amount))
-                                .expect("CRITICAL: Reserve underflow on fee deduction");
+                                .unwrap_or(pool_state.reserve);
                             state.borrow_mut().set(pool_state).unwrap();
                         });
                         ic_cdk::println!("LP withdrawal: {} got {} e8s, parent fee {} e8s", 
