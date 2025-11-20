@@ -19,11 +19,21 @@ pub enum WithdrawalType {
 
 impl Storable for PendingWithdrawal {
     fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(candid::encode_one(self).expect("Failed to encode PendingWithdrawal"))
+        Cow::Owned(
+            candid::encode_one(self).expect(
+                "CRITICAL: Failed to encode PendingWithdrawal. \
+                 This should never happen unless there's a bug in candid serialization. \
+                 If this occurs, it indicates a serious system integrity issue."
+            )
+        )
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        candid::decode_one(&bytes).expect("Failed to decode PendingWithdrawal")
+        candid::decode_one(&bytes).expect(
+            "CRITICAL: Failed to decode PendingWithdrawal from stable storage. \
+             This indicates storage corruption or an incompatible canister upgrade. \
+             Manual intervention required - check upgrade path and stable storage state."
+        )
     }
 
     const BOUND: Bound = Bound::Bounded {
@@ -51,11 +61,21 @@ pub enum AuditEvent {
 
 impl Storable for AuditEntry {
     fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(candid::encode_one(self).expect("Failed to encode AuditEntry"))
+        Cow::Owned(
+            candid::encode_one(self).expect(
+                "CRITICAL: Failed to encode AuditEntry. \
+                 This should never happen unless there's a bug in candid serialization. \
+                 Audit logging is failing - system integrity may be compromised."
+            )
+        )
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        candid::decode_one(&bytes).expect("Failed to decode AuditEntry")
+        candid::decode_one(&bytes).expect(
+            "CRITICAL: Failed to decode AuditEntry from stable storage. \
+             This indicates audit log corruption or an incompatible upgrade. \
+             Audit trail integrity cannot be guaranteed."
+        )
     }
 
     const BOUND: Bound = Bound::Bounded {

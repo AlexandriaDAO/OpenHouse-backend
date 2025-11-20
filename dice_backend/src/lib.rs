@@ -19,7 +19,7 @@ mod analytics;
 // =============================================================================
 
 pub use defi_accounting::{
-    deposit, withdraw, withdraw_all, get_balance, get_my_balance, get_house_balance,
+    deposit, withdraw_all, get_balance, get_my_balance, get_house_balance,
     get_max_allowed_payout, get_accounting_stats, audit_balances, refresh_canister_balance,
     AccountingStats,
     // Liquidity Pool types only

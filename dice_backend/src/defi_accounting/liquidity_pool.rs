@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use num_traits::ToPrimitive;
 use ic_ledger_types::MAINNET_LEDGER_CANISTER_ID;
 
-use super::accounting;
+use super::{accounting, guard::OperationGuard};
 
 // Constants
 
@@ -120,6 +120,9 @@ pub struct PoolStats {
 // in `accounting.rs` which use the legacy `transfer` (ICRC-1) where the user sends
 // funds directly to the canister's subaccount.
 pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
+    // Prevent concurrent operations from same caller
+    let _guard = OperationGuard::new()?;
+
     // Validate
     if amount < MIN_DEPOSIT {
         return Err(format!("Minimum deposit is {} e8s", MIN_DEPOSIT));
@@ -194,6 +197,9 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
 //    The fee remains in the canister as a protocol buffer.
 //    This ensures the Reserve is always solvent (Reserve <= Balance).
 async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
+    // Prevent concurrent operations from same caller
+    let _guard = OperationGuard::new()?;
+
     let caller = ic_cdk::caller();
 
     // Validate shares
