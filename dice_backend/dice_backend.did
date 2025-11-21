@@ -81,7 +81,6 @@ service : {
 
   // Accounting methods
   deposit: (nat64) -> (variant { Ok: nat64; Err: text });
-  withdraw: (nat64) -> (variant { Ok: nat64; Err: text });
   withdraw_all: () -> (variant { Ok: nat64; Err: text });
   get_balance: (principal) -> (nat64) query;
   get_my_balance: () -> (nat64) query;
@@ -98,6 +97,7 @@ service : {
 
   // LP Queries
   get_lp_position : (principal) -> (LPPosition) query;
+  get_my_lp_position : () -> (LPPosition) query;
   get_pool_stats : () -> (PoolStats) query;
   get_house_mode : () -> (text) query;
   can_accept_bets : () -> (bool) query;
