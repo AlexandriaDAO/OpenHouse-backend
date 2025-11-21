@@ -41,10 +41,22 @@ pub fn audit_balances() -> Result<String, String> {
 // LIQUIDITY POOL QUERIES
 // =============================================================================
 
+#[query]
 pub fn get_lp_position(user: Principal) -> LPPosition {
     liquidity_pool::get_lp_position_internal(user)
 }
 
+#[query]
 pub fn get_pool_stats() -> PoolStats {
     liquidity_pool::get_pool_stats_internal()
+}
+
+#[query]
+pub fn get_my_lp_position() -> LPPosition {
+    get_lp_position(ic_cdk::caller())
+}
+
+#[query]
+pub fn get_house_mode() -> String {
+    "liquidity_pool".to_string()
 }

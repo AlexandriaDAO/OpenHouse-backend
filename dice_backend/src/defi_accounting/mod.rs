@@ -8,7 +8,10 @@ pub use accounting::{
     deposit,
     withdraw_all,
     refresh_canister_balance,
+    get_canister_balance,
     update_balance,
+    get_withdrawal_status,
+    get_audit_log,
     AccountingStats,
 };
 
@@ -29,5 +32,7 @@ pub use query::{
     get_accounting_stats,
     audit_balances,
     get_lp_position,
+    get_my_lp_position,
     get_pool_stats,
+    get_house_mode,
 };
