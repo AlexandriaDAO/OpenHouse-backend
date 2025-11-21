@@ -18,13 +18,6 @@ mod analytics;
 // RE-EXPORTS
 // =============================================================================
 
-pub use defi_accounting::{
-    deposit, withdraw_all, get_balance, get_my_balance, get_house_balance,
-    get_max_allowed_payout, get_accounting_stats, audit_balances, refresh_canister_balance,
-    AccountingStats,
-    // Liquidity Pool types only
-    LPPosition, PoolStats,
-};
 pub use types::{RollDirection, DiceResult, GameStats, DetailedGameHistory, SeedRotationRecord};
 
 // =============================================================================
@@ -125,90 +118,7 @@ fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<
     game::calculate_payout_info(target_number, direction)
 }
 
-#[update]
-async fn get_canister_balance() -> u64 {
-    #[derive(CandidType, serde::Serialize)]
-    struct Account {
-        owner: Principal,
-        subaccount: Option<Vec<u8>>,
-    }
-
-    let account = Account {
-        owner: ic_cdk::id(),
-        subaccount: None,
-    };
-
-    let ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-    let result: Result<(Nat,), _> = ic_cdk::call(ledger, "icrc1_balance_of", (account,)).await;
-
-    match result {
-        Ok((balance,)) => {
-            balance.0.try_into().unwrap_or(0)
-        }
-        Err(e) => {
-            ic_cdk::println!("Failed to query canister balance: {:?}", e);
-            0
-        }
-    }
-}
-
 #[query]
 fn greet(name: String) -> String {
     format!("Welcome to OpenHouse Dice, {}! Roll the dice and test your luck!", name)
-}
-
-// =============================================================================
-// LIQUIDITY POOL API ENDPOINTS
-// =============================================================================
-
-// Pool initialization
-
-// Liquidity Pool Management
-
-#[update]
-async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
-    defi_accounting::deposit_liquidity(amount).await
-}
-
-#[update]
-async fn withdraw_all_liquidity() -> Result<u64, String> {
-    defi_accounting::withdraw_all_liquidity().await
-}
-
-// LP Queries
-
-#[query]
-fn get_lp_position(user: Principal) -> LPPosition {
-    defi_accounting::get_lp_position(user)
-}
-
-#[query]
-fn get_my_lp_position() -> LPPosition {
-    let caller = ic_cdk::caller();
-    defi_accounting::get_lp_position(caller)
-}
-
-#[query]
-fn get_pool_stats() -> PoolStats {
-    defi_accounting::get_pool_stats()
-}
-
-#[query]
-fn get_house_mode() -> String {
-    "liquidity_pool".to_string()
-}
-
-#[query]
-fn can_accept_bets() -> bool {
-    defi_accounting::can_accept_bets()
-}
-
-#[query]
-fn get_withdrawal_status() -> Option<defi_accounting::types::PendingWithdrawal> {
-    defi_accounting::accounting::get_withdrawal_status()
-}
-
-#[query]
-fn get_audit_log(offset: usize, limit: usize) -> Vec<defi_accounting::types::AuditEntry> {
-    defi_accounting::accounting::get_audit_log(offset, limit)
 }

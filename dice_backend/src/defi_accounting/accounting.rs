@@ -1,5 +1,5 @@
 use candid::{CandidType, Deserialize, Principal, Nat};
-use ic_cdk::update;
+use ic_cdk::{query, update};
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::{StableBTreeMap, StableVec};
 use std::cell::RefCell;
@@ -433,13 +433,13 @@ pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
     Ok(())
 }
 
-
+#[query]
 pub fn get_withdrawal_status() -> Option<PendingWithdrawal> {
     let caller = ic_cdk::caller();
     PENDING_WITHDRAWALS.with(|p| p.borrow().get(&caller))
 }
 
-
+#[query]
 pub fn get_audit_log(offset: usize, limit: usize) -> Vec<AuditEntry> {
     AUDIT_LOG.with(|log| {
         let log = log.borrow();
@@ -485,6 +485,33 @@ pub async fn refresh_canister_balance() -> u64 {
         }
         Err(_e) => {
             CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow())
+        }
+    }
+}
+
+#[update]
+pub async fn get_canister_balance() -> u64 {
+    #[derive(CandidType, Deserialize)]
+    struct IcrcAccount {
+        owner: Principal,
+        subaccount: Option<Vec<u8>>,
+    }
+
+    let account = IcrcAccount {
+        owner: ic_cdk::id(),
+        subaccount: None,
+    };
+
+    let ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
+    let result: Result<(Nat,), _> = ic_cdk::call(ledger, "icrc1_balance_of", (account,)).await;
+
+    match result {
+        Ok((balance,)) => {
+            balance.0.try_into().unwrap_or(0)
+        }
+        Err(e) => {
+            ic_cdk::println!("Failed to query canister balance: {:?}", e);
+            0
         }
     }
 }
