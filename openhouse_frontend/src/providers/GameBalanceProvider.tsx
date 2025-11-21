@@ -117,11 +117,10 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
             ]);
             break;
           case 'mines':
-            if (!minesActor) throw new Error('Mines actor not available');
-            [gameBalance, houseBalance] = await Promise.all([
-              (minesActor as any).get_my_balance(),
-              (minesActor as any).get_house_balance(),
-            ]);
+            // Plinko V2 (Motoko) doesn't have balance management - use dummy values
+            // This is a demo implementation without real balance tracking
+            gameBalance = BigInt(0);
+            houseBalance = BigInt(100000000000); // 1000 ICP in e8s for display
             break;
           default:
             throw new Error(`Unknown game type: ${game}`);

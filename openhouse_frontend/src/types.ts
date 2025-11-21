@@ -15,4 +15,5 @@ export interface GameInfo {
   houseEdge: number;
   path: string;
   icon: string;
+  badge?: string;
 }

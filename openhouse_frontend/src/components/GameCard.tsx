@@ -20,7 +20,14 @@ export const GameCard: React.FC<GameCardProps> = ({ game }) => {
       }}
     >
       <div className="text-4xl mb-4">{game.icon}</div>
-      <h2 className="text-2xl font-bold mb-2">{game.name}</h2>
+      <div className="flex items-center justify-center gap-2 mb-2">
+        <h2 className="text-2xl font-bold">{game.name}</h2>
+        {game.badge && (
+          <span className="bg-purple-600 text-white px-2 py-1 rounded text-xs font-semibold">
+            {game.badge}
+          </span>
+        )}
+      </div>
       <p className="text-gray-400 mb-4">{game.description}</p>
       <div className="space-y-2 text-sm">
         <div className="flex justify-between">
