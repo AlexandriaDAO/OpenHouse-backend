@@ -1,0 +1,33 @@
+type PlinkoResult = record {
+  path: vec bool;
+  final_position: nat8;
+  multiplier: float64;
+  win: bool;
+};
+
+type MultiBallResult = record {
+  balls: vec PlinkoResult;
+  total_multiplier: float64;
+  average_multiplier: float64;
+  ball_count: nat8;
+};
+
+service : {
+  // Drop a ball - no parameters needed (fixed 8 rows)
+  drop_ball: () -> (variant { Ok: PlinkoResult; Err: text });
+
+  // Drop multiple balls (1-10 balls)
+  drop_balls: (nat8) -> (variant { Ok: MultiBallResult; Err: text });
+
+  // Get all 9 multipliers (positions 0-8)
+  get_multipliers: () -> (vec float64) query;
+
+  // Get the mathematical formula
+  get_formula: () -> (text) query;
+
+  // Get expected value (should be 0.99)
+  get_expected_value: () -> (float64) query;
+
+  // Test function
+  greet: (text) -> (text) query;
+}

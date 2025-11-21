@@ -1,0 +1,35 @@
+type CrashResult = record {
+  crash_point: float64;
+  randomness_hash: text;
+};
+
+type PlayCrashResult = record {
+  crash_point: float64;
+  won: bool;
+  target_multiplier: float64;
+  payout: nat64;
+  randomness_hash: text;
+};
+
+service : {
+  // NEW: Secure pre-commitment method
+  play_crash: (float64) -> (variant { Ok: PlayCrashResult; Err: text });
+
+  // DEPRECATED: Old method (kept for compatibility)
+  simulate_crash: () -> (variant { Ok: CrashResult; Err: text });
+
+  // Get the crash formula
+  get_crash_formula: () -> (text) query;
+
+  // Get expected value (0.99)
+  get_expected_value: () -> (float64) query;
+
+  // Get probability of reaching target (validates input is finite)
+  get_win_probability: (float64) -> (variant { Ok: float64; Err: text }) query;
+
+  // Get probability table for common targets
+  get_probability_table: () -> (vec record { float64; float64 }) query;
+
+  // Test function
+  greet: (text) -> (text) query;
+}
