@@ -3,7 +3,7 @@ import './DiceAnimation.css';
 
 // Animation timing constants
 const ANIMATION_CONFIG = {
-  FRAME_INTERVAL: 50, // Slower update for numbers (50ms vs 33ms)
+  FRAME_INTERVAL: 100, // Reduced update rate (100ms = 10fps) for performance
   MIN_DISPLAY_TIME: 500,
   RESULT_DISPLAY_DURATION: 2000
 } as const;
@@ -100,13 +100,17 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
           intervalRef.current = null;
         }
         setAnimationPhase('complete');
-        if (onAnimationComplete) onAnimationComplete();
+        onAnimationComplete?.();
       }, 10000);
 
       return () => {
         if (intervalRef.current) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
+        }
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+          timeoutRef.current = null;
         }
       };
     }
@@ -124,10 +128,7 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
         
         setDisplayNumber(targetNumber);
         setAnimationPhase('complete');
-
-        if (onAnimationComplete) {
-          onAnimationComplete();
-        }
+        onAnimationComplete?.();
       }, ANIMATION_CONFIG.MIN_DISPLAY_TIME);
 
       return () => clearTimeout(minRollTime);
