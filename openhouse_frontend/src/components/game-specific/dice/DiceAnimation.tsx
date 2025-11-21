@@ -166,40 +166,44 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
   return (
     <div className="dice-container">
       <div 
-        className={`dice-cube ${
-          animationPhase === 'rolling' ? 'rolling-animation' : ''
-        } ${
+        className={`dice-scaler ${
           animationPhase === 'complete' ? 'landing-animation' : ''
         }`}
       >
-        {/* Front face (showing current number) */}
-        <div className="dice-face dice-face-front">
-          <DiceDots number={displayNumber} />
-        </div>
+        <div 
+          className={`dice-cube ${
+            animationPhase === 'rolling' ? 'rolling-animation' : ''
+          }`}
+        >
+          {/* Front face (showing current number) */}
+          <div className="dice-face dice-face-front">
+            <DiceDots number={displayNumber} />
+          </div>
 
-        {/* Back face */}
-        <div className="dice-face dice-face-back">
-          <DiceDots number={getOppositeFace(displayNumber)} />
-        </div>
+          {/* Back face */}
+          <div className="dice-face dice-face-back">
+            <DiceDots number={getOppositeFace(displayNumber)} />
+          </div>
 
-        {/* Right face */}
-        <div className="dice-face dice-face-right">
-          <DiceDots number={adjacentFaces[0]} />
-        </div>
+          {/* Right face */}
+          <div className="dice-face dice-face-right">
+            <DiceDots number={adjacentFaces[0]} />
+          </div>
 
-        {/* Left face */}
-        <div className="dice-face dice-face-left">
-          <DiceDots number={adjacentFaces[1]} />
-        </div>
+          {/* Left face */}
+          <div className="dice-face dice-face-left">
+            <DiceDots number={adjacentFaces[1]} />
+          </div>
 
-        {/* Top face */}
-        <div className="dice-face dice-face-top">
-          <DiceDots number={adjacentFaces[2]} />
-        </div>
+          {/* Top face */}
+          <div className="dice-face dice-face-top">
+            <DiceDots number={adjacentFaces[2]} />
+          </div>
 
-        {/* Bottom face */}
-        <div className="dice-face dice-face-bottom">
-          <DiceDots number={adjacentFaces[3]} />
+          {/* Bottom face */}
+          <div className="dice-face dice-face-bottom">
+            <DiceDots number={adjacentFaces[3]} />
+          </div>
         </div>
       </div>
 
