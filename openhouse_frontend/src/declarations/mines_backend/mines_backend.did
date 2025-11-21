@@ -1,68 +1,38 @@
-type GameStats = record {
-  total_games: nat64;
-  total_completed: nat64;
-  total_busted: nat64;
-};
-
-// ⚠️ DEMO MODE: These values are SIMULATED, not real ICP balances
-type Bankroll = record {
-  total_wagered: nat64;    // DEMO: Simulated total bets
-  total_paid_out: nat64;   // DEMO: Simulated total payouts
-  house_profit: int64;     // DEMO: Simulated profit
-  balance: nat64;          // DEMO: Simulated balance (NOT real ICP)
-};
-
-type RevealResult = record {
-  busted: bool;
-  multiplier: float64;
-};
-
-type GameInfo = record {
-  player: principal;
-  revealed: vec bool; // 25 booleans for 5x5 grid
-  num_mines: nat8;
-  is_active: bool;
-  current_multiplier: float64;
-};
-
-type GameSummary = record {
-  game_id: nat64;
-  num_mines: nat8;
-  is_active: bool;
-  timestamp: nat64;
-};
-
-// ============================================================
-// ⚠️ DEMO MODE - NO REAL ICP TRANSFERS ⚠️
-// All ICP amounts are SIMULATED for testing only
-// DO NOT use with real funds until ledger integration is complete
-// ============================================================
-
+type Result_1 = 
+ variant {
+   err: text;
+   ok: PlinkoResult;
+ };
+type Result = 
+ variant {
+   err: text;
+   ok: MultiBallResult;
+ };
+type PlinkoResult = 
+ record {
+   final_position: nat8;
+   multiplier: float64;
+   path: vec bool;
+   win: bool;
+ };
+type MultiBallResult = 
+ record {
+   average_multiplier: float64;
+   ball_count: nat8;
+   balls: vec PlinkoResult;
+   total_multiplier: float64;
+ };
 service : {
-  // ⚠️ DEMO: Start a new mines game (bet_amount in e8s - SIMULATED)
-  start_game: (nat64) -> (variant { Ok: nat64; Err: text });
-
-  // Reveal a tile (position 0-24)
-  reveal_tile: (nat64, nat8) -> (variant { Ok: RevealResult; Err: text });
-
-  // ⚠️ DEMO: Cash out and get payout (returns SIMULATED amount in e8s)
-  cash_out: (nat64) -> (variant { Ok: nat64; Err: text });
-
-  // Query game state (without revealing mines)
-  get_game: (nat64) -> (variant { Ok: GameInfo; Err: text }) query;
-
-  // Query statistics
-  get_stats: () -> (GameStats) query;
-
-  // Query bankroll
-  get_bankroll: () -> (Bankroll) query;
-
-  // Deposit to bankroll (amount in e8s)
-  deposit_to_bankroll: (nat64) -> (variant { Ok; Err: text });
-
-  // Get recent games for caller
-  get_recent_games: (nat32) -> (vec GameSummary) query;
-
-  // Test function
-  greet: (text) -> (text) query;
+  /// Drop a single ball down the 8-row Plinko board
+  drop_ball: () -> (Result_1);
+  /// Drop multiple balls (1-10) down the Plinko board
+  drop_balls: (num_balls: nat8) -> (Result);
+  /// Get expected value (should be 0.99 for 1% house edge)
+  get_expected_value: () -> (float64) query;
+  /// Get the mathematical formula as text
+  get_formula: () -> (text) query;
+  /// Get all 9 multipliers (positions 0-8)
+  get_multipliers: () -> (vec float64) query;
+  /// Test/greet function
+  greet: (name: text) -> (text) query;
 }

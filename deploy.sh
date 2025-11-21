@@ -45,7 +45,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --crash-only       Deploy only crash backend"
             echo "  --plinko-only      Deploy only plinko backend"
-            echo "  --mines-only       Deploy only mines backend"
+            echo "  --mines-only       Deploy only Plinko V2 (Motoko) backend"
             echo "  --dice-only        Deploy only dice backend"
             echo "  --frontend-only    Deploy only the frontend"
             echo "  --test            Run post-deployment tests"
@@ -55,7 +55,7 @@ while [[ $# -gt 0 ]]; do
             echo "  ./deploy.sh                    # Deploy everything to mainnet"
             echo "  ./deploy.sh --crash-only       # Deploy only crash backend"
             echo "  ./deploy.sh --plinko-only      # Deploy only plinko backend"
-            echo "  ./deploy.sh --mines-only       # Deploy only mines backend"
+            echo "  ./deploy.sh --mines-only       # Deploy only Plinko V2 (Motoko) backend"
             echo "  ./deploy.sh --dice-only        # Deploy only dice backend"
             echo "  ./deploy.sh --test             # Deploy and run tests"
             echo ""
@@ -151,24 +151,21 @@ deploy_plinko() {
     echo ""
 }
 
-# Function to deploy mines backend
+# Function to deploy mines backend (now Plinko V2 - Motoko)
 deploy_mines() {
     echo "================================================"
-    echo "Deploying Mines Backend Canister"
+    echo "Deploying Plinko V2 (Motoko) Backend Canister"
     echo "================================================"
 
-    # Build the backend canister
-    echo "Building mines backend canister..."
-    cargo build --release --target wasm32-unknown-unknown --package mines_backend
-
-    # Skip candid extraction - using manually created .did file
-    echo "Using pre-defined candid interface..."
+    # Build Motoko canister (dfx handles this automatically)
+    echo "Building Plinko V2 (Motoko) backend canister..."
+    dfx build mines_backend --network ic
 
     # Deploy to mainnet
-    echo "Deploying mines backend to mainnet..."
+    echo "Deploying Plinko V2 (Motoko) to mainnet..."
     dfx deploy mines_backend --network ic
 
-    echo "Mines backend deployment completed!"
+    echo "Plinko V2 (Motoko) deployment completed!"
     echo ""
 }
 

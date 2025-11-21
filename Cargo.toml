@@ -2,7 +2,6 @@
 members = [
     "crash_backend",
     "plinko_backend",
-    "mines_backend",
     "dice_backend",
 ]
 resolver = "2"

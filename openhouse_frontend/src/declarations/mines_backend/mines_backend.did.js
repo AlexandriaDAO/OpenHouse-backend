@@ -1,66 +1,25 @@
 export const idlFactory = ({ IDL }) => {
-  const Bankroll = IDL.Record({
-    'total_paid_out' : IDL.Nat64,
-    'balance' : IDL.Nat64,
-    'total_wagered' : IDL.Nat64,
-    'house_profit' : IDL.Int64,
-  });
-  const GameInfo = IDL.Record({
-    'player' : IDL.Principal,
-    'current_multiplier' : IDL.Float64,
-    'revealed' : IDL.Vec(IDL.Bool),
-    'num_mines' : IDL.Nat8,
-    'is_active' : IDL.Bool,
-  });
-  const GameSummary = IDL.Record({
-    'num_mines' : IDL.Nat8,
-    'game_id' : IDL.Nat64,
-    'timestamp' : IDL.Nat64,
-    'is_active' : IDL.Bool,
-  });
-  const GameStats = IDL.Record({
-    'total_games' : IDL.Nat64,
-    'total_busted' : IDL.Nat64,
-    'total_completed' : IDL.Nat64,
-  });
-  const RevealResult = IDL.Record({
+  const PlinkoResult = IDL.Record({
+    'win' : IDL.Bool,
     'multiplier' : IDL.Float64,
-    'busted' : IDL.Bool,
+    'path' : IDL.Vec(IDL.Bool),
+    'final_position' : IDL.Nat8,
   });
+  const Result_1 = IDL.Variant({ 'ok' : PlinkoResult, 'err' : IDL.Text });
+  const MultiBallResult = IDL.Record({
+    'total_multiplier' : IDL.Float64,
+    'ball_count' : IDL.Nat8,
+    'balls' : IDL.Vec(PlinkoResult),
+    'average_multiplier' : IDL.Float64,
+  });
+  const Result = IDL.Variant({ 'ok' : MultiBallResult, 'err' : IDL.Text });
   return IDL.Service({
-    'cash_out' : IDL.Func(
-        [IDL.Nat64],
-        [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],
-        [],
-      ),
-    'deposit_to_bankroll' : IDL.Func(
-        [IDL.Nat64],
-        [IDL.Variant({ 'Ok' : IDL.Null, 'Err' : IDL.Text })],
-        [],
-      ),
-    'get_bankroll' : IDL.Func([], [Bankroll], ['query']),
-    'get_game' : IDL.Func(
-        [IDL.Nat64],
-        [IDL.Variant({ 'Ok' : GameInfo, 'Err' : IDL.Text })],
-        ['query'],
-      ),
-    'get_recent_games' : IDL.Func(
-        [IDL.Nat32],
-        [IDL.Vec(GameSummary)],
-        ['query'],
-      ),
-    'get_stats' : IDL.Func([], [GameStats], ['query']),
+    'drop_ball' : IDL.Func([], [Result_1], []),
+    'drop_balls' : IDL.Func([IDL.Nat8], [Result], []),
+    'get_expected_value' : IDL.Func([], [IDL.Float64], ['query']),
+    'get_formula' : IDL.Func([], [IDL.Text], ['query']),
+    'get_multipliers' : IDL.Func([], [IDL.Vec(IDL.Float64)], ['query']),
     'greet' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
-    'reveal_tile' : IDL.Func(
-        [IDL.Nat64, IDL.Nat8],
-        [IDL.Variant({ 'Ok' : RevealResult, 'Err' : IDL.Text })],
-        [],
-      ),
-    'start_game' : IDL.Func(
-        [IDL.Nat64],
-        [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],
-        [],
-      ),
   });
 };
 export const init = ({ IDL }) => { return []; };

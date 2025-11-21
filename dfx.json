@@ -13,8 +13,8 @@
       "specified_id": "weupr-2qaaa-aaaap-abl3q-cai"
     },
     "mines_backend": {
-      "type": "rust",
-      "package": "mines_backend",
+      "type": "motoko",
+      "main": "mines_backend/src/main.mo",
       "candid": "mines_backend/mines_backend.did",
       "specified_id": "wvrcw-3aaaa-aaaah-arm4a-cai"
     },
