@@ -180,11 +180,11 @@ pub async fn withdraw_all() -> Result<u64, String> {
                           balance, MIN_WITHDRAW / 100_000_000));
     }
 
-    // ATOMIC: Set balance to 0 + create pending
-    USER_BALANCES_STABLE.with(|balances| {
-        balances.borrow_mut().insert(caller, 0);
-    });
-
+    // ATOMIC: Create pending FIRST, then zero balance
+    // This ordering is critical for atomicity:
+    // - If inserting pending fails (e.g., memory full), balance remains untouched
+    // - IC stable structures auto-rollback on trap, so partial state is impossible
+    // - Only after pending is successfully created do we zero the balance
     let created_at = ic_cdk::api::time();
     let pending = PendingWithdrawal {
         withdrawal_type: WithdrawalType::User { amount: balance },
@@ -194,6 +194,12 @@ pub async fn withdraw_all() -> Result<u64, String> {
     };
 
     PENDING_WITHDRAWALS.with(|p| p.borrow_mut().insert(caller, pending));
+
+    // Now that pending is created, zero the balance
+    USER_BALANCES_STABLE.with(|balances| {
+        balances.borrow_mut().insert(caller, 0);
+    });
+
     log_audit(AuditEvent::WithdrawalInitiated { user: caller, amount: balance });
 
     match attempt_transfer(caller, balance, created_at).await {

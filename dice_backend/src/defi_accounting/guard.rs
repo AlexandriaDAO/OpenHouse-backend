@@ -37,6 +37,31 @@ impl Drop for OperationGuard {
     }
 }
 
+/// Emergency safety valve: Clear stuck guard for a specific principal
+///
+/// This function exists as a fail-safe in case a guard fails to drop properly
+/// (e.g., canister trap/upgrade during an operation). Without this, a user could
+/// be permanently locked out from performing operations.
+///
+/// **WARNING**: This bypasses the guard protection. Only use if:
+/// - User reports being unable to perform operations due to "already in progress" error
+/// - You've verified there's no actual pending operation for this user
+/// - As a last resort recovery mechanism
+///
+/// Returns: true if a guard was cleared, false if no guard existed
+pub fn clear_guard_for_principal(principal: Principal) -> bool {
+    PENDING_OPERATIONS.with(|ops| {
+        ops.borrow_mut().remove(&principal)
+    })
+}
+
+/// Query: Check if a principal currently has an active guard
+pub fn has_active_guard(principal: Principal) -> bool {
+    PENDING_OPERATIONS.with(|ops| {
+        ops.borrow().contains(&principal)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
