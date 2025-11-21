@@ -8,7 +8,7 @@ import {
   GameStats,
   type GameStat,
 } from '../components/game-ui';
-import { DiceAnimation, DiceControls, DiceAccountingPanel, type DiceDirection } from '../components/game-specific/dice';
+import { DiceAnimation, DiceControls, DiceAccountingPanel, DiceLiquidityPanel, type DiceDirection } from '../components/game-specific/dice';
 import { useGameMode, useGameState } from '../hooks/games';
 import { useGameBalance } from '../providers/GameBalanceProvider';
 import { useAuth } from '../providers/AuthProvider';
@@ -313,6 +313,9 @@ export const Dice: React.FC = () => {
         onBalanceChange={handleBalanceChange}
         showDepositAnimation={showDepositAnimation}
       />
+
+      {/* LIQUIDITY POOL PANEL */}
+      <DiceLiquidityPanel />
 
       {/* BETTING CONTROLS */}
       <div className="card max-w-2xl mx-auto">

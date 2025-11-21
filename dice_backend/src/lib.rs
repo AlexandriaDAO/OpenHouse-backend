@@ -183,6 +183,12 @@ fn get_lp_position(user: Principal) -> LPPosition {
 }
 
 #[query]
+fn get_my_lp_position() -> LPPosition {
+    let caller = ic_cdk::caller();
+    defi_accounting::get_lp_position(caller)
+}
+
+#[query]
 fn get_pool_stats() -> PoolStats {
     defi_accounting::get_pool_stats()
 }
