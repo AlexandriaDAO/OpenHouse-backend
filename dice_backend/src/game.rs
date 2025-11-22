@@ -237,12 +237,36 @@ pub async fn play_dice(
     // Now only add winnings if player won
 
     if is_win {
+        // Calculate profit to be deducted from pool
+        let profit = payout.saturating_sub(bet_amount);
+        let pool_reserve = liquidity_pool::get_pool_reserve();
+
+        // Check if pool can afford the profit payout
+        if profit > pool_reserve {
+            // CRITICAL: Race condition hit. Pool was drained during game.
+            // ACTION: Refund bet, Log error, Return failure.
+            
+            // Refund the bet that was deducted earlier
+            let current_balance = accounting::get_balance(caller);
+            let refund_balance = current_balance.checked_add(bet_amount)
+                .ok_or("Balance overflow on refund")?;
+            accounting::update_balance(caller, refund_balance)?;
+            
+            // Log
+            ic_cdk::println!("CRITICAL: Payout failure. Refunded {} to {}", bet_amount, caller);
+            
+            return Err(format!(
+                "House cannot afford payout ({} ICP). Your bet of {} ICP has been REFUNDED. Pool was drained by concurrent games. Please try a smaller bet.", 
+                profit as f64 / E8S_PER_ICP as f64,
+                bet_amount as f64 / E8S_PER_ICP as f64
+            ));
+        }
+
         let current_balance = accounting::get_balance(caller);
         let new_balance = current_balance.checked_add(payout)
             .ok_or("Balance overflow when adding winnings")?;
         accounting::update_balance(caller, new_balance)?;
 
-        let profit = payout.saturating_sub(bet_amount);
         liquidity_pool::update_pool_on_win(profit);
     } else {
         liquidity_pool::update_pool_on_loss(bet_amount);
