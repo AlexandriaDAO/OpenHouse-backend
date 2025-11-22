@@ -22,7 +22,9 @@ const USER_BALANCES_MEMORY_ID: u8 = 10;
 const PENDING_WITHDRAWALS_MEMORY_ID: u8 = 20;
 const AUDIT_LOG_MEMORY_ID: u8 = 21;
 const MAX_PAYOUT_PERCENTAGE: f64 = 0.10;
-const MAX_RETRIES: u8 = 10;
+// Retry for ~21 hours (250 * 5 mins) to cover transient outages while staying
+// within the Ledger's 24-hour deduplication window.
+const MAX_RETRIES: u8 = 250;
 /// Minimum balance before triggering automatic weekly withdrawal to parent canister.
 /// Set to 1 ICP to minimize gas costs while ensuring timely fee collection.
 const PARENT_AUTO_WITHDRAW_THRESHOLD: u64 = 100_000_000; // 1 ICP
@@ -394,7 +396,7 @@ async fn process_single_withdrawal(user: Principal) -> Result<(), String> {
 
     if pending.retries >= MAX_RETRIES {
         log_audit(AuditEvent::SystemError {
-             error: format!("Withdrawal STUCK for {}. Manual Check Required.", user)
+             error: format!("Withdrawal STUCK for {} after ~21h. Manual Check Required.", user)
         });
         return Ok(());
     }
@@ -417,7 +419,7 @@ async fn process_single_withdrawal(user: Principal) -> Result<(), String> {
              PENDING_WITHDRAWALS.with(|p| {
                 let mut map = p.borrow_mut();
                 if let Some(mut w) = map.get(&user) {
-                    w.retries += 1;
+                    w.retries = w.retries.saturating_add(1);
                     w.last_error = Some(msg);
                     map.insert(user, w);
                 }
