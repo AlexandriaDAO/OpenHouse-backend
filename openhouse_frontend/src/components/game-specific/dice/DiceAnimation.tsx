@@ -3,8 +3,8 @@ import './DiceAnimation.css';
 
 // Animation timing constants
 const ANIMATION_CONFIG = {
-  FRAME_INTERVAL: 100, // Reduced update rate (100ms = 10fps) for performance
-  MIN_DISPLAY_TIME: 500,
+  FAST_INTERVAL: 50,            // Fast rolling interval
+  SLOWDOWN_DELAYS: [100, 150, 250, 400, 600], // Progressive slowdown steps
   RESULT_DISPLAY_DURATION: 2000
 } as const;
 
@@ -14,238 +14,91 @@ interface DiceAnimationProps {
   onAnimationComplete?: () => void;
 }
 
-// Helper component for rendering dice dots
-const DiceDots: React.FC<{ number: number }> = ({ number }) => {
-  // For 1-6: render traditional dice dot patterns
-  if (number >= 1 && number <= 6) {
-    return (
-      <div className={`dice-dots dots-${number}`}>
-        {number === 1 && (
-          <div className="dice-dot center"></div>
-        )}
-        {number === 2 && (
-          <>
-            <div className="dice-dot top-left"></div>
-            <div className="dice-dot bottom-right"></div>
-          </>
-        )}
-        {number === 3 && (
-          <>
-            <div className="dice-dot top-left"></div>
-            <div className="dice-dot center"></div>
-            <div className="dice-dot bottom-right"></div>
-          </>
-        )}
-        {number === 4 && (
-          <>
-            <div className="dice-dot top-left"></div>
-            <div className="dice-dot top-right"></div>
-            <div className="dice-dot bottom-left"></div>
-            <div className="dice-dot bottom-right"></div>
-          </>
-        )}
-        {number === 5 && (
-          <>
-            <div className="dice-dot top-left"></div>
-            <div className="dice-dot top-right"></div>
-            <div className="dice-dot center"></div>
-            <div className="dice-dot bottom-left"></div>
-            <div className="dice-dot bottom-right"></div>
-          </>
-        )}
-        {number === 6 && (
-          <>
-            <div className="dice-dot top-left"></div>
-            <div className="dice-dot top-right"></div>
-            <div className="dice-dot middle-left"></div>
-            <div className="dice-dot middle-right"></div>
-            <div className="dice-dot bottom-left"></div>
-            <div className="dice-dot bottom-right"></div>
-          </>
-        )}
-      </div>
-    );
-  }
-
-  // For 0, 7-100: render number in monospace font
-  return <span className="dice-number-display">{number}</span>;
-};
-
 export const DiceAnimation: React.FC<DiceAnimationProps> = ({
   targetNumber,
   isRolling,
   onAnimationComplete
 }) => {
   const [displayNumber, setDisplayNumber] = useState(0);
-  const [animationPhase, setAnimationPhase] = useState<'idle' | 'rolling' | 'complete'>('idle');
+  const [isComplete, setIsComplete] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const slowdownTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  // Start rolling animation
+  // Clear all timers helper
+  const clearAllTimers = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    slowdownTimeoutsRef.current.forEach(t => clearTimeout(t));
+    slowdownTimeoutsRef.current = [];
+  };
+
+  // Main rolling effect
   useEffect(() => {
-    if (isRolling) {
-      setAnimationPhase('rolling');
-      // Clear any previous timeouts
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    // Clear everything first
+    clearAllTimers();
 
-      // Start number shuffling
+    if (isRolling && targetNumber === null) {
+      // Start fast rolling
+      setIsComplete(false);
       intervalRef.current = setInterval(() => {
         setDisplayNumber(Math.floor(Math.random() * 101));
-      }, ANIMATION_CONFIG.FRAME_INTERVAL);
+      }, ANIMATION_CONFIG.FAST_INTERVAL);
+    } else if (isRolling && targetNumber !== null) {
+      // We have a result - do slowdown sequence
+      setIsComplete(false);
 
-      // Safety timeout (10s)
-      timeoutRef.current = setTimeout(() => {
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
-        }
-        setAnimationPhase('complete');
-        onAnimationComplete?.();
-      }, 10000);
+      let totalDelay = 0;
+      ANIMATION_CONFIG.SLOWDOWN_DELAYS.forEach((delay) => {
+        totalDelay += delay;
+        const timeout = setTimeout(() => {
+          setDisplayNumber(Math.floor(Math.random() * 101));
+        }, totalDelay);
+        slowdownTimeoutsRef.current.push(timeout);
+      });
 
-      return () => {
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
-        }
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-          timeoutRef.current = null;
-        }
-      };
-    }
-  }, [isRolling, onAnimationComplete]);
-
-  // Explicitly stop rolling when isRolling becomes false (handles error path)
-  useEffect(() => {
-    if (!isRolling) {
-      // Clear any running intervals immediately
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-
-      // Clear safety timeout
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-
-      // If we don't have a result yet, go to idle immediately
-      if (targetNumber === null && animationPhase === 'rolling') {
-        setAnimationPhase('idle');
-      }
-    }
-  }, [isRolling, targetNumber, animationPhase]);
-
-  // Show result when backend returns
-  useEffect(() => {
-    if (targetNumber !== null && isRolling) {
-      // Add a small delay to ensure the roll is perceived
-      const minRollTime = setTimeout(() => {
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
-        }
-
+      // Final result
+      totalDelay += ANIMATION_CONFIG.SLOWDOWN_DELAYS[ANIMATION_CONFIG.SLOWDOWN_DELAYS.length - 1];
+      const finalTimeout = setTimeout(() => {
         setDisplayNumber(targetNumber);
-        setAnimationPhase('complete');
+        setIsComplete(true);
         onAnimationComplete?.();
-      }, ANIMATION_CONFIG.MIN_DISPLAY_TIME);
-
-      return () => clearTimeout(minRollTime);
+      }, totalDelay);
+      slowdownTimeoutsRef.current.push(finalTimeout);
+    } else if (!isRolling) {
+      // Not rolling - reset to idle
+      setIsComplete(false);
     }
-  }, [targetNumber, isRolling, onAnimationComplete]);
 
-  // Reset to idle after display duration
+    // Cleanup on unmount or when dependencies change
+    return () => {
+      clearAllTimers();
+    };
+  }, [isRolling, targetNumber, onAnimationComplete]);
+
+  // Reset complete state after display duration
   useEffect(() => {
-    if (animationPhase === 'complete' && !isRolling) {
+    if (isComplete && !isRolling) {
       const timer = setTimeout(() => {
-        setAnimationPhase('idle');
+        setIsComplete(false);
       }, ANIMATION_CONFIG.RESULT_DISPLAY_DURATION);
       return () => clearTimeout(timer);
     }
-  }, [animationPhase, isRolling]);
+  }, [isComplete, isRolling]);
 
-  // Validate state consistency and auto-fix invalid states
-  useEffect(() => {
-    // Invalid state 1: isRolling=true but animationPhase='complete'
-    if (isRolling && animationPhase === 'complete') {
-      console.error('[DiceAnimation] INVALID STATE: isRolling=true but animationPhase=complete, fixing...');
-      setAnimationPhase('rolling');
-    }
-
-    // Invalid state 2: animationPhase='rolling' but no interval running and not rolling
-    if (!isRolling && animationPhase === 'rolling' && intervalRef.current === null) {
-      console.error('[DiceAnimation] INVALID STATE: animationPhase=rolling but no interval running and isRolling=false, fixing...');
-      setAnimationPhase('idle');
-    }
-  }, [isRolling, animationPhase]);
-
-  // Calculate opposite/adjacent faces for visual consistency
-  const getOppositeFace = (num: number): number => {
-    if (num >= 1 && num <= 6) return 7 - num;
-    return (num + 50) % 101;
-  };
-
-  const getAdjacentFaces = (num: number): [number, number, number, number] => {
-    // Just generate consistent pseudorandom neighbors based on the number
-    return [
-      (num + 23) % 101,
-      (num + 47) % 101,
-      (num + 71) % 101,
-      (num + 13) % 101
-    ];
-  };
-
-  const adjacentFaces = getAdjacentFaces(displayNumber);
+  const isAnimating = isRolling && !isComplete;
 
   return (
     <div className="dice-container">
-      <div 
-        className={`dice-scaler ${
-          animationPhase === 'complete' ? 'landing-animation' : ''
-        }`}
-      >
-        <div 
-          className={`dice-cube ${
-            animationPhase === 'rolling' ? 'rolling-animation' : ''
-          }`}
-        >
-          {/* Front face (showing current number) */}
-          <div className="dice-face dice-face-front">
-            <DiceDots number={displayNumber} />
-          </div>
-
-          {/* Back face */}
-          <div className="dice-face dice-face-back">
-            <DiceDots number={getOppositeFace(displayNumber)} />
-          </div>
-
-          {/* Right face */}
-          <div className="dice-face dice-face-right">
-            <DiceDots number={adjacentFaces[0]} />
-          </div>
-
-          {/* Left face */}
-          <div className="dice-face dice-face-left">
-            <DiceDots number={adjacentFaces[1]} />
-          </div>
-
-          {/* Top face */}
-          <div className="dice-face dice-face-top">
-            <DiceDots number={adjacentFaces[2]} />
-          </div>
-
-          {/* Bottom face */}
-          <div className="dice-face dice-face-bottom">
-            <DiceDots number={adjacentFaces[3]} />
-          </div>
+      <div className={`dice-box ${isComplete ? 'result-landed' : ''} ${isAnimating ? 'rolling' : ''}`}>
+        <div className="number-display">
+          {displayNumber}
         </div>
       </div>
 
       {/* Result glow */}
-      {animationPhase === 'complete' && targetNumber !== null && (
+      {isComplete && targetNumber !== null && (
         <div className="result-glow-turquoise"></div>
       )}
     </div>

@@ -3,6 +3,7 @@ Status:
 
 2. Fixed in https://github.com/AlexandriaDAO/OpenHouse/pull/76/files  (this fixed both 2 and the critical vulnerability in @claude_audit_v1.md)
 
+3. Fixed in https://github.com/AlexandriaDAO/OpenHouse/pull/79/files 
 
 
 # Gemini Security Audit: `dice_backend` DeFi Module

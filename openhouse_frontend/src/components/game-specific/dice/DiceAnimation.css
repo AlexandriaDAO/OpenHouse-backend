@@ -1,111 +1,65 @@
-/* Realistic 3D Dice Animation Styles - Upgraded */
+/* Simplified Dice Animation - Number Ticker */
 
 .dice-container {
-  /* Pure black void background */
   display: flex;
   justify-content: center;
   align-items: center;
   height: 300px;
   position: relative;
-  perspective: 1000px;
   background: #000000;
 }
 
-/* Wrapper for scaling animation to separate from rotation */
-.dice-scaler {
-  width: 150px;
-  height: 150px;
-  position: relative;
-  transform-style: preserve-3d;
-}
-
-.dice-cube {
-  width: 100%;
-  height: 100%;
-  position: relative;
-  transform-style: preserve-3d;
-  transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-/* Complex tumbling animation for rolling state */
-.dice-cube.rolling-animation {
-  animation: tumble 0.6s infinite linear;
-}
-
-@keyframes tumble {
-  0% { transform: rotateX(0) rotateY(0) rotateZ(0); }
-  25% { transform: rotateX(90deg) rotateY(180deg) rotateZ(45deg); }
-  50% { transform: rotateX(180deg) rotateY(360deg) rotateZ(90deg); }
-  75% { transform: rotateX(270deg) rotateY(540deg) rotateZ(135deg); }
-  100% { transform: rotateX(360deg) rotateY(720deg) rotateZ(180deg); }
-}
-
-/* Landing impact animation applied to wrapper */
-.dice-scaler.landing-animation {
-  animation: land 0.4s ease-out forwards;
-}
-
-@keyframes land {
-  0% { transform: scale(0.8); }
-  50% { transform: scale(1.1); }
-  100% { transform: scale(1); }
-}
-
-/* Individual dice faces */
-.dice-face {
-  position: absolute;
-  width: 150px;
-  height: 150px;
-  background: #FFFFFF; /* Keep white base for contrast */
-  border: 4px solid #000000; /* Thicker black border */
-  /* Cyan glow for "casino" feel */
-  box-shadow: inset 0 0 20px rgba(0, 209, 255, 0.1); 
+/* Dice-like container */
+.dice-box {
+  width: 200px;
+  height: 200px;
+  background: #FFFFFF;
+  border: 4px solid #000000;
+  border-radius: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  backface-visibility: hidden;
+  box-shadow: 0 0 20px rgba(0, 209, 255, 0.2);
+  transition: transform 0.3s ease;
 }
 
-/* Position each face in 3D space */
-.dice-face-front  { transform: rotateY(0deg) translateZ(75px); }
-.dice-face-back   { transform: rotateY(180deg) translateZ(75px); }
-.dice-face-right  { transform: rotateY(90deg) translateZ(75px); }
-.dice-face-left   { transform: rotateY(-90deg) translateZ(75px); }
-.dice-face-top    { transform: rotateX(90deg) translateZ(75px); }
-.dice-face-bottom { transform: rotateX(-90deg) translateZ(75px); }
-
-/* Container for dice dots */
-.dice-dots {
-  width: 100%;
-  height: 100%;
-  position: relative;
+/* Subtle shake during rolling */
+.dice-box.rolling {
+  animation: dice-shake 0.1s infinite;
 }
 
-/* Individual dice dots */
-.dice-dot {
-  width: 24px;
-  height: 24px;
-  background: #000000;
-  border-radius: 50%;
-  position: absolute;
-  box-shadow: 0 0 2px rgba(0,0,0,0.5);
+@keyframes dice-shake {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25% { transform: translateY(-3px) rotate(-1deg); }
+  50% { transform: translateY(0) rotate(0deg); }
+  75% { transform: translateY(-3px) rotate(1deg); }
 }
 
-/* Dot positioning */
-.dice-dot.center { top: 50%; left: 50%; transform: translate(-50%, -50%); }
-.dice-dot.top-left { top: 20%; left: 20%; }
-.dice-dot.top-right { top: 20%; right: 20%; }
-.dice-dot.bottom-left { bottom: 20%; left: 20%; }
-.dice-dot.bottom-right { bottom: 20%; right: 20%; }
-.dice-dot.middle-left { top: 50%; left: 20%; transform: translateY(-50%); }
-.dice-dot.middle-right { top: 50%; right: 20%; transform: translateY(-50%); }
+/* Landing animation - bounce and scale */
+.dice-box.result-landed {
+  animation: dice-land 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
 
-/* Number display for 0, 7-100 */
-.dice-number-display {
+@keyframes dice-land {
+  0% {
+    transform: scale(0.85) rotate(-5deg);
+  }
+  50% {
+    transform: scale(1.1) rotate(2deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+/* Number display inside dice */
+.number-display {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 3rem;
-  font-weight: 800;
+  font-size: 5rem;
+  font-weight: 900;
   color: #000000;
+  user-select: none;
+  text-align: center;
 }
 
 /* Result glow - DFINITY turquoise */
@@ -114,8 +68,8 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 250px;
-  height: 250px;
+  width: 300px;
+  height: 300px;
   border-radius: 50%;
   background: radial-gradient(circle, rgba(41, 171, 226, 0.6) 0%, transparent 70%);
   animation: pulse-glow 1.5s ease-in-out infinite;
@@ -124,13 +78,19 @@
 }
 
 @keyframes pulse-glow {
-  0%, 100% { opacity: 0.4; transform: translate(-50%, -50%) scale(1); }
-  50% { opacity: 0.8; transform: translate(-50%, -50%) scale(1.15); }
+  0%, 100% {
+    opacity: 0.4;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: translate(-50%, -50%) scale(1.15);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dice-cube.rolling-animation,
-  .dice-scaler.landing-animation,
+  .dice-box.rolling,
+  .dice-box.result-landed,
   .result-glow-turquoise {
     animation: none;
   }
