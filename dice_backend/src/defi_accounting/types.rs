@@ -61,6 +61,8 @@ pub enum AuditEvent {
     BalanceRestored { user: Principal, amount: u64 },
     LPRestored { user: Principal, amount: u64 },
     SystemError { error: String },
+    ParentFeeCredited { amount: u64 },
+    ParentFeeFallback { amount: u64, reason: String },
 }
 
 impl Storable for AuditEntry {

@@ -73,7 +73,7 @@ enum TransferResult {
 // HELPER FUNCTIONS
 // =============================================================================
 
-fn log_audit(event: AuditEvent) {
+pub(crate) fn log_audit(event: AuditEvent) {
     AUDIT_LOG.with(|log| {
         let entry = AuditEntry {
             timestamp: ic_cdk::api::time(),
@@ -318,7 +318,9 @@ pub fn start_retry_timer() {
              return;
         }
         let timer_id = ic_cdk_timers::set_timer_interval(Duration::from_secs(300), || async {
-            process_pending_withdrawals().await;
+            ic_cdk::spawn(async {
+                process_pending_withdrawals().await;
+            });
         });
         *id.borrow_mut() = Some(timer_id);
     });
@@ -330,7 +332,9 @@ pub fn start_parent_withdrawal_timer() {
         
         // Run every 7 days (604,800 seconds)
         let timer_id = ic_cdk_timers::set_timer_interval(Duration::from_secs(604_800), || async {
-             auto_withdraw_parent().await;
+             ic_cdk::spawn(async {
+                 auto_withdraw_parent().await;
+             });
         });
         *t.borrow_mut() = Some(timer_id);
     });
@@ -476,9 +480,20 @@ pub fn credit_parent_fee(user: Principal, amount: u64) -> bool {
     USER_BALANCES_STABLE.with(|balances| {
         let mut balances = balances.borrow_mut();
         let current = balances.get(&user).unwrap_or(0);
-        balances.insert(user, current + amount);
-    });
-    true
+        match current.checked_add(amount) {
+            Some(new_bal) => {
+                balances.insert(user, new_bal);
+                log_audit(AuditEvent::ParentFeeCredited { amount });
+                true
+            },
+            None => {
+                log_audit(AuditEvent::SystemError { 
+                    error: format!("Parent balance overflow: {} + {}", current, amount) 
+                });
+                false 
+            }
+        }
+    })
 }
 
 

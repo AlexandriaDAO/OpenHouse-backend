@@ -288,6 +288,11 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
                         pool_state.reserve += Nat::from(fee_amount);
                         state.borrow_mut().set(pool_state);
                     });
+
+                    accounting::log_audit(crate::defi_accounting::types::AuditEvent::ParentFeeFallback {
+                        amount: fee_amount,
+                        reason: "Credit failed".to_string()
+                    });
                  }
             }
 
