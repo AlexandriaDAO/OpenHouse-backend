@@ -271,11 +271,12 @@ export const Dice: React.FC = () => {
         // P1 fix: Refresh balance after game completes (non-blocking to avoid UI delay)
         refreshBalance().catch(console.error);
       } else {
+        console.error('[Dice] Roll error:', result.Err);
         gameState.setGameError(result.Err);
         gameState.setIsPlaying(false);
       }
     } catch (err) {
-      console.error('Failed to roll dice:', err);
+      console.error('[Dice] Roll exception:', err);
       gameState.setGameError(err instanceof Error ? err.message : 'Failed to roll dice');
       gameState.setIsPlaying(false);
     }

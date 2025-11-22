@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
+import { Principal } from '@dfinity/principal';
 import { useAuth } from '../../../providers/AuthProvider';
 import { useBalance } from '../../../providers/BalanceProvider';
 import { useGameBalance } from '../../../providers/GameBalanceProvider';
 import { ConnectionStatusMini } from '../../ui/ConnectionStatus';
 import useDiceActor from '../../../hooks/actors/useDiceActor';
+import useLedgerActor from '../../../hooks/actors/useLedgerActor';
+import { ApproveArgs } from '../../../types/ledger';
 
 interface DiceAccountingPanelProps {
   gameBalance: bigint;  // Now required, not nullable
@@ -19,6 +22,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
   const { isAuthenticated } = useAuth();
   const { balance: walletBalance, refreshBalance } = useBalance();
   const { actor } = useDiceActor();
+  const { actor: ledgerActor } = useLedgerActor();
 
   // Get house balance from global state
   const gameBalanceContext = useGameBalance('dice');
@@ -27,13 +31,14 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
   const [depositAmount, setDepositAmount] = useState('0.1');
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [isDepositing, setIsDepositing] = useState(false);
+  const [depositStep, setDepositStep] = useState<'idle' | 'approving' | 'depositing'>('idle');
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   // Handle deposit
   const handleDeposit = async () => {
-    if (!actor || !isAuthenticated) return;
+    if (!actor || !ledgerActor || !isAuthenticated) return;
 
     setIsDepositing(true);
     setError(null);
@@ -55,7 +60,34 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
         return;
       }
 
-      // Call deposit
+      // STEP 1: Approve the dice backend to spend ICP
+      setDepositStep('approving');
+      const DICE_BACKEND_CANISTER_ID = 'whchi-hyaaa-aaaao-a4ruq-cai';
+      const approveArgs: ApproveArgs = {
+        spender: {
+          owner: Principal.fromText(DICE_BACKEND_CANISTER_ID),
+          subaccount: [],
+        },
+        amount: amountE8s + BigInt(10_000), // Add fee buffer
+        fee: [],
+        memo: [],
+        from_subaccount: [],
+        created_at_time: [],
+        expected_allowance: [],
+        expires_at: [],
+      };
+
+      const approveResult = await ledgerActor.icrc2_approve(approveArgs);
+
+      if ('Err' in approveResult) {
+        setError(`Approval failed: ${JSON.stringify(approveResult.Err)}`);
+        setIsDepositing(false);
+        setDepositStep('idle');
+        return;
+      }
+
+      // STEP 2: Call backend deposit (which will use transferFrom)
+      setDepositStep('depositing');
       const result = await actor.deposit(amountE8s);
 
       if ('Ok' in result) {
@@ -74,6 +106,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
       setError(err instanceof Error ? err.message : 'Deposit failed');
     } finally {
       setIsDepositing(false);
+      setDepositStep('idle');
     }
   };
 
@@ -152,7 +185,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
             }`}
             title="Deposit ICP to Dice Game"
           >
-            {isDepositing ? '↓ Depositing...' : '↓ Deposit'}
+            {depositStep === 'approving' ? '🔐 Approving...' : depositStep === 'depositing' ? '↓ Depositing...' : '↓ Deposit'}
           </button>
 
           <button
@@ -217,6 +250,9 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
                 autoFocus
               />
               <p className="text-xs text-gray-500 mt-1">Minimum: 0.1 ICP</p>
+              <p className="text-xs text-blue-400 mt-2 bg-blue-900/20 border border-blue-500/20 rounded px-2 py-1">
+                ℹ️ Deposit requires two steps: approve spending, then transfer
+              </p>
             </div>
 
             <div className="flex gap-2">
@@ -232,7 +268,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
                 disabled={isDepositing}
                 className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded font-bold disabled:opacity-50 transition"
               >
-                {isDepositing ? 'Depositing...' : 'Confirm Deposit'}
+                {depositStep === 'approving' ? '🔐 Approving...' : depositStep === 'depositing' ? '↓ Depositing...' : 'Confirm Deposit'}
               </button>
             </div>
           </div>

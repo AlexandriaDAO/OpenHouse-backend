@@ -116,6 +116,28 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
     }
   }, [isRolling, onAnimationComplete]);
 
+  // Explicitly stop rolling when isRolling becomes false (handles error path)
+  useEffect(() => {
+    if (!isRolling) {
+      // Clear any running intervals immediately
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+
+      // Clear safety timeout
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+
+      // If we don't have a result yet, go to idle immediately
+      if (targetNumber === null && animationPhase === 'rolling') {
+        setAnimationPhase('idle');
+      }
+    }
+  }, [isRolling, targetNumber, animationPhase]);
+
   // Show result when backend returns
   useEffect(() => {
     if (targetNumber !== null && isRolling) {
@@ -125,7 +147,7 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
           clearInterval(intervalRef.current);
           intervalRef.current = null;
         }
-        
+
         setDisplayNumber(targetNumber);
         setAnimationPhase('complete');
         onAnimationComplete?.();
@@ -144,6 +166,21 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
       return () => clearTimeout(timer);
     }
   }, [animationPhase, isRolling]);
+
+  // Validate state consistency and auto-fix invalid states
+  useEffect(() => {
+    // Invalid state 1: isRolling=true but animationPhase='complete'
+    if (isRolling && animationPhase === 'complete') {
+      console.error('[DiceAnimation] INVALID STATE: isRolling=true but animationPhase=complete, fixing...');
+      setAnimationPhase('rolling');
+    }
+
+    // Invalid state 2: animationPhase='rolling' but no interval running and not rolling
+    if (!isRolling && animationPhase === 'rolling' && intervalRef.current === null) {
+      console.error('[DiceAnimation] INVALID STATE: animationPhase=rolling but no interval running and isRolling=false, fixing...');
+      setAnimationPhase('idle');
+    }
+  }, [isRolling, animationPhase]);
 
   // Calculate opposite/adjacent faces for visual consistency
   const getOppositeFace = (num: number): number => {

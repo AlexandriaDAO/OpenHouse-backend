@@ -1,7 +1,7 @@
 Status:
 1. Fixed in https://github.com/AlexandriaDAO/OpenHouse/pull/74/files
 
-2. Next up.
+2. Fixed in https://github.com/AlexandriaDAO/OpenHouse/pull/76/files  (this fixed both 2 and the critical vulnerability in @claude_audit_v1.md)
 
 
 

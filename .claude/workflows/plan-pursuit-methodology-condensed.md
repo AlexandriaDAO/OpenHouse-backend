@@ -19,13 +19,14 @@ git pull
 ```
 **CRITICAL**: Main repo master is READ-ONLY. Never commit there. Only `git pull`.
 
-### 2. Create Worktree (MANDATORY SECOND STEP)
+### 2. Create Worktree (BLOCKING STEP)
+You MUST execute these shell commands BEFORE writing any plan files.
 ```bash
 cd /home/theseus/alexandria/openhouse
 git worktree add ../openhouse-[FEATURE] -b feature/[feature-name] master
 cd ../openhouse-[FEATURE]
 ```
-All planning happens IN the worktree, not main repo.
+**CRITICAL FAILURE CONDITION**: If you write `PLAN_*.md` to the main repository, you have failed. You must be inside the worktree directory before using `write_file`.
 
 ### 3. Research (30-60 min)
 ```bash
@@ -87,6 +88,8 @@ cd openhouse_frontend && npm run build
 ```
 
 ### 7. Embed Orchestrator (MANDATORY TOP OF PLAN)
+**AGENT INSTRUCTION**: Before using the `write_file` tool for this plan, verify your current working directory is `.../openhouse-[FEATURE]`. If not, execute Step 2.
+
 Every plan MUST start with this exact header (fill in placeholders):
 ```markdown
 # 🤖 AUTONOMOUS PR ORCHESTRATOR - DO NOT SKIP
