@@ -113,7 +113,7 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
         from: Account::from(caller),
         to: Account::from(ic_cdk::api::canister_self()),
         amount: amount.into(),
-        fee: None, 
+        fee: Some(Nat::from(ICP_TRANSFER_FEE)), 
         memo: None,
         created_at_time: None,
     };
