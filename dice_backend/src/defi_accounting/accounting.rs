@@ -65,7 +65,7 @@ pub struct AccountingStats {
 enum TransferResult {
     Success(BlockIndex),
     DefiniteError(String),
-    UncertainError(RejectionCode, String),
+    UncertainError(String),
 }
 
 // =============================================================================
@@ -205,9 +205,9 @@ pub async fn withdraw_all() -> Result<u64, String> {
             log_audit(AuditEvent::WithdrawalFailed { user: caller, amount: balance });
             Err(err)
         }
-        TransferResult::UncertainError(code, msg) => {
-            update_pending_error(caller, format!("{:?}: {}", code, msg));
-            Err(format!("Processing withdrawal. Check status later. {:?} {}", code, msg))
+        TransferResult::UncertainError(msg) => {
+            update_pending_error(caller, msg.clone());
+            Err(format!("Processing withdrawal. Check status later. {}", msg))
         }
     }
 }
@@ -257,12 +257,15 @@ async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> Tran
     match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, &args).await {
         Ok(Ok(block)) => TransferResult::Success(block),
         Ok(Err(e)) => {
-             // ic_ledger_types::TransferError
+             // Ledger Application Error (e.g. InsufficientFunds)
+             // The Ledger definitely rejected it.
              TransferResult::DefiniteError(format!("{:?}", e))
         }
         Err(e) => {
-            // In newer ic-ledger-types, we get a single Error type
-            TransferResult::DefiniteError(format!("{:?}", e))
+            // System Error (Timeout, CanisterError, etc.)
+            // The request might have been processed.
+            // CRITICAL: Return UncertainError. Do NOT rollback.
+            TransferResult::UncertainError(format!("{:?}", e))
         }
     }
 }
@@ -362,12 +365,12 @@ async fn process_single_withdrawal(user: Principal) -> Result<(), String> {
              rollback_withdrawal(user)?;
              log_audit(AuditEvent::WithdrawalFailed { user, amount });
         }
-        TransferResult::UncertainError(code, msg) => {
+        TransferResult::UncertainError(msg) => {
              PENDING_WITHDRAWALS.with(|p| {
                 let mut map = p.borrow_mut();
                 if let Some(mut w) = map.get(&user) {
                     w.retries += 1;
-                    w.last_error = Some(format!("{:?}: {}", code, msg));
+                    w.last_error = Some(msg);
                     map.insert(user, w);
                 }
              });
