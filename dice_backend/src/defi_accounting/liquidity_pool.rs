@@ -272,11 +272,9 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         Ok::<(), String>(())
     })?;
 
-    // CRITICAL: Transfer to LP first
-    match transfer_to_user(caller, lp_amount).await {
+    // Schedule Safe Withdrawal
+    match accounting::schedule_lp_withdrawal(caller, shares_to_burn.clone(), payout_nat.clone(), lp_amount) {
         Ok(_) => {
-            // LP got paid successfully
-            
             // BEST EFFORT: Try to pay parent
             let net_fee = fee_amount.saturating_sub(TRANSFER_FEE);
             
@@ -289,7 +287,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
             Ok(lp_amount)
         }
         Err(e) => {
-            // LP transfer failed - ROLLBACK EVERYTHING
+            // If scheduling fails (e.g. duplicate), rollback state immediately
             
             // 1. Restore shares
             LP_SHARES.with(|shares| {
@@ -303,7 +301,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
                 state.borrow_mut().set(pool_state);
             });
 
-            Err(format!("Transfer failed: {}. State rolled back.", e))
+            Err(e)
         }
     }
 }

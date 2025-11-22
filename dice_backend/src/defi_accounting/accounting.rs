@@ -342,12 +342,9 @@ async fn process_single_withdrawal(user: Principal) -> Result<(), String> {
         .ok_or("No pending")?;
 
     if pending.retries >= MAX_RETRIES {
-        let amount = match pending.withdrawal_type {
-            WithdrawalType::User { amount } => amount,
-            WithdrawalType::LP { amount, .. } => amount,
-        };
-        rollback_withdrawal(user)?;
-        log_audit(AuditEvent::WithdrawalExpired { user, amount });
+        log_audit(AuditEvent::SystemError {
+             error: format!("Withdrawal STUCK for {}. Manual Check Required.", user)
+        });
         return Ok(());
     }
 
@@ -430,6 +427,10 @@ pub(crate) fn audit_balances_internal() -> Result<String, String> {
 }
 
 pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
+    if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
+        return Err("Cannot update balance: withdrawal pending".to_string());
+    }
+
     USER_BALANCES_STABLE.with(|balances| {
         balances.borrow_mut().insert(user, new_balance);
     });
@@ -461,7 +462,7 @@ pub(crate) async fn transfer_to_user(user: Principal, amount: u64) -> Result<(),
         fee: Tokens::from_e8s(ICP_TRANSFER_FEE),
         from_subaccount: None,
         to: AccountIdentifier::new(&user, &DEFAULT_SUBACCOUNT),
-        created_at_time: None, // No idempotency for this internal helper yet? Should we?
+        created_at_time: None, // Idempotency not required: used for best-effort internal transfers/fees only
     };
 
     match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, &args).await {
