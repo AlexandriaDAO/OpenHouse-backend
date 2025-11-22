@@ -42,6 +42,7 @@ fn init() {
 
     // Start retry timer for pending withdrawals
     defi_accounting::accounting::start_retry_timer();
+    defi_accounting::accounting::start_parent_withdrawal_timer();
 }
 
 #[pre_upgrade]
@@ -56,6 +57,7 @@ fn post_upgrade() {
 
     // Start retry timer for pending withdrawals
     defi_accounting::accounting::start_retry_timer();
+    defi_accounting::accounting::start_parent_withdrawal_timer();
     // Note: StableBTreeMap restores automatically, no accounting restore needed
 }
 

@@ -19,7 +19,7 @@ const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
 const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
 const LP_WITHDRAWAL_FEE_BPS: u64 = 100; // 1%
 
-fn get_parent_principal() -> Principal {
+pub fn get_parent_principal() -> Principal {
     Principal::from_text(PARENT_STAKER_CANISTER).expect("Invalid parent canister ID")
 }
 
@@ -275,13 +275,27 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     // Schedule Safe Withdrawal
     match accounting::schedule_lp_withdrawal(caller, shares_to_burn.clone(), payout_nat.clone(), lp_amount) {
         Ok(_) => {
-            // BEST EFFORT: Try to pay parent
-            let net_fee = fee_amount.saturating_sub(TRANSFER_FEE);
-            
-            if net_fee > 0 {
-                 ic_cdk::spawn(async move {
-                    let _ = accounting::transfer_to_user(get_parent_principal(), net_fee).await;
-                 });
+            // SAFE ACCOUNTING: Credit parent internally
+            // No ledger transfer needed, so we save the TRANSFER_FEE.
+            // PROTOCOL BENEFIT: Since no ledger transfer occurs, the saved TRANSFER_FEE
+            // is retained as protocol revenue.
+            if fee_amount > 0 {
+                 let parent = get_parent_principal();
+                 if !accounting::credit_parent_fee(parent, fee_amount) {
+                     // Parent is busy (pending withdrawal).
+                     // Return fee to the pool reserve (LPs get the bonus).
+                     // This ensures Reserve + Deposits == Canister Balance.
+                     POOL_STATE.with(|state| {
+                        let mut pool_state = state.borrow().get().clone();
+                        pool_state.reserve += Nat::from(fee_amount);
+                        state.borrow_mut().set(pool_state);
+                    });
+
+                    accounting::log_audit(crate::defi_accounting::types::AuditEvent::ParentFeeFallback {
+                        amount: fee_amount,
+                        reason: "Credit failed".to_string()
+                    });
+                 }
             }
 
             Ok(lp_amount)
