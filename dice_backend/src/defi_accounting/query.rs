@@ -14,7 +14,7 @@ pub fn get_balance(user: Principal) -> u64 {
 
 #[query]
 pub fn get_my_balance() -> u64 {
-    get_balance(ic_cdk::caller())
+    get_balance(ic_cdk::api::msg_caller())
 }
 
 #[query]
@@ -53,7 +53,7 @@ pub fn get_pool_stats() -> PoolStats {
 
 #[query]
 pub fn get_my_lp_position() -> LPPosition {
-    get_lp_position(ic_cdk::caller())
+    get_lp_position(ic_cdk::api::msg_caller())
 }
 
 #[query]

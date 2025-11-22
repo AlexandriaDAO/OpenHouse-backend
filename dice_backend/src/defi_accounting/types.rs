@@ -18,7 +18,7 @@ pub enum WithdrawalType {
 }
 
 impl Storable for PendingWithdrawal {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         Cow::Owned(
             candid::encode_one(self).expect(
                 "CRITICAL: Failed to encode PendingWithdrawal. \
@@ -32,7 +32,7 @@ impl Storable for PendingWithdrawal {
         self.to_bytes().into_owned()
     }
 
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
         candid::decode_one(&bytes).expect(
             "CRITICAL: Failed to decode PendingWithdrawal from stable storage. \
              This indicates storage corruption or an incompatible canister upgrade. \
@@ -67,7 +67,7 @@ pub enum AuditEvent {
 }
 
 impl Storable for AuditEntry {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         Cow::Owned(
             candid::encode_one(self).expect(
                 "CRITICAL: Failed to encode AuditEntry. \
@@ -81,7 +81,7 @@ impl Storable for AuditEntry {
         self.to_bytes().into_owned()
     }
 
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
         candid::decode_one(&bytes).expect(
             "CRITICAL: Failed to decode AuditEntry from stable storage. \
              This indicates audit log corruption or an incompatible upgrade. \

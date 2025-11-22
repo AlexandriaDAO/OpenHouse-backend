@@ -79,7 +79,7 @@ pub async fn initialize_seed() {
         Err(_) => {
             // Improved fallback: combine timestamp with caller principal
             let time = ic_cdk::api::time();
-            let caller = ic_cdk::caller();
+            let caller = ic_cdk::api::msg_caller();
             let mut hasher = Sha256::new();
             hasher.update(time.to_be_bytes());
             hasher.update(caller.as_slice());
@@ -180,7 +180,7 @@ pub fn maybe_schedule_seed_rotation() {
 
     if needs_init {
         // Initialize seed on first game
-        ic_cdk::spawn(async {
+        ic_cdk::futures::spawn(async {
             initialize_seed().await;
         });
         return;
@@ -202,7 +202,7 @@ pub fn maybe_schedule_seed_rotation() {
 
     if should_rotate {
         // Schedule async rotation (non-blocking)
-        ic_cdk::spawn(async {
+        ic_cdk::futures::spawn(async {
             rotate_seed_async().await;
         });
     }

@@ -1,4 +1,3 @@
-use candid::{CandidType, Nat, Principal};
 use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
 use ic_stable_structures::memory_manager::{MemoryManager, VirtualMemory};
 use ic_stable_structures::DefaultMemoryImpl;
@@ -67,7 +66,7 @@ fn post_upgrade() {
 
 #[update]
 async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, client_seed: String) -> Result<DiceResult, String> {
-    game::play_dice(bet_amount, target_number, direction, client_seed, ic_cdk::caller()).await
+    game::play_dice(bet_amount, target_number, direction, client_seed, ic_cdk::api::msg_caller()).await
 }
 
 #[query]
