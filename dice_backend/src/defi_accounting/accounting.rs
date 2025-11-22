@@ -9,7 +9,6 @@ use ic_ledger_types::{
     MAINNET_LEDGER_CANISTER_ID, Memo, AccountBalanceArgs, BlockIndex, Timestamp,
 };
 use crate::types::{Account, TransferFromArgs, TransferFromError};
-use ic_cdk::api::call::RejectionCode;
 
 use crate::{MEMORY_MANAGER, Memory};
 use super::liquidity_pool;
@@ -100,17 +99,18 @@ fn calculate_total_deposits() -> u64 {
 // =============================================================================
 
 #[update]
+#[allow(deprecated)]
 pub async fn deposit(amount: u64) -> Result<u64, String> {
     if amount < MIN_DEPOSIT {
         return Err(format!("Minimum deposit is {} ICP", MIN_DEPOSIT / 100_000_000));
     }
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
 
     let args = TransferFromArgs {
         spender_subaccount: None,
         from: Account::from(caller),
-        to: Account::from(ic_cdk::id()),
+        to: Account::from(ic_cdk::api::canister_self()),
         amount: amount.into(),
         fee: None, 
         memo: None,
@@ -118,7 +118,7 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
     };
 
     let (result,): (Result<Nat, TransferFromError>,) =
-        ic_cdk::call(MAINNET_LEDGER_CANISTER_ID, "icrc2_transfer_from", (args,))
+        ic_cdk::api::call::call(MAINNET_LEDGER_CANISTER_ID, "icrc2_transfer_from", (args,))
         .await
         .map_err(|(code, msg)| format!("Call failed: {:?} {}", code, msg))?;
 
@@ -158,7 +158,7 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
 
 #[update]
 pub async fn withdraw_all() -> Result<u64, String> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     withdraw_internal(caller).await
 }
 
@@ -239,7 +239,7 @@ pub fn schedule_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount
     PENDING_WITHDRAWALS.with(|p| p.borrow_mut().insert(user, pending));
     log_audit(AuditEvent::WithdrawalInitiated { user, amount });
     
-    ic_cdk::spawn(async move {
+    ic_cdk::futures::spawn(async move {
         let _ = process_single_withdrawal(user).await;
     });
 
@@ -517,7 +517,7 @@ pub fn credit_parent_fee(user: Principal, amount: u64) -> bool {
 
 #[query]
 pub fn get_withdrawal_status() -> Option<PendingWithdrawal> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     PENDING_WITHDRAWALS.with(|p| p.borrow().get(&caller))
 }
 
@@ -532,29 +532,12 @@ pub fn get_audit_log(offset: usize, limit: usize) -> Vec<AuditEntry> {
     })
 }
 
-// Internal function needed by liquidity_pool.rs
-pub(crate) async fn transfer_to_user(user: Principal, amount: u64) -> Result<(), String> {
-    let args = TransferArgs {
-        memo: Memo(0),
-        amount: Tokens::from_e8s(amount - ICP_TRANSFER_FEE),
-        fee: Tokens::from_e8s(ICP_TRANSFER_FEE),
-        from_subaccount: None,
-        to: AccountIdentifier::new(&user, &DEFAULT_SUBACCOUNT),
-        created_at_time: None, // Idempotency not required: used for best-effort internal transfers/fees only
-    };
-
-    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, &args).await {
-        Ok(Ok(_)) => Ok(()),
-        Ok(Err(e)) => Err(format!("{:?}", e)),
-        Err(e) => Err(format!("{:?}", e)),
-    }
-}
-
 #[update]
+#[allow(deprecated)]
 pub async fn refresh_canister_balance() -> u64 {
     let ledger = MAINNET_LEDGER_CANISTER_ID;
-    let result: Result<(Tokens,), _> = ic_cdk::call(ledger, "account_balance", (AccountBalanceArgs {
-        account: AccountIdentifier::new(&ic_cdk::id(), &DEFAULT_SUBACCOUNT)
+    let result: Result<(Tokens,), _> = ic_cdk::api::call::call(ledger, "account_balance", (AccountBalanceArgs {
+        account: AccountIdentifier::new(&ic_cdk::api::canister_self(), &DEFAULT_SUBACCOUNT)
     },)).await;
 
     match result {
@@ -572,6 +555,7 @@ pub async fn refresh_canister_balance() -> u64 {
 }
 
 #[update]
+#[allow(deprecated)]
 pub async fn get_canister_balance() -> u64 {
     #[derive(CandidType, Deserialize)]
     struct IcrcAccount {
@@ -580,12 +564,12 @@ pub async fn get_canister_balance() -> u64 {
     }
 
     let account = IcrcAccount {
-        owner: ic_cdk::id(),
+        owner: ic_cdk::api::canister_self(),
         subaccount: None,
     };
 
     let ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-    let result: Result<(Nat,), _> = ic_cdk::call(ledger, "icrc1_balance_of", (account,)).await;
+    let result: Result<(Nat,), _> = ic_cdk::api::call::call(ledger, "icrc1_balance_of", (account,)).await;
 
     match result {
         Ok((balance,)) => {

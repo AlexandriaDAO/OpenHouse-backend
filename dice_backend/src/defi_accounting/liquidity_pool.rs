@@ -28,7 +28,7 @@ pub fn get_parent_principal() -> Principal {
 pub struct StorableNat(pub Nat);
 
 impl Storable for StorableNat {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         let bytes = self.0.0.to_bytes_be();
         let len = bytes.len() as u32;
         let mut result = len.to_be_bytes().to_vec();
@@ -64,7 +64,7 @@ struct PoolState {
 }
 
 impl Storable for PoolState {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         let serialized = serde_json::to_vec(self).unwrap();
         Cow::Owned(serialized)
     }
@@ -135,7 +135,7 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
         return Err(format!("Minimum deposit is {} e8s", MIN_DEPOSIT));
     }
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let amount_nat = Nat::from(amount);
 
     // Transfer from user (requires prior ICRC-2 approval)
@@ -204,7 +204,7 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
 //    The fee remains in the canister as a protocol buffer.
 //    This ensures the Reserve is always solvent (Reserve <= Balance).
 async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
 
     // Validate shares
     if shares_to_burn == Nat::from(0u64) {
@@ -322,7 +322,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
 
 #[update]
 pub async fn withdraw_all_liquidity() -> Result<u64, String> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let shares = LP_SHARES.with(|s| s.borrow().get(&caller).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64)));
 
     if shares == Nat::from(0u64) {
@@ -507,11 +507,12 @@ enum TransferFromError {
 
 type TransferFromResult = Result<Nat, TransferFromError>;
 
+#[allow(deprecated)]
 async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> {
     // Frontend must call icrc2_approve first
     // Then we use transfer_from
     let ledger = MAINNET_LEDGER_CANISTER_ID;
-    let canister_id = ic_cdk::id();
+    let canister_id = ic_cdk::api::canister_self();
 
     let args = TransferFromArgs {
         from: Account {
@@ -530,7 +531,7 @@ async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> 
     };
 
     let (result,): (TransferFromResult,) =
-        ic_cdk::call(ledger, "icrc2_transfer_from", (args,))
+        ic_cdk::api::call::call(ledger, "icrc2_transfer_from", (args,))
         .await
         .map_err(|e| format!("Call failed: {:?}", e))?;
 
@@ -538,8 +539,4 @@ async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> 
         Ok(_) => Ok(()),
         Err(e) => Err(format!("Transfer failed: {:?}", e)),
     }
-}
-
-async fn transfer_to_user(user: Principal, amount: u64) -> Result<(), String> {
-    accounting::transfer_to_user(user, amount).await
 }
