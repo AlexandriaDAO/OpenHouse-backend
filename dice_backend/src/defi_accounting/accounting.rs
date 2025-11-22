@@ -21,7 +21,6 @@ const MIN_WITHDRAW: u64 = 10_000_000; // 0.1 ICP
 const USER_BALANCES_MEMORY_ID: u8 = 10;
 const PENDING_WITHDRAWALS_MEMORY_ID: u8 = 20;
 const AUDIT_LOG_MEMORY_ID: u8 = 21;
-const MAX_PAYOUT_PERCENTAGE: f64 = 0.10;
 // Retry for ~21 hours (250 * 5 mins) to cover transient outages while staying
 // within the Ledger's 24-hour deduplication window.
 const MAX_RETRIES: u8 = 250;
@@ -443,7 +442,7 @@ pub(crate) fn get_balance_internal(user: Principal) -> u64 {
 
 pub(crate) fn get_max_allowed_payout_internal() -> u64 {
     let house_balance = liquidity_pool::get_pool_reserve();
-    (house_balance as f64 * MAX_PAYOUT_PERCENTAGE) as u64
+    (house_balance * 10) / 100
 }
 
 pub(crate) fn get_accounting_stats_internal() -> AccountingStats {

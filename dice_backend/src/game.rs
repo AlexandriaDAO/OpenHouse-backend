@@ -80,8 +80,12 @@ pub async fn play_dice(
     // Check user has sufficient internal balance
     let user_balance = accounting::get_balance(caller);
     if user_balance < bet_amount {
-        return Err(format!("Insufficient balance. You have {} e8s, need {} e8s. Please deposit more ICP.",
-                          user_balance, bet_amount));
+        let user_balance_icp = user_balance as f64 / E8S_PER_ICP as f64;
+        let needed_icp = bet_amount as f64 / E8S_PER_ICP as f64;
+        return Err(format!(
+            "INSUFFICIENT_BALANCE|Your dice balance: {:.4} ICP|Bet amount: {:.4} ICP|This bet was not placed and no funds were deducted.",
+            user_balance_icp, needed_icp
+        ));
     }
 
     // Validate input

@@ -92,7 +92,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
 
       if ('Ok' in result) {
         const newBalance = result.Ok;
-        setSuccess(`Deposited ${depositAmount} ICP! New balance: ${Number(newBalance) / 100_000_000} ICP`);
+        setSuccess(`💰 Bought ${depositAmount} ICP in chips! New balance: ${Number(newBalance) / 100_000_000} ICP`);
         setDepositAmount('0.1');
         setShowDepositModal(false);
 
@@ -125,7 +125,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
       if ('Ok' in result) {
         const newBalance = result.Ok;
         const withdrawnAmount = (Number(gameBalance) - Number(newBalance)) / 100_000_000;
-        setSuccess(`Withdrew all! (${withdrawnAmount.toFixed(4)} ICP) New balance: ${Number(newBalance) / 100_000_000} ICP`);
+        setSuccess(`💵 Cashed out all chips! (${withdrawnAmount.toFixed(4)} ICP) New balance: ${Number(newBalance) / 100_000_000} ICP`);
 
         // Refresh all balances
         await refreshBalance(); // Wallet balance
@@ -181,20 +181,20 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
             onClick={() => setShowDepositModal(true)}
             disabled={isDepositing}
             className={`flex-1 px-3 py-2 bg-dfinity-turquoise/90 hover:bg-dfinity-turquoise rounded text-sm font-bold text-pure-black disabled:opacity-50 transition ${
-              showDepositAnimation ? 'animate-pulse ring-4 ring-purple-400 ring-opacity-75' : ''
+              showDepositAnimation ? 'animate-pulse ring-4 ring-yellow-400 shadow-lg shadow-yellow-400/50' : ''
             }`}
-            title="Deposit ICP to Dice Game"
+            title="Buy chips to play Dice"
           >
-            {depositStep === 'approving' ? 'Approving...' : depositStep === 'depositing' ? 'Depositing...' : 'Deposit'}
+            {depositStep === 'approving' ? 'Approving...' : depositStep === 'depositing' ? 'Buying...' : '💰 Buy Chips'}
           </button>
 
           <button
             onClick={handleWithdrawAll}
             disabled={isWithdrawing || gameBalance === BigInt(0)}
             className="flex-1 px-3 py-2 bg-dfinity-turquoise/90 hover:bg-dfinity-turquoise rounded text-sm font-bold text-pure-black disabled:opacity-50 transition"
-            title="Withdraw all ICP from Dice Game"
+            title="Cash out all chips from Dice Game"
           >
-            {isWithdrawing ? 'Withdrawing...' : 'Withdraw'}
+            {isWithdrawing ? 'Cashing out...' : '💵 Cash Out'}
           </button>
 
           <button
@@ -211,8 +211,8 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
 
         {/* Attention text when animation active */}
         {showDepositAnimation && (
-          <p className="text-purple-400 animate-pulse font-semibold text-xs text-center mt-2">
-            ☝️ Deposit ICP here to start playing
+          <p className="text-yellow-400 animate-pulse font-semibold text-xs text-center mt-2">
+            ☝️ Buy chips here to start playing! ☝️
           </p>
         )}
 
@@ -233,7 +233,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
       {showDepositModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowDepositModal(false)}>
           <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4 border border-gray-700" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-xl font-bold text-white mb-4">Deposit ICP</h3>
+            <h3 className="text-xl font-bold text-white mb-4">💰 Buy Chips</h3>
 
             <div className="mb-4">
               <label className="block text-sm text-gray-400 mb-2">Amount (ICP)</label>

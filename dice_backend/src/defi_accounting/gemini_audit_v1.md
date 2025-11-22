@@ -5,6 +5,21 @@ Status:
 
 3. Fixed in https://github.com/AlexandriaDAO/OpenHouse/pull/79/files 
 
+4. Fixed in https://github.com/AlexandriaDAO/OpenHouse/pull/83/files
+
+5. Just this in accounting.rs: 
+│ 446 -     (house_balance as f64 * MAX_PAYOUT_PERCENTAGE) as u64                          │
+│ 446 +     (house_balance * 10) / 100  
+
+6. Fixed as a side effect of previous.
+
+
+
+
+
+
+
+
 
 # Gemini Security Audit: `dice_backend` DeFi Module
 

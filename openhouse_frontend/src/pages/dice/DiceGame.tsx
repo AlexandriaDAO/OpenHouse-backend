@@ -81,6 +81,39 @@ export function DiceGame() {
   // @ts-ignore - Keeping for future implementation
   const [csvExport, setCsvExport] = useState<string>('');
 
+  // Helper function to parse and improve backend error messages
+  const parseBackendError = (errorMsg: string): string => {
+    // Check for insufficient balance errors (new format from backend)
+    if (errorMsg.startsWith('INSUFFICIENT_BALANCE|')) {
+      const parts = errorMsg.split('|');
+      const userBalance = parts[1] || 'Unknown balance';
+      const betAmount = parts[2] || 'Unknown bet';
+
+      // Trigger deposit animation
+      setShowDepositAnimation(true);
+
+      return `💰 INSUFFICIENT CHIPS - BET NOT PLACED\n\n` +
+        `${userBalance}\n` +
+        `${betAmount}\n\n` +
+        `${parts[3] || 'This bet was not placed and no funds were deducted.'}\n\n` +
+        `👇 Click "Buy Chips" below to add more ICP to your game balance.`;
+    }
+
+    // Check for house limit errors
+    if (errorMsg.includes('exceeds house limit') || errorMsg.includes('house balance')) {
+      return `⚠️ BET REJECTED - NO MONEY LOST\n\n` +
+        `The house doesn't have enough funds to cover this bet's potential payout. ` +
+        `Try:\n` +
+        `• Lower your bet amount\n` +
+        `• Choose different odds (higher win chance = lower payout)\n` +
+        `• Wait for house balance to increase\n\n` +
+        `Your balance remains unchanged!`;
+    }
+
+    // Return original error if it's not a recognized format
+    return errorMsg;
+  };
+
   // Calculate odds when target or direction changes
   useEffect(() => {
     const updateOdds = async () => {
@@ -220,15 +253,21 @@ export function DiceGame() {
       return;
     }
 
-    // Step 4: Frontend validation: Check if house can afford the potential payout BEFORE starting animation
+    // Step 4: Frontend validation: Check if payout exceeds 10% of house balance (matching backend rule)
     const maxPayout = BigInt(Math.floor(gameState.betAmount * multiplier * E8S_PER_ICP));
-    if (maxPayout > balance.house) {
+    const maxAllowedPayout = (balance.house * BigInt(10)) / BigInt(100); // 10% of house balance
+
+    if (maxPayout > maxAllowedPayout) {
       const houseBalanceICP = Number(balance.house) / E8S_PER_ICP;
       const maxPayoutICP = Number(maxPayout) / E8S_PER_ICP;
+      const maxAllowedICP = Number(maxAllowedPayout) / E8S_PER_ICP;
       gameState.setGameError(
-        `Bet too large. House only has ${houseBalanceICP.toFixed(4)} ICP, ` +
-        `but max payout would be ${maxPayoutICP.toFixed(4)} ICP (${multiplier.toFixed(2)}x multiplier). ` +
-        `Please lower your bet or choose different odds.`
+        `⚠️ BET TOO LARGE - NO MONEY DEDUCTED\n\n` +
+        `Potential payout (${maxPayoutICP.toFixed(4)} ICP) exceeds house limit (${maxAllowedICP.toFixed(4)} ICP).\n` +
+        `House balance: ${houseBalanceICP.toFixed(4)} ICP | Max allowed payout: 10% of house\n\n` +
+        `Try:\n` +
+        `• Lower your bet amount\n` +
+        `• Choose different odds (higher win chance = lower payout)`
       );
       return;
     }
@@ -273,12 +312,16 @@ export function DiceGame() {
         refreshBalance().catch(console.error);
       } else {
         console.error('[Dice] Roll error:', result.Err);
-        gameState.setGameError(result.Err);
+        // Parse and improve error message before showing to user
+        const userFriendlyError = parseBackendError(result.Err);
+        gameState.setGameError(userFriendlyError);
         gameState.setIsPlaying(false);
       }
     } catch (err) {
       console.error('[Dice] Roll exception:', err);
-      gameState.setGameError(err instanceof Error ? err.message : 'Failed to roll dice');
+      const errorMsg = err instanceof Error ? err.message : 'Failed to roll dice';
+      const userFriendlyError = parseBackendError(errorMsg);
+      gameState.setGameError(userFriendlyError);
       gameState.setIsPlaying(false);
     }
   };
@@ -307,42 +350,26 @@ export function DiceGame() {
 
   return (
     <GameLayout
-      title="Dice"
-      icon="🎲"
-      description="Roll 0-100, predict over or under. Exact hit = house wins!"
       minBet={0.01}
       maxWin={10}
       houseEdge={0.99}
     >
-      {/* ACCOUNTING PANEL */}
-      <DiceAccountingPanel
-        gameBalance={balance.game}
-        onBalanceChange={handleBalanceChange}
-        showDepositAnimation={showDepositAnimation}
-      />
-
-      {/* BECOME AN OWNER CTA */}
-      <div className="card max-w-2xl mx-auto p-3 mb-4 bg-purple-900/10 border-purple-500/20 hover:bg-purple-900/20 transition-colors">
-        <Link to="/dice/liquidity" className="flex items-center justify-between group">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl">💰</span>
-            <div>
-              <p className="text-sm font-bold text-white group-hover:text-purple-300">
-                Become an Owner
-              </p>
-              <p className="text-xs text-gray-400">
-                Earn from house profits • 1% withdrawal fee
-              </p>
-            </div>
-          </div>
-          <span className="text-dfinity-turquoise group-hover:translate-x-1 transition-transform">
-            →
-          </span>
-        </Link>
-      </div>
-
-      {/* BETTING CONTROLS */}
+      {/* UNIFIED GAME CARD - Everything consolidated */}
       <div className="card max-w-2xl mx-auto">
+        {/* ACCOUNTING PANEL - Balances and Fund Management */}
+        <div className="mb-4 pb-4 border-b border-gray-700">
+          {!isAuthenticated ? (
+            <p className="text-center text-gray-400 text-sm">Please log in to manage funds</p>
+          ) : (
+            <DiceAccountingPanel
+              gameBalance={balance.game}
+              onBalanceChange={handleBalanceChange}
+              showDepositAnimation={showDepositAnimation}
+            />
+          )}
+        </div>
+
+        {/* BETTING CONTROLS */}
         <BetAmountInput
           value={gameState.betAmount}
           onChange={gameState.setBetAmount}
@@ -382,6 +409,47 @@ export function DiceGame() {
           </div>
         </div>
 
+        {/* House Balance Status Indicator */}
+        {(() => {
+          const houseBalanceICP = Number(balance.house) / E8S_PER_ICP;
+          const maxAllowedPayout = houseBalanceICP * 0.1; // 10% of house balance
+          const currentPotentialPayout = gameState.betAmount * multiplier;
+          const utilizationPct = maxAllowedPayout > 0 ? (currentPotentialPayout / maxAllowedPayout) * 100 : 0;
+
+          // Color coding based on utilization
+          let statusColor = 'text-green-400';
+          let bgColor = 'bg-green-900/20 border-green-500/30';
+          let statusText = 'Healthy';
+
+          if (utilizationPct > 90) {
+            statusColor = 'text-red-400';
+            bgColor = 'bg-red-900/20 border-red-500/30';
+            statusText = 'At Limit';
+          } else if (utilizationPct > 70) {
+            statusColor = 'text-yellow-400';
+            bgColor = 'bg-yellow-900/20 border-yellow-500/30';
+            statusText = 'Near Limit';
+          }
+
+          return (
+            <div className={`mb-3 p-2 border rounded text-xs ${bgColor}`}>
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-gray-400">House Status</span>
+                <span className={`font-bold ${statusColor}`}>{statusText}</span>
+              </div>
+              <div className="flex justify-between text-gray-300">
+                <span>Balance: {houseBalanceICP.toFixed(4)} ICP</span>
+                <span>Max Payout: {maxAllowedPayout.toFixed(4)} ICP</span>
+              </div>
+              {utilizationPct > 70 && (
+                <div className={`mt-1 text-center ${statusColor} font-semibold`}>
+                  ⚠️ Your bet is using {utilizationPct.toFixed(0)}% of house limit
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Collapsible How It Works */}
         <details className="mb-3">
           <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-300 text-center">
@@ -403,8 +471,12 @@ export function DiceGame() {
         />
 
         {gameState.gameError && (
-          <div className="mt-4 text-red-400 text-sm text-center">
-            {gameState.gameError}
+          <div className="mt-4 p-4 bg-red-900/30 border border-red-500/50 rounded text-red-400 text-sm">
+            {gameState.gameError.split('\n').map((line, i) => (
+              <div key={i} className={i === 0 ? 'font-bold text-center mb-2' : 'text-left'}>
+                {line}
+              </div>
+            ))}
           </div>
         )}
       </div>
