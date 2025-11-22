@@ -1,3 +1,18 @@
+Status.
+
+1. Fixed in https://github.com/AlexandriaDAO/OpenHouse/pull/76/files
+
+
+
+
+
+
+
+
+
+
+
+
 # DeFi Accounting Security Audit
 **Auditor**: Claude (Sonnet 4.5)
 **Date**: 2025-11-21

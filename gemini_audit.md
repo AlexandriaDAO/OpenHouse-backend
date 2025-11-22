@@ -1,10 +1,3 @@
-Status:
-1. Fixed in https://github.com/AlexandriaDAO/OpenHouse/pull/74/files
-
-2. Next up.
-
-
-
 # Gemini Security Audit: `dice_backend` DeFi Module
 
 **Date:** November 21, 2025
@@ -20,6 +13,9 @@ This audit identifies **5 specific vulnerabilities**, detailed below with proofs
 ---
 
 ## 1. Critical: Double Spend via User Withdrawal (Ledger Timeout)
+
+**STATUS: RESOLVED**
+**Fixed in:** [PR #74](https://github.com/AlexandriaDAO/OpenHouse/pull/74)
 
 ### The Vulnerability
 In `accounting.rs`, the `attempt_transfer` function treats all errors from `ic_ledger_types::transfer` as "Definite Errors".
