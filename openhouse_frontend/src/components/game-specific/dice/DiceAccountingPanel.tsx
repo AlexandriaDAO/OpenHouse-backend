@@ -7,6 +7,7 @@ import { ConnectionStatusMini } from '../../ui/ConnectionStatus';
 import useDiceActor from '../../../hooks/actors/useDiceActor';
 import useLedgerActor from '../../../hooks/actors/useLedgerActor';
 import { ApproveArgs } from '../../../types/ledger';
+import { DECIMALS_PER_CKUSDT, formatUSDT, TRANSFER_FEE } from '../../../types/balance';
 
 interface DiceAccountingPanelProps {
   gameBalance: bigint;  // Now required, not nullable
@@ -28,7 +29,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
   const gameBalanceContext = useGameBalance('dice');
   const houseBalance = gameBalanceContext.balance.house;
 
-  const [depositAmount, setDepositAmount] = useState('0.1');
+  const [depositAmount, setDepositAmount] = useState('10');
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [isDepositing, setIsDepositing] = useState(false);
   const [depositStep, setDepositStep] = useState<'idle' | 'approving' | 'depositing'>('idle');
@@ -45,22 +46,22 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
     setSuccess(null);
 
     try {
-      const amountE8s = BigInt(Math.floor(parseFloat(depositAmount) * 100_000_000));
+      const amount = BigInt(Math.floor(parseFloat(depositAmount) * DECIMALS_PER_CKUSDT));
 
-      // Validate amount
-      if (amountE8s < BigInt(10_000_000)) {
-        setError('Minimum deposit is 0.1 ICP');
+      // Validate amount (Min 10 USDT)
+      if (amount < BigInt(10_000_000)) {
+        setError('Minimum deposit is 10 USDT');
         setIsDepositing(false);
         return;
       }
 
-      if (walletBalance && amountE8s > walletBalance) {
+      if (walletBalance && amount > walletBalance) {
         setError('Insufficient wallet balance');
         setIsDepositing(false);
         return;
       }
 
-      // STEP 1: Approve the dice backend to spend ICP
+      // STEP 1: Approve the dice backend to spend USDT
       setDepositStep('approving');
       const DICE_BACKEND_CANISTER_ID = 'whchi-hyaaa-aaaao-a4ruq-cai';
       const approveArgs: ApproveArgs = {
@@ -68,7 +69,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
           owner: Principal.fromText(DICE_BACKEND_CANISTER_ID),
           subaccount: [],
         },
-        amount: amountE8s + BigInt(10_000), // Add fee buffer
+        amount: amount + BigInt(TRANSFER_FEE), // Add fee buffer
         fee: [],
         memo: [],
         from_subaccount: [],
@@ -88,12 +89,12 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
 
       // STEP 2: Call backend deposit (which will use transferFrom)
       setDepositStep('depositing');
-      const result = await actor.deposit(amountE8s);
+      const result = await actor.deposit(amount);
 
       if ('Ok' in result) {
         const newBalance = result.Ok;
-        setSuccess(`💰 Bought ${depositAmount} ICP in chips! New balance: ${Number(newBalance) / 100_000_000} ICP`);
-        setDepositAmount('0.1');
+        setSuccess(`💰 Bought ${depositAmount} USDT in chips! New balance: ${formatUSDT(newBalance)}`);
+        setDepositAmount('10');
         setShowDepositModal(false);
 
         // Refresh all balances
@@ -124,8 +125,8 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
 
       if ('Ok' in result) {
         const newBalance = result.Ok;
-        const withdrawnAmount = (Number(gameBalance) - Number(newBalance)) / 100_000_000;
-        setSuccess(`💵 Cashed out all chips! (${withdrawnAmount.toFixed(4)} ICP) New balance: ${Number(newBalance) / 100_000_000} ICP`);
+        const withdrawnAmount = (Number(gameBalance) - Number(newBalance)) / DECIMALS_PER_CKUSDT;
+        setSuccess(`💵 Cashed out all chips! (${withdrawnAmount.toFixed(2)} USDT) New balance: ${formatUSDT(newBalance)}`);
 
         // Refresh all balances
         await refreshBalance(); // Wallet balance
@@ -138,12 +139,6 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
     } finally {
       setIsWithdrawing(false);
     }
-  };
-
-  // Format balances
-  const formatBalance = (e8s: bigint | null): string => {
-    if (e8s === null) return '0.00000000';
-    return (Number(e8s) / 100_000_000).toFixed(8);
   };
 
   if (!isAuthenticated) {
@@ -164,14 +159,14 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
               <p className="text-xs text-gray-400">Dice Betting</p>
               <ConnectionStatusMini game="dice" />
             </div>
-            <p className="text-sm font-bold text-green-400">{formatBalance(gameBalance)}</p>
+            <p className="text-sm font-bold text-green-400">{formatUSDT(gameBalance)}</p>
           </div>
           <div className="bg-yellow-900/10 p-2 rounded border border-yellow-500/20">
             <div className="flex items-center justify-between">
               <p className="text-xs text-gray-400">House Money</p>
               <ConnectionStatusMini game="dice" />
             </div>
-            <p className="text-sm font-bold text-yellow-400">{formatBalance(houseBalance)}</p>
+            <p className="text-sm font-bold text-yellow-400">{formatUSDT(houseBalance)}</p>
           </div>
         </div>
 
@@ -236,19 +231,19 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
             <h3 className="text-xl font-bold text-white mb-4">💰 Buy Chips</h3>
 
             <div className="mb-4">
-              <label className="block text-sm text-gray-400 mb-2">Amount (ICP)</label>
+              <label className="block text-sm text-gray-400 mb-2">Amount (USDT)</label>
               <input
                 type="number"
                 value={depositAmount}
                 onChange={(e) => setDepositAmount(e.target.value)}
                 className="w-full bg-gray-900/50 border border-gray-700 rounded px-4 py-2 text-white"
                 placeholder="Enter amount"
-                min="0.1"
-                step="0.01"
+                min="10"
+                step="1"
                 disabled={isDepositing}
                 autoFocus
               />
-              <p className="text-xs text-gray-500 mt-1">Minimum: 0.1 ICP</p>
+              <p className="text-xs text-gray-500 mt-1">Minimum: 10 USDT</p>
               <p className="text-xs text-blue-400 mt-2 bg-blue-900/20 border border-blue-500/20 rounded px-2 py-1">
                 ℹ️ Deposit requires two steps: approve spending, then transfer
               </p>

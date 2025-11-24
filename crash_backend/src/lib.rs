@@ -113,10 +113,10 @@ async fn play_crash(target_multiplier: f64) -> Result<PlayCrashResult, String> {
     // Determine outcome
     let won = crash_point >= target_multiplier;
 
-    // Calculate payout (for now, simple 1 ICP bet)
+    // Calculate payout (for now, simple 1 USDT bet)
     // In future: integrate with actual betting system
     let payout = if won {
-        (target_multiplier * 100_000_000.0) as u64  // Convert to e8s
+        (target_multiplier * 1_000_000.0) as u64  // Convert to 6 decimals
     } else {
         0
     };
@@ -144,6 +144,7 @@ fn get_crash_formula() -> String {
 fn get_expected_value() -> f64 {
     0.99  // Theoretical - actual calculation would require integration
 }
+
 
 /// Calculate probability of reaching a specific multiplier
 /// Returns P(crash ≥ target)
@@ -261,7 +262,7 @@ fn create_randomness_hash(bytes: &[u8]) -> String {
 
 #[query]
 fn greet(name: String) -> String {
-    format!("Simple Crash: Transparent 1% edge, {} wins or loses fairly!", name)
+    format!("Simple Crash: Transparent 1% edge, {} wins or loses fairly with USDT!", name)
 }
 
 // ============================================================================

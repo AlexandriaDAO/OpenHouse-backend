@@ -1,4 +1,4 @@
-use crate::types::{DiceResult, GameStats, RollDirection, E8S_PER_ICP, MIN_BET, MAX_NUMBER};
+use crate::types::{DiceResult, GameStats, RollDirection, DECIMALS_PER_CKUSDT, MIN_BET, MAX_NUMBER};
 use crate::seed::{generate_dice_roll_instant, maybe_schedule_seed_rotation};
 use crate::defi_accounting::{self as accounting, liquidity_pool};
 use candid::Principal;
@@ -80,17 +80,17 @@ pub async fn play_dice(
     // Check user has sufficient internal balance
     let user_balance = accounting::get_balance(caller);
     if user_balance < bet_amount {
-        let user_balance_icp = user_balance as f64 / E8S_PER_ICP as f64;
-        let needed_icp = bet_amount as f64 / E8S_PER_ICP as f64;
+        let user_balance_usdt = user_balance as f64 / DECIMALS_PER_CKUSDT as f64;
+        let needed_usdt = bet_amount as f64 / DECIMALS_PER_CKUSDT as f64;
         return Err(format!(
-            "INSUFFICIENT_BALANCE|Your dice balance: {:.4} ICP|Bet amount: {:.4} ICP|This bet was not placed and no funds were deducted.",
-            user_balance_icp, needed_icp
+            "INSUFFICIENT_BALANCE|Your dice balance: {:.4} USDT|Bet amount: {:.4} USDT|This bet was not placed and no funds were deducted.",
+            user_balance_usdt, needed_usdt
         ));
     }
 
     // Validate input
     if bet_amount < MIN_BET {
-        return Err(format!("Minimum bet is {} ICP", MIN_BET as f64 / E8S_PER_ICP as f64));
+        return Err(format!("Minimum bet is {} USDT", MIN_BET as f64 / DECIMALS_PER_CKUSDT as f64));
     }
 
     // Validate target number based on direction
@@ -154,9 +154,9 @@ pub async fn play_dice(
     }
     if max_payout > max_allowed {
         return Err(format!(
-            "Max payout of {} ICP exceeds house limit of {} ICP (10% of house balance)",
-            max_payout as f64 / E8S_PER_ICP as f64,
-            max_allowed as f64 / E8S_PER_ICP as f64
+            "Max payout of {} USDT exceeds house limit of {} USDT (10% of house balance)",
+            max_payout as f64 / DECIMALS_PER_CKUSDT as f64,
+            max_allowed as f64 / DECIMALS_PER_CKUSDT as f64
         ));
     }
 
@@ -260,9 +260,9 @@ pub async fn play_dice(
             ic_cdk::println!("CRITICAL: Payout failure. Refunded {} to {}", bet_amount, caller);
             
             return Err(format!(
-                "House cannot afford payout ({} ICP). Your bet of {} ICP has been REFUNDED. Pool was drained by concurrent games. Please try a smaller bet.", 
-                profit as f64 / E8S_PER_ICP as f64,
-                bet_amount as f64 / E8S_PER_ICP as f64
+                "House cannot afford payout ({} USDT). Your bet of {} USDT has been REFUNDED. Pool was drained by concurrent games. Please try a smaller bet.", 
+                profit as f64 / DECIMALS_PER_CKUSDT as f64,
+                bet_amount as f64 / DECIMALS_PER_CKUSDT as f64
             ));
         }
 

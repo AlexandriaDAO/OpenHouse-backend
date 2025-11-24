@@ -7,15 +7,16 @@ use std::borrow::Cow;
 use num_traits::ToPrimitive;
 use ic_ledger_types::MAINNET_LEDGER_CANISTER_ID;
 
+use crate::types::{Account, TransferFromArgs, TransferFromError, CKUSDT_CANISTER_ID};
 use super::accounting;
 
 // Constants
 
 const MINIMUM_LIQUIDITY: u64 = 1000;
-const MIN_DEPOSIT: u64 = 100_000_000; // 1 ICP minimum for all deposits
-const MIN_WITHDRAWAL: u64 = 100_000; // 0.001 ICP
-const MIN_OPERATING_BALANCE: u64 = 1_000_000_000; // 10 ICP to operate games
-const TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP
+const MIN_DEPOSIT: u64 = 1_000_000; // 1 USDT minimum for all deposits
+const MIN_WITHDRAWAL: u64 = 100_000; // 0.1 USDT
+const MIN_OPERATING_BALANCE: u64 = 100_000_000; // 100 USDT to operate games
+const TRANSFER_FEE: u64 = 2; // 0.000002 USDT
 const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
 const LP_WITHDRAWAL_FEE_BPS: u64 = 100; // 1%
 
@@ -500,44 +501,11 @@ pub fn restore_lp_position(user: Principal, shares: Nat, reserve_amount: Nat) {
 
 // Transfer helpers (using existing accounting module)
 
-// ICRC-2 types not in ic_ledger_types
-#[derive(CandidType, Deserialize)]
-struct Account {
-    owner: Principal,
-    subaccount: Option<[u8; 32]>,
-}
-
-#[derive(CandidType, Deserialize)]
-struct TransferFromArgs {
-    from: Account,
-    to: Account,
-    amount: Nat,
-    fee: Option<Nat>,
-    memo: Option<Vec<u8>>,
-    created_at_time: Option<u64>,
-    spender_subaccount: Option<[u8; 32]>,
-}
-
-#[derive(CandidType, Deserialize, Debug)]
-enum TransferFromError {
-    BadFee { expected_fee: Nat },
-    BadBurn { min_burn_amount: Nat },
-    InsufficientFunds { balance: Nat },
-    InsufficientAllowance { allowance: Nat },
-    TooOld,
-    CreatedInFuture { ledger_time: u64 },
-    Duplicate { duplicate_of: Nat },
-    TemporarilyUnavailable,
-    GenericError { error_code: Nat, message: String },
-}
-
-type TransferFromResult = Result<Nat, TransferFromError>;
-
 #[allow(deprecated)]
 async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> {
     // Frontend must call icrc2_approve first
     // Then we use transfer_from
-    let ledger = MAINNET_LEDGER_CANISTER_ID;
+    let ledger = Principal::from_text(CKUSDT_CANISTER_ID).unwrap();
     let canister_id = ic_cdk::api::canister_self();
 
     let args = TransferFromArgs {
@@ -557,10 +525,10 @@ async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> 
         spender_subaccount: None,
     };
 
-    let (result,): (TransferFromResult,) =
+    let (result,): (Result<Nat, TransferFromError>,) =
         ic_cdk::api::call::call(ledger, "icrc2_transfer_from", (args,))
         .await
-        .map_err(|e| format!("Call failed: {:?}", e))?;
+        .map_err(|(code, msg)| format!("Call failed: {:?} {}", code, msg))?;
 
     match result {
         Ok(_) => Ok(()),

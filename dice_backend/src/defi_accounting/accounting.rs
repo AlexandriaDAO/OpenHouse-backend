@@ -8,16 +8,17 @@ use ic_ledger_types::{
     AccountIdentifier, TransferArgs, Tokens, DEFAULT_SUBACCOUNT,
     MAINNET_LEDGER_CANISTER_ID, Memo, AccountBalanceArgs, BlockIndex, Timestamp,
 };
-use crate::types::{Account, TransferFromArgs, TransferFromError};
+use crate::types::{Account, TransferFromArgs, TransferFromError, TransferArg, TransferError};
 
 use crate::{MEMORY_MANAGER, Memory};
 use super::liquidity_pool;
 use super::types::{PendingWithdrawal, WithdrawalType, AuditEntry, AuditEvent};
 
 // Constants
-const ICP_TRANSFER_FEE: u64 = 10_000; // 0.0001 ICP in e8s
-const MIN_DEPOSIT: u64 = 10_000_000; // 0.1 ICP
-const MIN_WITHDRAW: u64 = 10_000_000; // 0.1 ICP
+const CKUSDT_CANISTER_ID: Principal = Principal::from_slice(&[0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x3c, 0x01, 0x01]); // cngnf-vqaaa-aaaar-qag4q-cai
+const CKUSDT_TRANSFER_FEE: u64 = 2; // 0.000002 USDT
+const MIN_DEPOSIT: u64 = 10_000_000; // 10 USDT
+const MIN_WITHDRAW: u64 = 1_000_000; // 1 USDT
 const USER_BALANCES_MEMORY_ID: u8 = 10;
 const PENDING_WITHDRAWALS_MEMORY_ID: u8 = 20;
 const AUDIT_LOG_MEMORY_ID: u8 = 21;
@@ -25,8 +26,8 @@ const AUDIT_LOG_MEMORY_ID: u8 = 21;
 // within the Ledger's 24-hour deduplication window.
 const MAX_RETRIES: u8 = 250;
 /// Minimum balance before triggering automatic weekly withdrawal to parent canister.
-/// Set to 1 ICP to minimize gas costs while ensuring timely fee collection.
-const PARENT_AUTO_WITHDRAW_THRESHOLD: u64 = 100_000_000; // 1 ICP
+/// Set to 100 USDT to minimize gas costs while ensuring timely fee collection.
+const PARENT_AUTO_WITHDRAW_THRESHOLD: u64 = 100_000_000; // 100 USDT
 
 thread_local! {
     static USER_BALANCES_STABLE: RefCell<StableBTreeMap<Principal, u64, Memory>> = RefCell::new(
@@ -103,7 +104,7 @@ fn calculate_total_deposits() -> u64 {
 #[allow(deprecated)]
 pub async fn deposit(amount: u64) -> Result<u64, String> {
     if amount < MIN_DEPOSIT {
-        return Err(format!("Minimum deposit is {} ICP", MIN_DEPOSIT / 100_000_000));
+        return Err(format!("Minimum deposit is {} USDT", MIN_DEPOSIT / 1_000_000));
     }
 
     let caller = ic_cdk::api::msg_caller();
@@ -116,13 +117,13 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
         // Explicitly charge the fee to the sender.
         // This prevents the protocol from "eating" the fee (insolvency risk).
         // If the ledger creates a surplus from this, it is Protocol Profit (safe).
-        fee: Some(Nat::from(ICP_TRANSFER_FEE)), 
+        fee: Some(Nat::from(CKUSDT_TRANSFER_FEE)), 
         memo: None,
         created_at_time: None,
     };
 
     let (result,): (Result<Nat, TransferFromError>,) =
-        ic_cdk::api::call::call(MAINNET_LEDGER_CANISTER_ID, "icrc2_transfer_from", (args,))
+        ic_cdk::api::call::call(CKUSDT_CANISTER_ID, "icrc2_transfer_from", (args,))
         .await
         .map_err(|(code, msg)| format!("Call failed: {:?} {}", code, msg))?;
 
@@ -143,7 +144,7 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
                 new_bal
             });
 
-            ic_cdk::println!("Deposit successful: {} deposited {} e8s at block {}", caller, amount_received, block_index);
+            ic_cdk::println!("Deposit successful: {} deposited {} decimals at block {}", caller, amount_received, block_index);
             Ok(new_balance)
         }
         Err(e) => Err(format!("Transfer failed: {:?}", e)),
@@ -173,8 +174,8 @@ pub(crate) async fn withdraw_internal(user: Principal) -> Result<u64, String> {
     }
 
     if balance < MIN_WITHDRAW {
-        return Err(format!("Balance {} e8s is below minimum withdrawal of {} ICP",
-                          balance, MIN_WITHDRAW / 100_000_000));
+        return Err(format!("Balance {} decimals is below minimum withdrawal of {} USDT",
+                          balance, MIN_WITHDRAW / 1_000_000));
     }
 
     // ATOMIC: Create pending FIRST, then zero balance
@@ -250,28 +251,25 @@ pub fn schedule_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount
 // =============================================================================
 
 async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> TransferResult {
-    let args = TransferArgs {
-        memo: Memo(0),
-        amount: Tokens::from_e8s(amount - ICP_TRANSFER_FEE),
-        fee: Tokens::from_e8s(ICP_TRANSFER_FEE),
+    let args = TransferArg {
         from_subaccount: None,
-        to: AccountIdentifier::new(&user, &DEFAULT_SUBACCOUNT),
-        created_at_time: Some(Timestamp { timestamp_nanos: created_at }),
+        to: Account { owner: user, subaccount: None },
+        amount: Nat::from(amount - CKUSDT_TRANSFER_FEE),
+        fee: Some(Nat::from(CKUSDT_TRANSFER_FEE)),
+        memo: None,
+        created_at_time: Some(created_at),
     };
 
-    match ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, &args).await {
-        Ok(Ok(block)) => TransferResult::Success(block),
-        Ok(Err(e)) => {
-             // Ledger Application Error (e.g. InsufficientFunds)
-             // The Ledger definitely rejected it.
-             TransferResult::DefiniteError(format!("{:?}", e))
-        }
-        Err(e) => {
-            // System Error (Timeout, CanisterError, etc.)
-            // The request might have been processed.
-            // CRITICAL: Return UncertainError. Do NOT rollback.
-            TransferResult::UncertainError(format!("{:?}", e))
-        }
+    let call_result: Result<(Result<Nat, TransferError>,), _> = 
+        ic_cdk::api::call::call(CKUSDT_CANISTER_ID, "icrc1_transfer", (args,)).await;
+
+    match call_result {
+        Ok((Ok(block_index),)) => {
+            let idx = block_index.0.try_into().unwrap_or(0);
+            TransferResult::Success(idx)
+        },
+        Ok((Err(e),)) => TransferResult::DefiniteError(format!("{:?}", e)),
+        Err((code, msg)) => TransferResult::UncertainError(format!("{:?} {}", code, msg)),
     }
 }
 
@@ -533,14 +531,16 @@ pub fn get_audit_log(offset: usize, limit: usize) -> Vec<AuditEntry> {
 #[update]
 #[allow(deprecated)]
 pub async fn refresh_canister_balance() -> u64 {
-    let ledger = MAINNET_LEDGER_CANISTER_ID;
-    let result: Result<(Tokens,), _> = ic_cdk::api::call::call(ledger, "account_balance", (AccountBalanceArgs {
-        account: AccountIdentifier::new(&ic_cdk::api::canister_self(), &DEFAULT_SUBACCOUNT)
-    },)).await;
+    let account = Account {
+        owner: ic_cdk::api::canister_self(),
+        subaccount: None,
+    };
+
+    let result: Result<(Nat,), _> = ic_cdk::api::call::call(CKUSDT_CANISTER_ID, "icrc1_balance_of", (account,)).await;
 
     match result {
         Ok((balance,)) => {
-            let balance_u64 = balance.e8s();
+            let balance_u64 = balance.0.try_into().unwrap_or(0);
             CACHED_CANISTER_BALANCE.with(|cache| {
                 *cache.borrow_mut() = balance_u64;
             });
@@ -555,19 +555,12 @@ pub async fn refresh_canister_balance() -> u64 {
 #[update]
 #[allow(deprecated)]
 pub async fn get_canister_balance() -> u64 {
-    #[derive(CandidType, Deserialize)]
-    struct IcrcAccount {
-        owner: Principal,
-        subaccount: Option<Vec<u8>>,
-    }
-
-    let account = IcrcAccount {
+    let account = Account {
         owner: ic_cdk::api::canister_self(),
         subaccount: None,
     };
 
-    let ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-    let result: Result<(Nat,), _> = ic_cdk::api::call::call(ledger, "icrc1_balance_of", (account,)).await;
+    let result: Result<(Nat,), _> = ic_cdk::api::call::call(CKUSDT_CANISTER_ID, "icrc1_balance_of", (account,)).await;
 
     match result {
         Ok((balance,)) => {

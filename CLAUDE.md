@@ -54,7 +54,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 ### 1. Crash Game
 - **Mechanics**: Multiplier increases from 1.00x until it crashes
 - **Objective**: Cash out before the crash
-- **Min Bet**: 1 ICP
+- **Min Bet**: 1 USDT
 - **Max Win**: 1000x
 - **House Edge**: 1%
 - **Canister**: `crash_backend`
@@ -62,7 +62,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 ### 2. Plinko
 - **Mechanics**: Ball bounces through pegs to land in multiplier slots
 - **Features**: Adjustable rows (8/12/16) and risk levels (Low/Medium/High)
-- **Min Bet**: 1 ICP
+- **Min Bet**: 1 USDT
 - **Max Win**: 1000x (16 rows, high risk)
 - **House Edge**: 1%
 - **Canister**: `plinko_backend`
@@ -70,7 +70,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 ### 3. Mines
 - **Mechanics**: Navigate a 5x5 grid minefield
 - **Objective**: Reveal safe tiles to increase multiplier, avoid mines
-- **Min Bet**: 1 ICP
+- **Min Bet**: 1 USDT
 - **Max Win**: 5000x
 - **House Edge**: 1%
 - **Canister**: `mines_backend`
@@ -78,15 +78,15 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 ### 4. Dice
 - **Mechanics**: Roll a number from 0-100, predict over or under target
 - **Objective**: Choose target number and direction, win if roll matches prediction
-- **Min Bet**: 0.01 ICP
-- **Max Bet**: Dynamic based on multiplier (10 ICP max win / multiplier)
-- **Max Win**: 10 ICP
+- **Min Bet**: 0.01 USDT
+- **Max Bet**: Dynamic based on multiplier (10 USDT max win / multiplier)
+- **Max Win**: 10 USDT
 - **House Edge**: 1%
 - **Win Chance**: 1% to 98% (adjustable via target number)
 - **Canister**: `dice_backend`
 
 ### Future Games
-- **Slots**: Traditional slot machine with ICP themes
+- **Slots**: Traditional slot machine with crypto themes
 - **Roulette**: European roulette with single zero
 
 ## 🏗️ Development Workflow

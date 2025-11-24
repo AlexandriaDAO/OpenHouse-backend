@@ -1,4 +1,4 @@
-use crate::types::{DetailedGameHistory, RollDirection, E8S_PER_ICP};
+use crate::types::{DetailedGameHistory, RollDirection, DECIMALS_PER_CKUSDT};
 use crate::game::GAME_HISTORY;
 
 // =============================================================================
@@ -18,8 +18,8 @@ pub fn get_detailed_history(limit: u32) -> Vec<DetailedGameHistory> {
                 DetailedGameHistory {
                     game_id,
                     player: game.player.to_text(),
-                    bet_icp: (game.bet_amount as f64 / E8S_PER_ICP as f64),
-                    won_icp: if game.is_win { game.payout as f64 / E8S_PER_ICP as f64 } else { 0.0 },
+                    bet_icp: (game.bet_amount as f64 / DECIMALS_PER_CKUSDT as f64),
+                    won_icp: if game.is_win { game.payout as f64 / DECIMALS_PER_CKUSDT as f64 } else { 0.0 },
                     target_number: game.target_number,
                     direction: match game.direction {
                         RollDirection::Over => "Over".to_string(),
@@ -52,7 +52,7 @@ pub fn get_detailed_history(limit: u32) -> Vec<DetailedGameHistory> {
 pub fn export_history_csv(limit: u32) -> String {
     let history = get_detailed_history(limit);
 
-    let mut csv = String::from("game_id,player,bet_icp,won_icp,target,direction,rolled,win_chance_%,multiplier,is_win,profit_loss_e8s,timestamp\n");
+    let mut csv = String::from("game_id,player,bet_usdt,won_usdt,target,direction,rolled,win_chance_%,multiplier,is_win,profit_loss_decimals,timestamp\n");
 
     for game in history {
         csv.push_str(&format!(

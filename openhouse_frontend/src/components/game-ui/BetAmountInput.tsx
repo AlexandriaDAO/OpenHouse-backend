@@ -37,7 +37,7 @@ export const BetAmountInput: React.FC<BetAmountInputProps> = ({
     return (
       <div className="mb-4">
         <label className="block text-sm text-pure-white/60 mb-2 font-mono">
-          Bet Amount {isPracticeMode ? '(Practice)' : ''}: {value.toFixed(2)} ICP
+          Bet Amount {isPracticeMode ? '(Practice)' : ''}: {value.toFixed(2)} USDT
         </label>
 
         <input
@@ -52,8 +52,8 @@ export const BetAmountInput: React.FC<BetAmountInputProps> = ({
         />
 
         <div className="flex justify-between text-xs text-pure-white/40 font-mono mt-1">
-          <span>{min} ICP</span>
-          <span>{max} ICP</span>
+          <span>{min} USDT</span>
+          <span>{max} USDT</span>
         </div>
 
         {error && (
@@ -68,7 +68,7 @@ export const BetAmountInput: React.FC<BetAmountInputProps> = ({
   return (
     <div className="mb-4">
       <label className="block text-sm text-pure-white/60 mb-2 font-mono">
-        Bet Amount {isPracticeMode ? '(Practice)' : ''} (ICP)
+        Bet Amount {isPracticeMode ? '(Practice)' : ''} (USDT)
       </label>
 
       <input

@@ -214,7 +214,7 @@ pub fn calculate_multiplier(position: u8) -> f64 {
 
 #[query]
 fn greet(name: String) -> String {
-    format!("Pure Mathematical Plinko: Transparent odds, {} wins or loses fairly!", name)
+    format!("Pure Mathematical Plinko: Transparent odds, {} wins or loses fairly with USDT!", name)
 }
 
 // ============================================================================

@@ -17,9 +17,8 @@ import { useGameBalance } from '../../providers/GameBalanceProvider';
 import { useBalance } from '../../providers/BalanceProvider';
 import { useAuth } from '../../providers/AuthProvider';
 import { ApproveArgs } from '../../types/ledger';
+import { DECIMALS_PER_CKUSDT, formatUSDT, TRANSFER_FEE } from '../../types/balance';
 
-// ICP conversion constant
-const E8S_PER_ICP = 100_000_000; // 1 ICP = 100,000,000 e8s
 const DICE_BACKEND_CANISTER_ID = 'whchi-hyaaa-aaaao-a4ruq-cai';
 
 interface DiceGameResult {
@@ -62,8 +61,8 @@ const HouseStatusInline: React.FC <{
   betAmount: number;
   multiplier: number;
 }> = ({ houseBalance, betAmount, multiplier }) => {
-  const houseBalanceICP = Number(houseBalance) / E8S_PER_ICP;
-  const maxAllowedPayout = houseBalanceICP * 0.1;
+  const houseBalanceUSDT = Number(houseBalance) / DECIMALS_PER_CKUSDT;
+  const maxAllowedPayout = houseBalanceUSDT * 0.1;
   const currentPotentialPayout = betAmount * multiplier;
   const utilizationPct = maxAllowedPayout > 0
     ? (currentPotentialPayout / maxAllowedPayout) * 100
@@ -120,7 +119,7 @@ export function DiceGame() {
   const [showDepositAnimation, setShowDepositAnimation] = useState(false);
 
   // Accounting State
-  const [depositAmount, setDepositAmount] = useState('0.1');
+  const [depositAmount, setDepositAmount] = useState('10');
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [isDepositing, setIsDepositing] = useState(false);
   const [depositStep, setDepositStep] = useState<'idle' | 'approving' | 'depositing'>('idle');
@@ -144,7 +143,7 @@ export function DiceGame() {
         `${userBalance}\n` +
         `${betAmount}\n\n` +
         `${parts[3] || 'This bet was not placed and no funds were deducted.'}\n\n` +
-        `👇 Click "Buy Chips" above to add more ICP.`;
+        `👇 Click "Buy Chips" above to add more USDT.`;
     }
     if (errorMsg.includes('exceeds house limit') || errorMsg.includes('house balance')) {
       return `⚠️ BET REJECTED - NO MONEY LOST\n\n` +
@@ -163,15 +162,16 @@ export function DiceGame() {
     setAccountingSuccess(null);
 
     try {
-      const amountE8s = BigInt(Math.floor(parseFloat(depositAmount) * 100_000_000));
+      const amount = BigInt(Math.floor(parseFloat(depositAmount) * DECIMALS_PER_CKUSDT));
 
-      if (amountE8s < BigInt(10_000_000)) {
-        setAccountingError('Minimum deposit is 0.1 ICP');
+      // Min deposit 10 USDT for game balance
+      if (amount < BigInt(10_000_000)) {
+        setAccountingError('Minimum deposit is 10 USDT');
         setIsDepositing(false);
         return;
       }
 
-      if (walletBalance && amountE8s > walletBalance) {
+      if (walletBalance && amount > walletBalance) {
         setAccountingError('Insufficient wallet balance');
         setIsDepositing(false);
         return;
@@ -183,7 +183,7 @@ export function DiceGame() {
           owner: Principal.fromText(DICE_BACKEND_CANISTER_ID),
           subaccount: [],
         },
-        amount: amountE8s + BigInt(10_000),
+        amount: amount + BigInt(TRANSFER_FEE),
         fee: [],
         memo: [],
         from_subaccount: [],
@@ -202,12 +202,12 @@ export function DiceGame() {
       }
 
       setDepositStep('depositing');
-      const result = await actor.deposit(amountE8s);
+      const result = await actor.deposit(amount);
 
       if ('Ok' in result) {
         const newBalance = result.Ok;
-        setAccountingSuccess(`💰 Bought ${depositAmount} ICP in chips!`);
-        setDepositAmount('0.1');
+        setAccountingSuccess(`💰 Bought ${depositAmount} USDT in chips!`);
+        setDepositAmount('10');
         setShowDepositModal(false);
         await refreshWalletBalance();
         gameBalanceContext.refresh();
@@ -234,8 +234,8 @@ export function DiceGame() {
 
       if ('Ok' in result) {
         const newBalance = result.Ok;
-        const withdrawnAmount = (Number(balance.game) - Number(newBalance)) / 100_000_000;
-        setAccountingSuccess(`💵 Cashed out ${withdrawnAmount.toFixed(4)} ICP!`);
+        const withdrawnAmount = (Number(balance.game) - Number(newBalance)) / DECIMALS_PER_CKUSDT;
+        setAccountingSuccess(`💵 Cashed out ${withdrawnAmount.toFixed(2)} USDT!`);
         await refreshWalletBalance();
         gameBalanceContext.refresh();
       } else {
@@ -246,11 +246,6 @@ export function DiceGame() {
     } finally {
       setIsWithdrawing(false);
     }
-  };
-
-  const formatBalance = (e8s: bigint | null) => {
-    if (e8s === null) return '0.00';
-    return (Number(e8s) / E8S_PER_ICP).toFixed(2);
   };
 
   // Calculate odds
@@ -273,11 +268,11 @@ export function DiceGame() {
 
         try {
           const maxPayoutE8s = await actor.get_max_allowed_payout();
-          const maxPayoutICP = Number(maxPayoutE8s) / E8S_PER_ICP;
-          const maxBetICP = mult > 0 ? maxPayoutICP / mult : 0;
-          setMaxBet(maxBetICP);
-          if (gameState.betAmount > maxBetICP) {
-            gameState.setBetAmount(maxBetICP);
+          const maxPayoutUSDT = Number(maxPayoutE8s) / DECIMALS_PER_CKUSDT;
+          const maxBetUSDT = mult > 0 ? maxPayoutUSDT / mult : 0;
+          setMaxBet(maxBetUSDT);
+          if (gameState.betAmount > maxBetUSDT) {
+            gameState.setBetAmount(maxBetUSDT);
           }
         } catch (e) {
           setMaxBet(10);
@@ -347,9 +342,9 @@ export function DiceGame() {
     }
 
     // Frontend limit check
-    const maxPayout = BigInt(Math.floor(gameState.betAmount * multiplier * E8S_PER_ICP));
+    const maxPayout = BigInt(Math.floor(gameState.betAmount * multiplier * DECIMALS_PER_CKUSDT));
     const maxAllowedPayout = (balance.house * BigInt(10)) / BigInt(100);
-    if (maxPayout > maxAllowedPayout) {
+    if (maxPayout > maxAllowedAllowedPayout) {
       gameState.setGameError('Potential payout exceeds house limit.');
       return;
     }
@@ -365,14 +360,14 @@ export function DiceGame() {
     });
 
     try {
-      const betAmountE8s = BigInt(Math.floor(gameState.betAmount * E8S_PER_ICP));
+      const betAmount = BigInt(Math.floor(gameState.betAmount * DECIMALS_PER_CKUSDT));
       const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
       const randomBytes = new Uint8Array(16);
       crypto.getRandomValues(randomBytes);
       const clientSeed = Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
 
       const result = await Promise.race([
-        actor.play_dice(betAmountE8s, targetNumber, directionVariant, clientSeed),
+        actor.play_dice(betAmount, targetNumber, directionVariant, clientSeed),
         timeoutPromise
       ]);
 
@@ -409,7 +404,7 @@ export function DiceGame() {
      // Simple CSV generation from current history
      const headers = "Time,Bet,Target,Roll,Outcome,Payout\n";
      const rows = gameState.history.map(g => 
-       `${new Date(Number(g.timestamp) / 1_000_000).toISOString()},${Number(g.bet_amount)/E8S_PER_ICP},${g.target_number},${g.rolled_number},${g.is_win ? 'WIN' : 'LOSS'},${Number(g.payout)/E8S_PER_ICP}`
+       `${new Date(Number(g.timestamp) / 1_000_000).toISOString()},${Number(g.bet_amount)/DECIMALS_PER_CKUSDT},${g.target_number},${g.rolled_number},${g.is_win ? 'WIN' : 'LOSS'},${Number(g.payout)/DECIMALS_PER_CKUSDT}`
      ).join('\n');
      setCsvExport(headers + rows);
      navigator.clipboard.writeText(headers + rows);
@@ -432,17 +427,17 @@ export function DiceGame() {
               <div className="flex gap-6 text-sm bg-gray-800/40 px-4 py-2 rounded-lg">
                 <div className="flex items-center gap-2">
                   <span className="text-gray-400">Wallet:</span>
-                  <span className="font-mono font-bold text-green-400">{formatBalance(walletBalance)} ICP</span>
+                  <span className="font-mono font-bold text-green-400">{formatUSDT(walletBalance)}</span>
                 </div>
                 <div className="w-px h-4 bg-gray-700"></div>
                 <div className="flex items-center gap-2">
                   <span className="text-gray-400">Game:</span>
-                  <span className="font-mono font-bold text-blue-400">{formatBalance(balance.game)} ICP</span>
+                  <span className="font-mono font-bold text-blue-400">{formatUSDT(balance.game)}</span>
                 </div>
                 <div className="w-px h-4 bg-gray-700 hidden sm:block"></div>
                 <div className="flex items-center gap-2 hidden sm:flex">
                   <span className="text-gray-400">House:</span>
-                  <span className="font-mono font-bold text-yellow-400">{formatBalance(balance.house)} ICP</span>
+                  <span className="font-mono font-bold text-yellow-400">{formatUSDT(balance.house)}</span>
                 </div>
               </div>
 
@@ -520,11 +515,11 @@ export function DiceGame() {
               </div>
               <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center">
                 <span className="text-gray-400 text-xs">Max Bet</span>
-                <span className="font-bold text-blue-400">{maxBet.toFixed(2)} ICP</span>
+                <span className="font-bold text-blue-400">{maxBet.toFixed(2)} USDT</span>
               </div>
               <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center border border-dfinity-turquoise/20">
                 <span className="text-gray-400 text-xs">Potential Win</span>
-                <span className="font-bold text-dfinity-turquoise">{(gameState.betAmount * multiplier).toFixed(2)} ICP</span>
+                <span className="font-bold text-dfinity-turquoise">{(gameState.betAmount * multiplier).toFixed(2)} USDT</span>
               </div>
             </div>
 
@@ -574,7 +569,7 @@ export function DiceGame() {
                   
                   {gameState.lastResult.is_win && (
                     <div className="text-2xl font-mono text-dfinity-turquoise">
-                      +{(Number(gameState.lastResult.payout) / E8S_PER_ICP).toFixed(4)} ICP
+                      +{formatUSDT(gameState.lastResult.payout)}
                     </div>
                   )}
 
@@ -636,24 +631,24 @@ export function DiceGame() {
             </h3>
 
             <div className="mb-6">
-              <label className="block text-sm text-gray-400 mb-2">Amount (ICP)</label>
+              <label className="block text-sm text-gray-400 mb-2">Amount (USDT)</label>
               <div className="relative">
                 <input
                   type="number"
                   value={depositAmount}
                   onChange={(e) => setDepositAmount(e.target.value)}
                   className="w-full bg-black/50 border border-gray-600 rounded-lg px-4 py-3 text-white text-lg focus:border-dfinity-turquoise focus:outline-none transition"
-                  placeholder="0.0"
-                  min="0.1"
-                  step="0.01"
+                  placeholder="10.0"
+                  min="10"
+                  step="1"
                   disabled={isDepositing}
                   autoFocus
                 />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 font-mono">ICP</span>
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 font-mono">USDT</span>
               </div>
               <div className="flex justify-between items-center mt-2">
-                <p className="text-xs text-gray-500">Wallet: {formatBalance(walletBalance)} ICP</p>
-                <p className="text-xs text-gray-500">Min: 0.1 ICP</p>
+                <p className="text-xs text-gray-500">Wallet: {formatUSDT(walletBalance)}</p>
+                <p className="text-xs text-gray-500">Min: 10 USDT</p>
               </div>
             </div>
 

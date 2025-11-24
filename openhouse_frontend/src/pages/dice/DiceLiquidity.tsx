@@ -4,35 +4,35 @@ import { InfoTooltip } from '../../components/InfoTooltip';
 
 // Tooltip content constants
 const LP_INFO_TEXT = `Liquidity Pool Mechanics:
-• Deposit ICP to receive LP shares
+• Deposit USDT to receive LP shares
 • Share price = Total Reserve / Total Shares
 • Earn as players lose (1% house edge)
 • Withdraw anytime (1% fee applies)
-• Minimum deposit: 1 ICP
-• Minimum withdrawal: 0.001 ICP`;
+• Minimum deposit: 1 USDT
+• Minimum withdrawal: 0.1 USDT`;
 
 const HOW_IT_WORKS_DETAILS = `Share Price Calculation:
-1. Initial deposit: 1 share = 1 ICP
+1. Initial deposit: 1 share = 1 USDT
 2. Subsequent: shares = (deposit × total_shares) / pool_reserve
-3. Redemption: ICP = (your_shares × pool_reserve) / total_shares
+3. Redemption: USDT = (your_shares × pool_reserve) / total_shares
 
 When You Profit:
-• Player loses 10 ICP bet → +10 ICP to pool → share price ↑
+• Player loses 10 USDT bet → +10 USDT to pool → share price ↑
 • 1% house edge ensures long-term profitability
 
 When You Lose:
-• Player wins 100 ICP → -100 ICP from pool → share price ↓`;
+• Player wins 100 USDT payout → -100 USDT from pool → share price ↓`;
 
 const FEE_DETAILS = `Withdrawal Fee Breakdown:
 • Fee: 1% of withdrawal amount (100 basis points)
-• Example: Withdraw 10 ICP → 0.1 ICP fee, receive 9.9 ICP
+• Example: Withdraw 10 USDT → 0.1 USDT fee, receive 9.9 USDT
 • Fee goes to: Parent staker canister (e454q-riaaa-aaaap-qqcyq-cai)
 • Fallback: If parent busy, fee returns to pool (you benefit!)
 
 House Edge Flow:
 • Dice game has 1% house edge
-• Player bets 100 ICP, loses → 100 ICP to pool
-• Expected long-term: +1 ICP per 100 ICP wagered`;
+• Player bets 100 USDT, loses → 100 USDT to pool
+• Expected long-term: +1 USDT per 100 USDT wagered`;
 
 export function DiceLiquidity() {
   return (
