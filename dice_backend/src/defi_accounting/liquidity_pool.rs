@@ -123,6 +123,33 @@ pub struct PoolStats {
     pub is_initialized: bool,
 }
 
+// Calculate shares for a given deposit amount (read-only, no side effects)
+fn calculate_shares_for_deposit(amount_nat: &Nat) -> Result<Nat, String> {
+    POOL_STATE.with(|state| {
+        let pool_state = state.borrow().get().clone();
+        let current_reserve = pool_state.reserve.clone();
+        let total_shares = calculate_total_supply();
+
+        if total_shares == Nat::from(0u64) {
+            // Initial deposit logic (simulation)
+            let initial_shares = amount_nat.clone();
+            let burned_shares = Nat::from(MINIMUM_LIQUIDITY);
+            
+            if initial_shares < burned_shares {
+                return Ok::<Nat, String>(Nat::from(0u64));
+            }
+            Ok::<Nat, String>(initial_shares - burned_shares)
+        } else {
+            // Standard logic (simulation)
+            let numerator = amount_nat.clone() * total_shares;
+            if current_reserve == Nat::from(0u64) {
+                 return Ok::<Nat, String>(Nat::from(0u64));
+            }
+            Ok::<Nat, String>(numerator / current_reserve)
+        }
+    })
+}
+
 // Deposit liquidity
 // NOTE: We use `icrc2_transfer_from` here because the user must approve the canister
 // to spend their funds (ICRC-2 approval flow). This is different from user deposits
@@ -138,50 +165,45 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     let caller = ic_cdk::api::msg_caller();
     let amount_nat = Nat::from(amount);
 
+    // Pre-Flight Check: Calculate projected shares BEFORE transfer
+    // This prevents "dust loss" where users send funds but get 0 shares.
+    let projected_shares = calculate_shares_for_deposit(&amount_nat)?;
+
+    if projected_shares == Nat::from(0u64) {
+        return Err("Deposit too small: results in 0 shares".to_string());
+    }
+
     // Transfer from user (requires prior ICRC-2 approval)
     match transfer_from_user(caller, amount).await {
         Err(e) => return Err(format!("Transfer failed: {}", e)),
         Ok(_) => {}
     }
 
-    // Calculate shares to mint
-    let shares_to_mint = POOL_STATE.with(|state| {
-        let pool_state = state.borrow().get().clone();
-        let current_reserve = pool_state.reserve.clone();
-        let total_shares = calculate_total_supply();
+    // Calculate shares to mint (reuse shared logic)
+    let shares_to_mint = calculate_shares_for_deposit(&amount_nat)?;
 
-        if total_shares == Nat::from(0u64) {
-            // First deposit - burn minimum liquidity
-            let initial_shares = amount_nat.clone();
-            let burned_shares = Nat::from(MINIMUM_LIQUIDITY);
-
-            // Mint burned shares to zero address
-            LP_SHARES.with(|shares| {
-                shares.borrow_mut().insert(Principal::anonymous(), StorableNat(burned_shares.clone()));
-            });
-
-            // User gets initial_shares - burned
-            if initial_shares < burned_shares {
-                return Err("Initial deposit too small".to_string());
-            }
-            Ok(initial_shares - burned_shares)
-        } else {
-            // Subsequent deposits - proportional shares
-            // shares = (amount * total_shares) / current_reserve
-            let numerator = amount_nat.clone() * total_shares;
-            if current_reserve == Nat::from(0u64) {
-                 return Err("Division by zero".to_string());
-            }
-            Ok(numerator / current_reserve)
-        }
-    })?;
-
+    // SAFETY: This should never trigger after pre-flight check, but kept as defensive check
     if shares_to_mint == Nat::from(0u64) {
-        return Err("Deposit too small: results in 0 shares".to_string());
+        ic_cdk::trap("CRITICAL: Share calculation inconsistency");
     }
 
     // Update user shares
     LP_SHARES.with(|shares| {
+        // Handle initial burn if needed (only if this is the FIRST deposit)
+        // Note: We check total_shares again inside the block to be safe, 
+        // though the calculation logic already accounted for the burn subtraction.
+        // However, we need to physically insert the burned shares into the map 
+        // if this is indeed the first deposit.
+        let total_shares = shares.borrow()
+            .iter()
+            .map(|entry| entry.value().0.clone())
+            .fold(Nat::from(0u64), |acc, amt| acc + amt);
+
+        if total_shares == Nat::from(0u64) {
+            let burned_shares = Nat::from(MINIMUM_LIQUIDITY);
+            shares.borrow_mut().insert(Principal::anonymous(), StorableNat(burned_shares));
+        }
+
         let mut shares_map = shares.borrow_mut();
         let current = shares_map.get(&caller).map(|s| s.0.clone()).unwrap_or(Nat::from(0u64));
         let new_shares = current + shares_to_mint.clone();
