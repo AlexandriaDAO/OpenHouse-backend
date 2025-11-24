@@ -41,8 +41,8 @@ interface DiceGameResult {
 interface DetailedGameHistory {
   game_id: bigint;
   player: string;
-  bet_icp: number;
-  won_icp: number;
+  bet_usdt: number;
+  won_usdt: number;
   target_number: number;
   direction: string;
   rolled_number: number;

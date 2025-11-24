@@ -120,11 +120,11 @@ openhouse_frontend/src/
 ## Liquidity Pool Mechanics (For Tooltip Documentation)
 
 ### How It Works
-1. **Deposit**: LPs deposit ICP, receive shares proportional to deposit
-2. **Share Price**: `pool_reserve / total_shares` (starts at 1 ICP)
+1. **Deposit**: LPs deposit ckUSDT, receive shares proportional to deposit
+2. **Share Price**: `pool_reserve / total_shares` (starts at 1 ckUSDT)
 3. **Earnings**: When players lose, bet → pool reserve (share price ↑)
 4. **Losses**: When players win, payout ← pool reserve (share price ↓)
-5. **Withdraw**: Burn shares, receive proportional ICP minus 1% fee
+5. **Withdraw**: Burn shares, receive proportional ckUSDT minus 1% fee
 
 ### Fee Structure
 - **Withdrawal Fee**: 1% of withdrawn amount
@@ -134,10 +134,10 @@ openhouse_frontend/src/
 
 ### Key Constants (from backend)
 ```rust
-MIN_DEPOSIT: 1 ICP (100_000_000 e8s)
-MIN_WITHDRAWAL: 0.001 ICP (100_000 e8s)
+MIN_DEPOSIT: 1 ckUSDT (1_000_000 decimals)
+MIN_WITHDRAWAL: 1 ckUSDT (1_000_000 decimals)
 LP_WITHDRAWAL_FEE_BPS: 100 (1%)
-MIN_OPERATING_BALANCE: 10 ICP (pool won't accept bets below this)
+MIN_OPERATING_BALANCE: 100 ckUSDT (pool won't accept bets below this)
 ```
 
 ## Implementation Plan
@@ -374,39 +374,39 @@ export function DiceLiquidity() {
 // Tooltip content constants
 const LP_INFO_TEXT = `
 Liquidity Pool Mechanics:
-• Deposit ICP to receive LP shares
+• Deposit ckUSDT to receive LP shares
 • Share price = Total Reserve / Total Shares
 • Earn as players lose (1% house edge)
 • Withdraw anytime (1% fee applies)
-• Minimum deposit: 1 ICP
-• Minimum withdrawal: 0.001 ICP
+• Minimum deposit: 1 ckUSDT
+• Minimum withdrawal: 1 ckUSDT
 `;
 
 const HOW_IT_WORKS_DETAILS = `
 Share Price Calculation:
-1. Initial deposit: 1 share = 1 ICP
+1. Initial deposit: 1 share = 1 ckUSDT
 2. Subsequent: shares = (deposit × total_shares) / pool_reserve
-3. Redemption: ICP = (your_shares × pool_reserve) / total_shares
+3. Redemption: ckUSDT = (your_shares × pool_reserve) / total_shares
 
 When You Profit:
-• Player loses 10 ICP bet → +10 ICP to pool → share price ↑
+• Player loses 10 ckUSDT bet → +10 ckUSDT to pool → share price ↑
 • 1% house edge ensures long-term profitability
 
 When You Lose:
-• Player wins 100 ICP → -100 ICP from pool → share price ↓
+• Player wins 100 ckUSDT → -100 ckUSDT from pool → share price ↓
 `;
 
 const FEE_DETAILS = `
 Withdrawal Fee Breakdown:
 • Fee: 1% of withdrawal amount (100 basis points)
-• Example: Withdraw 10 ICP → 0.1 ICP fee, receive 9.9 ICP
+• Example: Withdraw 10 ckUSDT → 0.1 ckUSDT fee, receive 9.9 ckUSDT
 • Fee goes to: Parent staker canister (e454q-riaaa-aaaap-qqcyq-cai)
 • Fallback: If parent busy, fee returns to pool (you benefit!)
 
 House Edge Flow:
 • Dice game has 1% house edge
-• Player bets 100 ICP, loses → 100 ICP to pool
-• Expected long-term: +1 ICP per 100 ICP wagered
+• Player bets 100 ckUSDT, loses → 100 ckUSDT to pool
+• Expected long-term: +1 ckUSDT per 100 ckUSDT wagered
 `;
 ```
 

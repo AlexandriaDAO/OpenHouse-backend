@@ -64,8 +64,8 @@ export const HealthDashboard: React.FC = () => {
     }
   };
 
-  const formatICP = (e8s: bigint) => {
-    return (Number(e8s) / 100_000_000).toFixed(4);
+  const formatUSDT = (decimals: bigint) => {
+    return (Number(decimals) / 1_000_000).toFixed(4);
   };
 
   const formatNumber = (n: bigint) => {
@@ -79,7 +79,7 @@ export const HealthDashboard: React.FC = () => {
   };
 
   const calculateExcess = () => {
-    if (!accounting) return { excess: '0', excessICP: '0.00000000', orphanedFees: 0, isHealthy: true };
+    if (!accounting) return { excess: '0', excessUSDT: '0.000000', orphanedFees: 0, isHealthy: true };
 
     // Use BigInt arithmetic to avoid precision loss
     const poolReserve = accounting.house_balance;
@@ -88,11 +88,11 @@ export const HealthDashboard: React.FC = () => {
 
     const calculated = poolReserve + deposits;
     const excess = canisterBalance - calculated;
-    const excessICP = formatICP(excess);
+    const excessUSDT = formatUSDT(excess);
     const orphanedFees = Number(excess / BigInt(10_000));
-    const isHealthy = excess < BigInt(100_000_000); // Less than 1 ICP
+    const isHealthy = excess < BigInt(1_000_000); // Less than 1 USDT
 
-    return { excess: excess.toString(), excessICP, orphanedFees, isHealthy };
+    return { excess: excess.toString(), excessUSDT, orphanedFees, isHealthy };
   };
 
   const formatLastUpdated = () => {
@@ -153,18 +153,18 @@ export const HealthDashboard: React.FC = () => {
                     </span>
                   </div>
                   {(() => {
-                    const { excess, excessICP, orphanedFees, isHealthy } = calculateExcess();
+                    const { excess, excessUSDT, orphanedFees, isHealthy } = calculateExcess();
                     return (
                       <>
                         <div className="flex justify-between p-2 bg-gray-900/50 rounded">
                           <span className="text-gray-400">Excess Balance:</span>
                           <span className={isHealthy ? 'text-gray-300' : 'text-yellow-400'}>
-                            {excessICP} ICP
+                            {excessUSDT} USDT
                           </span>
                         </div>
                         <div className="flex justify-between p-2 bg-gray-900/50 rounded">
                           <span className="text-gray-400">Orphaned Fees:</span>
-                          <span className="text-gray-300">{orphanedFees} (@ 0.0001 ICP each)</span>
+                          <span className="text-gray-300">{orphanedFees} (@ 0.01 USDT each)</span>
                         </div>
                       </>
                     );
@@ -178,7 +178,7 @@ export const HealthDashboard: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="flex flex-col">
                     <span className="text-gray-400">Total Deposits</span>
-                    <span className="font-mono text-white">{formatICP(accounting.total_user_deposits)} ICP</span>
+                    <span className="font-mono text-white">{formatUSDT(accounting.total_user_deposits)} USDT</span>
                   </div>
                   <div className="flex flex-col">
                     <span className="text-gray-400">Unique Depositors</span>
@@ -186,11 +186,11 @@ export const HealthDashboard: React.FC = () => {
                   </div>
                   <div className="flex flex-col">
                     <span className="text-gray-400">House Balance</span>
-                    <span className="font-mono text-white">{formatICP(accounting.house_balance)} ICP</span>
+                    <span className="font-mono text-white">{formatUSDT(accounting.house_balance)} USDT</span>
                   </div>
                   <div className="flex flex-col">
                     <span className="text-gray-400">Canister Balance</span>
-                    <span className="font-mono text-white">{formatICP(accounting.canister_balance)} ICP</span>
+                    <span className="font-mono text-white">{formatUSDT(accounting.canister_balance)} USDT</span>
                   </div>
                 </div>
               </section>
@@ -205,7 +205,7 @@ export const HealthDashboard: React.FC = () => {
                   </div>
                   <div className="flex flex-col">
                     <span className="text-gray-400">Pool Reserve</span>
-                    <span className="font-mono text-white">{formatICP(poolStats.pool_reserve)} ICP</span>
+                    <span className="font-mono text-white">{formatUSDT(poolStats.pool_reserve)} USDT</span>
                   </div>
                   <div className="flex flex-col">
                     <span className="text-gray-400">Total LPs</span>
@@ -213,7 +213,7 @@ export const HealthDashboard: React.FC = () => {
                   </div>
                   <div className="flex flex-col">
                     <span className="text-gray-400">Share Price</span>
-                    <span className="font-mono text-white">{formatICP(poolStats.share_price)} ICP</span>
+                    <span className="font-mono text-white">{formatUSDT(poolStats.share_price)} USDT</span>
                   </div>
                 </div>
               </section>
@@ -228,16 +228,16 @@ export const HealthDashboard: React.FC = () => {
                   </div>
                   <div className="flex flex-col">
                     <span className="text-gray-400">Total Volume</span>
-                    <span className="font-mono text-white">{formatICP(gameStats.total_volume)} ICP</span>
+                    <span className="font-mono text-white">{formatUSDT(gameStats.total_volume)} USDT</span>
                   </div>
                   <div className="flex flex-col">
                     <span className="text-gray-400">Total Payouts</span>
-                    <span className="font-mono text-white">{formatICP(gameStats.total_payouts)} ICP</span>
+                    <span className="font-mono text-white">{formatUSDT(gameStats.total_payouts)} USDT</span>
                   </div>
                   <div className="flex flex-col">
                     <span className="text-gray-400">House Profit</span>
                     <span className={`font-mono ${Number(gameStats.house_profit) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {formatICP(gameStats.house_profit)} ICP
+                      {formatUSDT(gameStats.house_profit)} USDT
                     </span>
                   </div>
                   <div className="flex flex-col">

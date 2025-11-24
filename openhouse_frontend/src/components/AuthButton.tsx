@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../providers/AuthProvider';
 import { useBalance } from '../providers/BalanceProvider';
-import { formatIcp } from '../types/ledger';
+import { formatUSDT } from '../types/ledger';
 
 export const AuthButton: React.FC = () => {
   const { isAuthenticated, principal, login, logout, isInitializing } = useAuth();
@@ -39,12 +39,12 @@ export const AuthButton: React.FC = () => {
         {/* Balance Display */}
         <div className="flex items-center gap-2 bg-casino-accent px-4 py-2 rounded-lg">
           <div className="text-sm">
-            <div className="text-gray-400 text-xs">ICP Balance</div>
+            <div className="text-gray-400 text-xs">USDT Balance</div>
             <div className="font-bold text-lg">
               {balanceLoading ? (
                 <span className="animate-pulse">Loading...</span>
               ) : balance !== null ? (
-                <span>{formatIcp(balance)} ICP</span>
+                <span>{formatUSDT(balance)}</span>
               ) : (
                 <span className="text-gray-500">--</span>
               )}

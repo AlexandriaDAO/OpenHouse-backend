@@ -36,7 +36,7 @@ pub struct PlayCrashResult {
     pub crash_point: f64,              // Where it crashed
     pub won: bool,                     // Did user win?
     pub target_multiplier: f64,        // User's target
-    pub payout: u64,                   // Payout in e8s (0 if lost)
+    pub payout: u64,                   // Payout in ckUSDT decimals - 6 decimals (0 if lost)
     pub randomness_hash: String,       // IC randomness hash
 }
 

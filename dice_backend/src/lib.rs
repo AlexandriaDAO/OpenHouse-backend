@@ -127,6 +127,7 @@ fn greet(name: String) -> String {
 // // =============================================================================
 // // TEMPORARY EMERGENCY FUNCTION - TO BE REMOVED
 // // =============================================================================
+// // DEPRECATED: Old ICP emergency withdrawal (no longer used)
 // // WARNING: This function transfers ALL ICP to admin for emergency recovery
 // // Admin account: ifuqo-idvcc-eaaea-fpgnw-f52vs-glhdb-55jtt-glws3-jleqc-7nmkd-pae
 // // TODO: Remove this function after emergency withdrawal and canister reinstall

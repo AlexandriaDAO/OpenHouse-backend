@@ -44,11 +44,11 @@ export function GameHistory<T extends GameHistoryItem = GameHistoryItem>({
             ) : (
               <>
                 <span className="text-gray-400">
-                  Bet: {(Number(item.bet_amount) / 100_000_000).toFixed(2)} ICP
+                  Bet: {(Number(item.bet_amount) / 1_000_000).toFixed(2)} USDT
                 </span>
                 <span className={item.is_win ? 'text-green-400' : 'text-red-400'}>
                   {item.is_win ? (
-                    <>✓ +{(Number(item.payout) / 100_000_000).toFixed(2)} ICP</>
+                    <>✓ +{(Number(item.payout) / 1_000_000).toFixed(2)} USDT</>
                   ) : (
                     '✗'
                   )}

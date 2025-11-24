@@ -1,12 +1,12 @@
 # DeFi Accounting Module - AI Assistant Guide
 
 ## Purpose
-Self-contained, auditable accounting module for ICP-based games using a Liquidity Pool system.
+Self-contained, auditable accounting module for ckUSDT-based games using a Liquidity Pool system.
 
 ## Core Features
-- **Liquidity Pool System**: LP providers stake ICP for shares
-- **User Deposits/Withdrawals**: Player fund management with ICP ledger
-- **LP Deposits/Withdrawals**: Liquidity providers can stake ICP for shares
+- **Liquidity Pool System**: LP providers stake ckUSDT for shares
+- **User Deposits/Withdrawals**: Player fund management with ckUSDT ledger (ICRC-2)
+- **LP Deposits/Withdrawals**: Liquidity providers can stake ckUSDT for shares
 - **Balance Tracking**: Stable storage persistence across upgrades
 - **Bet Limits**: 10% of pool balance max payout per bet
 
@@ -41,21 +41,22 @@ defi_accounting::update_balance(player, new_balance)?;
 ## Liquidity Pool System
 
 ### Key Functions
-- `deposit_liquidity(amount)` - Stake ICP, receive LP shares
-- `withdraw_all_liquidity()` - Burn all shares, receive proportional ICP
+- `deposit_liquidity(amount)` - Stake ckUSDT, receive LP shares
+- `withdraw_all_liquidity()` - Burn all shares, receive proportional ckUSDT
 - `get_pool_stats()` - View pool metrics
 - `get_lp_position(principal)` - Check LP shares and value
 
 ### Security Features
-- **Minimum 1 ICP deposit** - Prevents share manipulation attacks
+- **Minimum 1 ckUSDT deposit** - Prevents share manipulation attacks
 - **Full withdrawal only** - No partial withdrawals (simplicity)
 - **No admin control** - Fully decentralized, no special privileges
 - **CEI Pattern** - State changes before transfers prevent reentrancy
 
 ## Important Constants
-- Min LP deposit: 1 ICP (prevents attacks)
-- Min user deposit/withdraw: 0.1 ICP
-- Transfer fee: 0.0001 ICP
+- Min LP deposit: 1 ckUSDT (prevents attacks)
+- Min user deposit: 10 ckUSDT (prevents dust)
+- Min withdraw: 1 ckUSDT
+- Transfer fee: 0.01 ckUSDT (10,000 decimals)
 - Max payout: 10% of pool balance
 - Minimum liquidity burned: 1000 shares (first depositor)
 
@@ -63,5 +64,5 @@ defi_accounting::update_balance(player, new_balance)?;
 - Keep game-agnostic (no game logic here)
 - Maintain stable storage compatibility
 - Remember IC's sequential execution model (no guards needed)
-- Test with real ICP on mainnet (no local env)
+- Test with real ckUSDT on mainnet (no local env)
 - All state changes must happen BEFORE await points

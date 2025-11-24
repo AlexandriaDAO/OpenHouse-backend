@@ -48,7 +48,7 @@ The name "OpenHouse" is a triple play on words:
 
 In traditional casinos, the house provides all liquidity and takes all profits. At OpenHouse:
 
-1. **Users provide house liquidity** - Deposit ICP to become a liquidity provider (LP)
+1. **Users provide house liquidity** - Deposit ckUSDT (stablecoin pegged to $1) to become a liquidity provider (LP)
 2. **Receive ownership shares** - Get LP tokens representing your share of the house
 3. **Earn from the edge** - The 1% house edge flows to LP holders proportionally
 4. **Withdraw anytime** - Pull your liquidity plus earnings whenever you want
@@ -57,7 +57,7 @@ In traditional casinos, the house provides all liquidity and takes all profits. 
 
 OpenHouse has a transparent, simple revenue model:
 
-- **Players** play games with a transparent 1% house edge
+- **Players** play games with a transparent 1% house edge using ckUSDT
 - **Liquidity providers** earn from the house edge on every bet
 - **$ALEX stakers** receive 100% of platform revenue via a 1% fee on LP withdrawals
 - **No hidden fees** - That's it. No rake, no VIP programs, no misleading promos
@@ -88,7 +88,7 @@ openhouse/
 Each game backend is written in Rust and independently manages:
 - Game logic and rules
 - Random number generation via IC VRF
-- Bet placement and payout calculation
+- Bet placement and payout calculation using ckUSDT
 - Game history and statistics
 
 ## 🚀 Quick Start
@@ -146,25 +146,25 @@ Anyone can:
 - Multiplier starts at 1.00x and increases
 - Cash out before the crash to win
 - Crash point determined by VRF
-- Min bet: 1 ICP | Max win: 1000x
+- Min bet: 0.01 USDT | Max win: 1000x
 
 ### Plinko
 - Drop ball through 8, 12, or 16 rows of pegs
 - Choose risk level: Low, Medium, or High
 - Different multiplier distributions per configuration
-- Min bet: 1 ICP | Max win: 1000x
+- Min bet: 0.01 USDT | Max win: 1000x
 
 ### Mines
 - 5x5 grid with hidden mines
 - Reveal safe tiles to increase multiplier
 - Cash out anytime or lose everything on a mine
-- Min bet: 1 ICP | Max win: 5000x
+- Min bet: 0.01 USDT | Max win: 5000x
 
 ### Dice
 - Roll a number from 0-100
 - Predict over or under your target
 - Adjustable win chance from 1% to 98%
-- Min bet: 1 ICP | Max win: 100x
+- Min bet: 0.01 USDT | Max win: 100x
 
 ## 🛠️ Development
 

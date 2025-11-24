@@ -35,8 +35,8 @@ export type ApproveError =
 
 export type ApproveResult = { Ok: bigint } | { Err: ApproveError };
 
-// ICP Ledger Service Interface (minimal, just what we need)
-export interface ICPLedgerService {
+// ckUSDT Ledger Service Interface (ICRC-1 and ICRC-2 methods)
+export interface ckUSDTLedgerService {
   // ICRC-1 standard method
   icrc1_balance_of: (account: Account) => Promise<bigint>;
 
@@ -47,16 +47,19 @@ export interface ICPLedgerService {
   account_balance: (args: { account: Uint8Array }) => Promise<Tokens>;
 }
 
-// Helper to convert e8s to ICP
-export function e8sToIcp(e8s: bigint): number {
-  return Number(e8s) / 100_000_000;
+// Helper to convert ckUSDT decimals to USDT amount
+export function decimalsToUSDT(decimals: bigint): number {
+  return Number(decimals) / 1_000_000; // 6 decimals for ckUSDT
 }
 
-// Helper to format ICP balance
-export function formatIcp(e8s: bigint): string {
-  const icp = e8sToIcp(e8s);
-  return icp.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 8,
-  });
+// Helper to format USDT balance
+export function formatUSDT(decimals: bigint): string {
+  const usdt = decimalsToUSDT(decimals);
+  return `$${usdt.toFixed(2)} USDT`;
 }
+
+/** @deprecated Use decimalsToUSDT instead */
+export const e8sToIcp = decimalsToUSDT;
+
+/** @deprecated Use formatUSDT instead */
+export const formatIcp = formatUSDT;

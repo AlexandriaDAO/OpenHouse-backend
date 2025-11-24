@@ -256,9 +256,9 @@ npm run build
 ```
 
 ### Game Design Principles
-- **House Edge**: Always 3% (transparent)
+- **House Edge**: Always 1% (transparent)
 - **Randomness**: Use IC VRF (`ic_cdk::api::management_canister::main::raw_rand()`)
-- **Min Bet**: 1 ICP across all games
+- **Min Bet**: Varies by game (Dice: 0.01 USDT, others TBD)
 - **Provably Fair**: Commit-reveal for verification
 - **Transparent Odds**: All multiplier tables public
 

@@ -1,12 +1,12 @@
-# DeFi Accounting Module for ICP Games
+# DeFi Accounting Module for ckUSDT Games
 
-A secure, auditable, and reusable accounting module for Internet Computer Protocol (ICP) based games using a Liquidity Pool system.
+A secure, auditable, and reusable accounting module for Internet Computer Protocol (ICP) based games using a Liquidity Pool system with ckUSDT.
 
 ## 🎯 Overview
 
-This module provides complete DeFi functionality for ICP-based games using a Liquidity Pool system:
+This module provides complete DeFi functionality for ckUSDT-based games using a Liquidity Pool system:
 
-- Liquidity providers stake ICP for shares
+- Liquidity providers stake ckUSDT for shares
 - Players win/lose from the pool
 - Distributed risk among LPs
 - Fully decentralized (no admin control)
@@ -57,15 +57,15 @@ if potential_payout > max {
 ### For Liquidity Providers
 
 ```rust
-// Deposit ICP to receive LP shares (minimum 1 ICP)
-let shares = deposit_liquidity(100_000_000).await?;
+// Deposit ckUSDT to receive LP shares (minimum 1 ckUSDT)
+let shares = deposit_liquidity(1_000_000).await?;
 
 // Check position
 let position = get_lp_position(caller);
-// Returns: shares owned, ICP value, % of pool
+// Returns: shares owned, ckUSDT value, % of pool
 
 // Withdraw all (no partial withdrawals)
-let icp_received = withdraw_all_liquidity().await?;
+let usdt_received = withdraw_all_liquidity().await?;
 ```
 
 ## 📊 API Reference
@@ -74,8 +74,8 @@ let icp_received = withdraw_all_liquidity().await?;
 
 | Function | Type | Description |
 |----------|------|-------------|
-| `deposit(amount: u64)` | Update | Deposit ICP into player account |
-| `withdraw(amount: u64)` | Update | Withdraw ICP from player account |
+| `deposit(amount: u64)` | Update | Deposit ckUSDT into player account |
+| `withdraw(amount: u64)` | Update | Withdraw ckUSDT from player account |
 | `withdraw_all()` | Update | Withdraw entire player balance |
 | `get_balance(user: Principal)` | Query | Get user's balance |
 | `get_my_balance()` | Query | Get caller's balance |
@@ -84,8 +84,8 @@ let icp_received = withdraw_all_liquidity().await?;
 
 | Function | Type | Description |
 |----------|------|-------------|
-| `deposit_liquidity(amount: u64)` | Update | Stake ICP, receive LP shares (min 1 ICP) |
-| `withdraw_all_liquidity()` | Update | Burn all shares, receive proportional ICP |
+| `deposit_liquidity(amount: u64)` | Update | Stake ckUSDT, receive LP shares (min 1 ckUSDT) |
+| `withdraw_all_liquidity()` | Update | Burn all shares, receive proportional ckUSDT |
 | `get_lp_position(user: Principal)` | Query | Get LP shares and value |
 | `get_pool_stats()` | Query | Get pool metrics |
 
@@ -102,7 +102,7 @@ let icp_received = withdraw_all_liquidity().await?;
 ## 🔒 Security Features
 
 ### Liquidity Pool Security
-- **Minimum 1 ICP deposit** - Prevents share manipulation attacks
+- **Minimum 1 ckUSDT deposit** - Prevents share manipulation attacks
 - **Full withdrawal only** - Simplifies accounting, prevents gaming
 - **No admin privileges** - Fully decentralized
 - **CEI Pattern** - State changes before transfers
@@ -120,15 +120,15 @@ Key constants in the module:
 
 ```rust
 // Liquidity Pool
-const MIN_DEPOSIT: u64 = 100_000_000;      // 1 ICP minimum for LP
+const MIN_DEPOSIT: u64 = 1_000_000;        // 1 ckUSDT minimum for LP
 const MINIMUM_LIQUIDITY: u64 = 1000;       // Burned on first deposit
 
 // Player Accounts
-const MIN_DEPOSIT: u64 = 10_000_000;       // 0.1 ICP for players
-const MIN_WITHDRAW: u64 = 10_000_000;      // 0.1 ICP minimum
+const MIN_DEPOSIT: u64 = 10_000_000;       // 10 ckUSDT for players (prevents dust)
+const MIN_WITHDRAW: u64 = 1_000_000;       // 1 ckUSDT minimum
 
 // System
-const TRANSFER_FEE: u64 = 10_000;          // 0.0001 ICP
+const TRANSFER_FEE: u64 = 10_000;          // 0.01 ckUSDT (10,000 decimals)
 const MAX_PAYOUT_PERCENTAGE: f64 = 0.10;   // 10% of pool/house
 ```
 
@@ -140,7 +140,7 @@ const MAX_PAYOUT_PERCENTAGE: f64 = 0.10;   // 10% of pool/house
 - **Decentralized** - No single point of failure
 - **Transparent** - All shares and reserves on-chain
 
-### Why 1 ICP Minimum?
+### Why 1 ckUSDT Minimum?
 - **Prevents Attacks** - Share manipulation requires significant capital
 - **Avoids Precision Loss** - Integer math works well at this scale
 - **Serious LPs Only** - Filters out dust deposits

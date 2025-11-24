@@ -50,26 +50,26 @@ CANISTER=$(echo "$AUDIT" | grep -oP 'canister \(\K\d+' || echo "0")
 if [ -n "$POOL" ] && [ -n "$DEPOSITS" ] && [ -n "$CANISTER" ]; then
     CALCULATED=$((POOL + DEPOSITS))
     EXCESS=$((CANISTER - CALCULATED))
-    EXCESS_ICP=$(echo "scale=8; $EXCESS / 100000000" | bc)
+    EXCESS_USDT=$(echo "scale=6; $EXCESS / 1000000" | bc)
     FEE_COUNT=$((EXCESS / 10000))
 
     echo "======================================"
     echo "  Accounting Breakdown"
     echo "======================================"
-    echo "Pool Reserve:     $POOL e8s"
-    echo "User Deposits:    $DEPOSITS e8s"
-    echo "Calculated Total: $CALCULATED e8s"
-    echo "Actual Balance:   $CANISTER e8s"
+    echo "Pool Reserve:     $POOL decimals"
+    echo "User Deposits:    $DEPOSITS decimals"
+    echo "Calculated Total: $CALCULATED decimals"
+    echo "Actual Balance:   $CANISTER decimals"
     echo "--------------------------------------"
-    echo "EXCESS:           $EXCESS e8s ($EXCESS_ICP ICP)"
-    echo "Orphaned Fees:    $FEE_COUNT (@ 0.0001 ICP each)"
+    echo "EXCESS:           $EXCESS decimals ($EXCESS_USDT USDT)"
+    echo "Orphaned Fees:    $FEE_COUNT (@ 0.01 USDT each)"
     echo ""
 
     # Health status
-    if [ $EXCESS -lt 100000000 ]; then
-        echo -e "${GREEN}✅ HEALTH STATUS: HEALTHY${NC} (excess < 1 ICP)"
+    if [ $EXCESS -lt 1000000 ]; then
+        echo -e "${GREEN}✅ HEALTH STATUS: HEALTHY${NC} (excess < 1 USDT)"
     else
-        echo -e "${YELLOW}⚠️  HEALTH STATUS: WARNING${NC} (excess >= 1 ICP)"
+        echo -e "${YELLOW}⚠️  HEALTH STATUS: WARNING${NC} (excess >= 1 USDT)"
     fi
     echo ""
 fi
@@ -102,9 +102,9 @@ echo "======================================"
 CAN_BET=$(dfx canister --network $NETWORK call $CANISTER_ID can_accept_bets 2>&1)
 if [ $? -eq 0 ]; then
     if echo "$CAN_BET" | grep -q "true"; then
-        echo -e "${GREEN}✅ System can accept bets${NC} (pool reserve >= 10 ICP)"
+        echo -e "${GREEN}✅ System can accept bets${NC} (pool reserve >= 100 USDT)"
     else
-        echo -e "${RED}❌ System cannot accept bets${NC} (pool reserve < 10 ICP)"
+        echo -e "${RED}❌ System cannot accept bets${NC} (pool reserve < 100 USDT)"
     fi
 else
     echo -e "${RED}✗ Failed to check operational status${NC}"
@@ -124,17 +124,17 @@ echo "======================================"
 
 # Summary with recommendations
 if [ -n "$EXCESS" ]; then
-    if [ $EXCESS -lt 100000000 ]; then
+    if [ $EXCESS -lt 1000000 ]; then
         echo -e "${GREEN}✓ Overall Status: HEALTHY${NC}"
         echo "  - Accounting audit passed"
         echo "  - Excess balance within acceptable range"
-    elif [ $EXCESS -lt 500000000 ]; then
+    elif [ $EXCESS -lt 5000000 ]; then
         echo -e "${YELLOW}⚠ Overall Status: NEEDS ATTENTION${NC}"
-        echo "  - Excess balance accumulating (1-5 ICP)"
+        echo "  - Excess balance accumulating (1-5 USDT)"
         echo "  - Consider investigating orphaned fees"
     else
         echo -e "${RED}✗ Overall Status: ACTION REQUIRED${NC}"
-        echo "  - High excess balance (>5 ICP)"
+        echo "  - High excess balance (>5 USDT)"
         echo "  - Immediate investigation recommended"
     fi
 else

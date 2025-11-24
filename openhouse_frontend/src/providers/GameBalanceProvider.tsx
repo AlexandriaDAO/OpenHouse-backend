@@ -120,7 +120,7 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
             // Plinko V2 (Motoko) doesn't have balance management - use dummy values
             // This is a demo implementation without real balance tracking
             gameBalance = BigInt(0);
-            houseBalance = BigInt(100000000000); // 1000 ICP in e8s for display
+            houseBalance = BigInt(1_000_000_000); // 1000 USDT in ckUSDT decimals for display
             break;
           default:
             throw new Error(`Unknown game type: ${game}`);

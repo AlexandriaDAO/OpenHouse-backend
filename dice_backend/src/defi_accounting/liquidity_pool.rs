@@ -5,7 +5,6 @@ use serde::Serialize;
 use std::cell::RefCell;
 use std::borrow::Cow;
 use num_traits::ToPrimitive;
-use ic_ledger_types::MAINNET_LEDGER_CANISTER_ID;
 
 use crate::types::{Account, TransferFromArgs, TransferFromError, CKUSDT_CANISTER_ID, CKUSDT_TRANSFER_FEE};
 use super::accounting;
