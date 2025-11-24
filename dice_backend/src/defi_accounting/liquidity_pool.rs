@@ -176,6 +176,10 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
         }
     })?;
 
+    if shares_to_mint == Nat::from(0u64) {
+        return Err("Deposit too small: results in 0 shares".to_string());
+    }
+
     // Update user shares
     LP_SHARES.with(|shares| {
         let mut shares_map = shares.borrow_mut();

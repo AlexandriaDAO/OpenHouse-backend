@@ -3,6 +3,10 @@ use ic_stable_structures::Storable;
 use std::borrow::Cow;
 use ic_stable_structures::storable::Bound;
 
+pub fn sanitize_error(msg: &str) -> String {
+    msg.chars().take(256).collect()
+}
+
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct PendingWithdrawal {
     pub withdrawal_type: WithdrawalType,
@@ -41,7 +45,7 @@ impl Storable for PendingWithdrawal {
     }
 
     const BOUND: Bound = Bound::Bounded {
-        max_size: 1000, // Estimated max size
+        max_size: 2048, // Increased from 1000
         is_fixed_size: false,
     };
 }
@@ -90,7 +94,7 @@ impl Storable for AuditEntry {
     }
 
     const BOUND: Bound = Bound::Bounded {
-        max_size: 500,
+        max_size: 2048, // Increased from 500
         is_fixed_size: false,
     };
 }

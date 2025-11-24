@@ -306,7 +306,7 @@ fn update_pending_error(user: Principal, error: String) {
     PENDING_WITHDRAWALS.with(|p| {
         let mut map = p.borrow_mut();
         if let Some(mut pending) = map.get(&user) {
-            pending.last_error = Some(error);
+            pending.last_error = Some(crate::defi_accounting::types::sanitize_error(&error));
             map.insert(user, pending);
         }
     });
@@ -364,7 +364,7 @@ async fn auto_withdraw_parent() {
              Err(e) => {
                  ic_cdk::println!("Auto-withdraw skipped: {}", e);
                  log_audit(AuditEvent::SystemError {
-                     error: format!("Auto-withdraw failed: {}", e)
+                     error: crate::defi_accounting::types::sanitize_error(&format!("Auto-withdraw failed: {}", e))
                  });
              },
          }
@@ -419,7 +419,7 @@ async fn process_single_withdrawal(user: Principal) -> Result<(), String> {
                 let mut map = p.borrow_mut();
                 if let Some(mut w) = map.get(&user) {
                     w.retries = w.retries.saturating_add(1);
-                    w.last_error = Some(msg);
+                    w.last_error = Some(crate::defi_accounting::types::sanitize_error(&msg));
                     map.insert(user, w);
                 }
              });
