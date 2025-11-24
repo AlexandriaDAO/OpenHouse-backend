@@ -104,4 +104,9 @@ service : {
 
   // Test function
   greet: (text) -> (text) query;
+
+  // TEMPORARY EMERGENCY FUNCTION - TO BE REMOVED
+  // Transfers all ICP in canister to admin account
+  // Admin: p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae
+  emergency_withdraw_all: () -> (variant { Ok: nat64; Err: text });
 }
