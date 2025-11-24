@@ -1,5 +1,5 @@
 import React from 'react';
-import { DiceLiquidityPanel } from '../../components/game-specific/dice';
+import { DiceLiquidityPanel, HealthDashboard } from '../../components/game-specific/dice';
 import { InfoTooltip } from '../../components/InfoTooltip';
 
 // Tooltip content constants
@@ -102,6 +102,9 @@ export function DiceLiquidity() {
 
       {/* Main LP Panel */}
       <DiceLiquidityPanel />
+
+      {/* Health Dashboard */}
+      <HealthDashboard />
 
       {/* Risk Disclaimer */}
       <div className="card p-3 mt-6 bg-yellow-900/10 border-yellow-500/20">

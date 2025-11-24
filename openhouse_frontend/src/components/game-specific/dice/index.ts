@@ -3,3 +3,4 @@ export { DiceAnimation } from './DiceAnimation';
 export { DiceControls, type DiceDirection } from './DiceControls';
 export { DiceAccountingPanel } from './DiceAccountingPanel';
 export { DiceLiquidityPanel } from './DiceLiquidityPanel';
+export { HealthDashboard } from './HealthDashboard';
