@@ -1,4 +1,4 @@
-# 1. Medium, fixed in https://github.com/AlexandriaDAO/OpenHouse/pull/89/files
+# 1. Medium, fixed in https://github.com/AlexandriaDAO/OpenHouse/pull/89/files & https://github.com/AlexandriaDAO/OpenHouse/pull/90/files
 
 
 

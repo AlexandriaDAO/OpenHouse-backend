@@ -128,7 +128,7 @@ fn greet(name: String) -> String {
 // // TEMPORARY EMERGENCY FUNCTION - TO BE REMOVED
 // // =============================================================================
 // // WARNING: This function transfers ALL ICP to admin for emergency recovery
-// // Admin account: p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae
+// // Admin account: ifuqo-idvcc-eaaea-fpgnw-f52vs-glhdb-55jtt-glws3-jleqc-7nmkd-pae
 // // TODO: Remove this function after emergency withdrawal and canister reinstall
 // #[update]
 // async fn emergency_withdraw_all() -> Result<u64, String> {
@@ -139,7 +139,7 @@ fn greet(name: String) -> String {
 //     use candid::Principal;
 
 //     // Admin principal
-//     let admin = Principal::from_text("p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae")
+//     let admin = Principal::from_text("ifuqo-idvcc-eaaea-fpgnw-f52vs-glhdb-55jtt-glws3-jleqc-7nmkd-pae")
 //         .map_err(|e| format!("Invalid admin principal: {:?}", e))?;
 
 //     // Get current canister balance
