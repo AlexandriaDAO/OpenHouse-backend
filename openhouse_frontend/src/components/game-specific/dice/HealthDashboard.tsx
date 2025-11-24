@@ -79,17 +79,18 @@ export const HealthDashboard: React.FC = () => {
   };
 
   const calculateExcess = () => {
-    if (!accounting) return { excess: '0', excessICP: '0.0000', orphanedFees: 0, isHealthy: true };
+    if (!accounting) return { excess: '0', excessICP: '0.00000000', orphanedFees: 0, isHealthy: true };
 
-    const poolReserve = Number(accounting.house_balance);
-    const deposits = Number(accounting.total_user_deposits);
-    const canisterBalance = Number(accounting.canister_balance);
+    // Use BigInt arithmetic to avoid precision loss
+    const poolReserve = accounting.house_balance;
+    const deposits = accounting.total_user_deposits;
+    const canisterBalance = accounting.canister_balance;
 
     const calculated = poolReserve + deposits;
     const excess = canisterBalance - calculated;
-    const excessICP = (excess / 100_000_000).toFixed(8);
-    const orphanedFees = Math.floor(excess / 10_000);
-    const isHealthy = excess < 100_000_000; // Less than 1 ICP
+    const excessICP = formatICP(excess);
+    const orphanedFees = Number(excess / BigInt(10_000));
+    const isHealthy = excess < BigInt(100_000_000); // Less than 1 ICP
 
     return { excess: excess.toString(), excessICP, orphanedFees, isHealthy };
   };

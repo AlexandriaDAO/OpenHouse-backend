@@ -43,6 +43,8 @@ export interface GameStats {
   total_games: bigint;
   /** Total betting volume (in e8s) */
   total_volume: bigint;
+  /** Total payouts to winners (in e8s) */
+  total_payouts: bigint;
   /** House profit/loss (in e8s) */
   house_profit: bigint;
   /** Number of games won by players */

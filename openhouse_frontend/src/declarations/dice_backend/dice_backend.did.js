@@ -80,11 +80,6 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text })],
         [],
       ),
-    'emergency_withdraw_all' : IDL.Func(
-        [],
-        [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],
-        [],
-      ),
     'export_history_csv' : IDL.Func([IDL.Nat32], [IDL.Text], ['query']),
     'get_accounting_stats' : IDL.Func([], [AccountingStats], ['query']),
     'get_balance' : IDL.Func([IDL.Principal], [IDL.Nat64], ['query']),

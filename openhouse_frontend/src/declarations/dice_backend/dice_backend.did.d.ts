@@ -71,11 +71,6 @@ export interface _SERVICE {
     { 'Ok' : bigint } |
       { 'Err' : string }
   >,
-  'emergency_withdraw_all' : ActorMethod<
-    [],
-    { 'Ok' : bigint } |
-      { 'Err' : string }
-  >,
   'export_history_csv' : ActorMethod<[number], string>,
   'get_accounting_stats' : ActorMethod<[], AccountingStats>,
   'get_balance' : ActorMethod<[Principal], bigint>,
