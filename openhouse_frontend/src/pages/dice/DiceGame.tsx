@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { Principal } from '@dfinity/principal';
 import useDiceActor from '../../hooks/actors/useDiceActor';
+import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import {
   GameLayout,
   BetAmountInput,
@@ -9,17 +11,19 @@ import {
   GameStats,
   type GameStat,
 } from '../../components/game-ui';
-import { DiceAnimation, DiceControls, DiceAccountingPanel, type DiceDirection } from '../../components/game-specific/dice';
+import { DiceAnimation, DiceControls, type DiceDirection } from '../../components/game-specific/dice';
 import { useGameMode, useGameState } from '../../hooks/games';
 import { useGameBalance } from '../../providers/GameBalanceProvider';
+import { useBalance } from '../../providers/BalanceProvider';
 import { useAuth } from '../../providers/AuthProvider';
-import type { Principal } from '@dfinity/principal';
+import { ApproveArgs } from '../../types/ledger';
 
 // ICP conversion constant
 const E8S_PER_ICP = 100_000_000; // 1 ICP = 100,000,000 e8s
+const DICE_BACKEND_CANISTER_ID = 'whchi-hyaaa-aaaao-a4ruq-cai';
 
 interface DiceGameResult {
-  game_id?: bigint;  // Add game_id field
+  game_id?: bigint;
   player: Principal;
   bet_amount: bigint;
   target_number: number;
@@ -29,12 +33,12 @@ interface DiceGameResult {
   multiplier: number;
   payout: bigint;
   is_win: boolean;
-  is_house_hit?: boolean;  // Tracks when roll == target (exact hit = house wins) - optional for backward compatibility
+  is_house_hit?: boolean;
   timestamp: bigint;
   clientId?: string;
 }
 
-// Add new interface for detailed history
+// Detailed history interface
 interface DetailedGameHistory {
   game_id: bigint;
   player: string;
@@ -52,21 +56,62 @@ interface DetailedGameHistory {
   house_edge_actual: number;
 }
 
+// Helper component for inline house status
+const HouseStatusInline: React.FC <{
+  houseBalance: bigint;
+  betAmount: number;
+  multiplier: number;
+}> = ({ houseBalance, betAmount, multiplier }) => {
+  const houseBalanceICP = Number(houseBalance) / E8S_PER_ICP;
+  const maxAllowedPayout = houseBalanceICP * 0.1;
+  const currentPotentialPayout = betAmount * multiplier;
+  const utilizationPct = maxAllowedPayout > 0
+    ? (currentPotentialPayout / maxAllowedPayout) * 100
+    : 0;
+
+  let statusColor = 'text-green-400';
+  let statusText = 'Healthy';
+
+  if (utilizationPct > 90) {
+    statusColor = 'text-red-400';
+    statusText = 'At Limit';
+  } else if (utilizationPct > 70) {
+    statusColor = 'text-yellow-400';
+    statusText = 'Near Limit';
+  }
+
+  return (
+    <div className="text-xs text-gray-400 bg-gray-800/30 rounded p-2 mt-4">
+      <div className="flex justify-between items-center">
+        <span>House Status</span>
+        <span className={`font-bold ${statusColor}`}>{statusText}</span>
+      </div>
+      {utilizationPct > 70 && (
+        <div className={`text-center mt-1 ${statusColor}`}>
+          ⚠️ Using {utilizationPct.toFixed(0)}% of house limit
+        </div>
+      )}
+    </div>
+  );
+};
+
 export function DiceGame() {
   const { actor } = useDiceActor();
+  const { actor: ledgerActor } = useLedgerActor();
   const { isAuthenticated } = useAuth();
   const gameMode = useGameMode();
-  // Initialize with conservative default, will be updated dynamically
-  const [maxBet, setMaxBet] = useState(10); // Dynamic max bet in ICP
-  const gameState = useGameState<DiceGameResult>(0.01, maxBet);
-  // Use global balance state
+  
+  // Global Balance State
+  const { balance: walletBalance, refreshBalance: refreshWalletBalance } = useBalance();
   const gameBalanceContext = useGameBalance('dice');
   const balance = gameBalanceContext.balance;
-  const refreshBalance = gameBalanceContext.refresh;
-  // Note: Disabled useGameHistory to prevent infinite loop - using gameState.history instead
-  // const { history } = useGameHistory<DiceGameResult>(actor, 'get_recent_games', 10);
+  const refreshGameBalance = gameBalanceContext.refresh;
 
-  // Dice-specific state
+  // Game State
+  const [maxBet, setMaxBet] = useState(10);
+  const gameState = useGameState<DiceGameResult>(0.01, maxBet);
+  
+  // Dice-specific State
   const [targetNumber, setTargetNumber] = useState(50);
   const [direction, setDirection] = useState<DiceDirection>('Over');
   const [winChance, setWinChance] = useState(0);
@@ -74,223 +119,258 @@ export function DiceGame() {
   const [animatingResult, setAnimatingResult] = useState<number | null>(null);
   const [showDepositAnimation, setShowDepositAnimation] = useState(false);
 
-  // State for detailed history (TODO: implement when backend methods are available)
-  // @ts-ignore - Keeping for future implementation
+  // Accounting State
+  const [depositAmount, setDepositAmount] = useState('0.1');
+  const [showDepositModal, setShowDepositModal] = useState(false);
+  const [isDepositing, setIsDepositing] = useState(false);
+  const [depositStep, setDepositStep] = useState<'idle' | 'approving' | 'depositing'>('idle');
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [accountingError, setAccountingError] = useState<string | null>(null);
+  const [accountingSuccess, setAccountingSuccess] = useState<string | null>(null);
+
+  // History State
   const [detailedHistory, setDetailedHistory] = useState<DetailedGameHistory[]>([]);
   const [showDetailedView, setShowDetailedView] = useState(false);
-  // @ts-ignore - Keeping for future implementation
   const [csvExport, setCsvExport] = useState<string>('');
 
-  // Helper function to parse and improve backend error messages
+  // Helper to parse backend errors
   const parseBackendError = (errorMsg: string): string => {
-    // Check for insufficient balance errors (new format from backend)
     if (errorMsg.startsWith('INSUFFICIENT_BALANCE|')) {
       const parts = errorMsg.split('|');
       const userBalance = parts[1] || 'Unknown balance';
       const betAmount = parts[2] || 'Unknown bet';
-
-      // Trigger deposit animation
       setShowDepositAnimation(true);
-
       return `💰 INSUFFICIENT CHIPS - BET NOT PLACED\n\n` +
         `${userBalance}\n` +
         `${betAmount}\n\n` +
         `${parts[3] || 'This bet was not placed and no funds were deducted.'}\n\n` +
-        `👇 Click "Buy Chips" below to add more ICP to your game balance.`;
+        `👇 Click "Buy Chips" above to add more ICP.`;
     }
-
-    // Check for house limit errors
     if (errorMsg.includes('exceeds house limit') || errorMsg.includes('house balance')) {
       return `⚠️ BET REJECTED - NO MONEY LOST\n\n` +
         `The house doesn't have enough funds to cover this bet's potential payout. ` +
-        `Try:\n` +
-        `• Lower your bet amount\n` +
-        `• Choose different odds (higher win chance = lower payout)\n` +
-        `• Wait for house balance to increase\n\n` +
-        `Your balance remains unchanged!`;
+        `Try lowering your bet or changing odds.`;
     }
-
-    // Return original error if it's not a recognized format
     return errorMsg;
   };
 
-  // Calculate odds when target or direction changes
+  // Accounting Handlers
+  const handleDeposit = async () => {
+    if (!actor || !ledgerActor || !isAuthenticated) return;
+
+    setIsDepositing(true);
+    setAccountingError(null);
+    setAccountingSuccess(null);
+
+    try {
+      const amountE8s = BigInt(Math.floor(parseFloat(depositAmount) * 100_000_000));
+
+      if (amountE8s < BigInt(10_000_000)) {
+        setAccountingError('Minimum deposit is 0.1 ICP');
+        setIsDepositing(false);
+        return;
+      }
+
+      if (walletBalance && amountE8s > walletBalance) {
+        setAccountingError('Insufficient wallet balance');
+        setIsDepositing(false);
+        return;
+      }
+
+      setDepositStep('approving');
+      const approveArgs: ApproveArgs = {
+        spender: {
+          owner: Principal.fromText(DICE_BACKEND_CANISTER_ID),
+          subaccount: [],
+        },
+        amount: amountE8s + BigInt(10_000),
+        fee: [],
+        memo: [],
+        from_subaccount: [],
+        created_at_time: [],
+        expected_allowance: [],
+        expires_at: [],
+      };
+
+      const approveResult = await ledgerActor.icrc2_approve(approveArgs);
+
+      if ('Err' in approveResult) {
+        setAccountingError(`Approval failed: ${JSON.stringify(approveResult.Err)}`);
+        setIsDepositing(false);
+        setDepositStep('idle');
+        return;
+      }
+
+      setDepositStep('depositing');
+      const result = await actor.deposit(amountE8s);
+
+      if ('Ok' in result) {
+        const newBalance = result.Ok;
+        setAccountingSuccess(`💰 Bought ${depositAmount} ICP in chips!`);
+        setDepositAmount('0.1');
+        setShowDepositModal(false);
+        await refreshWalletBalance();
+        gameBalanceContext.refresh();
+      } else {
+        setAccountingError(result.Err);
+      }
+    } catch (err) {
+      setAccountingError(err instanceof Error ? err.message : 'Deposit failed');
+    } finally {
+      setIsDepositing(false);
+      setDepositStep('idle');
+    }
+  };
+
+  const handleWithdrawAll = async () => {
+    if (!actor || !isAuthenticated) return;
+
+    setIsWithdrawing(true);
+    setAccountingError(null);
+    setAccountingSuccess(null);
+
+    try {
+      const result = await actor.withdraw_all();
+
+      if ('Ok' in result) {
+        const newBalance = result.Ok;
+        const withdrawnAmount = (Number(balance.game) - Number(newBalance)) / 100_000_000;
+        setAccountingSuccess(`💵 Cashed out ${withdrawnAmount.toFixed(4)} ICP!`);
+        await refreshWalletBalance();
+        gameBalanceContext.refresh();
+      } else {
+        setAccountingError(result.Err);
+      }
+    } catch (err) {
+      setAccountingError(err instanceof Error ? err.message : 'Withdrawal failed');
+    } finally {
+      setIsWithdrawing(false);
+    }
+  };
+
+  const formatBalance = (e8s: bigint | null) => {
+    if (e8s === null) return '0.00';
+    return (Number(e8s) / E8S_PER_ICP).toFixed(2);
+  };
+
+  // Calculate odds
   useEffect(() => {
     const updateOdds = async () => {
       if (!actor) return;
-
       try {
         const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
-
-        // Declare mult in outer scope so it's accessible throughout the try block
         let mult = 0;
-
-        // Get payout info (existing)
+        
         const result = await actor.calculate_payout_info(targetNumber, directionVariant);
-
         if ('Ok' in result) {
           const [chance, multiplier] = result.Ok;
-          mult = multiplier; // Assign to outer scope variable
+          mult = multiplier;
           setWinChance(chance * 100);
           setMultiplier(mult);
         } else if ('Err' in result) {
           gameState.setGameError(result.Err);
         }
 
-        // Get max bet based on max allowed payout (10% house limit)
         try {
           const maxPayoutE8s = await actor.get_max_allowed_payout();
           const maxPayoutICP = Number(maxPayoutE8s) / E8S_PER_ICP;
-
-          // Calculate max bet: max_allowed_payout / multiplier
-          // Now 'mult' is defined and accessible here
           const maxBetICP = mult > 0 ? maxPayoutICP / mult : 0;
           setMaxBet(maxBetICP);
-
-          // Adjust current bet if it exceeds new max
           if (gameState.betAmount > maxBetICP) {
             gameState.setBetAmount(maxBetICP);
           }
-        } catch (maxBetError) {
-          console.error('Failed to get max bet, using default:', maxBetError);
-          // Use a safe default if the call fails
+        } catch (e) {
           setMaxBet(10);
         }
       } catch (err) {
         console.error('Failed to calculate odds:', err);
       }
     };
-
     updateOdds();
   }, [targetNumber, direction, actor]);
 
-  // Load initial game history on mount
+  // Load history
   useEffect(() => {
     const loadHistory = async () => {
       if (!actor) return;
-
       try {
-        // Load regular history for animation
         const games = await actor.get_recent_games(10);
-        // Process all games at once to avoid multiple state updates
         const processedGames = games.map((game: DiceGameResult) => ({
           ...game,
           clientId: crypto.randomUUID()
         }));
-
-        // Add all games in a single batch if we have a batch method
         processedGames.forEach((game: DiceGameResult) => {
           gameState.addToHistory(game);
         });
-
-        // TODO: Load detailed history for display (method not yet implemented)
-        // const detailed = await actor.get_detailed_history(20);
-        // setDetailedHistory(detailed);
-
-        // TODO: Get CSV export (method not yet implemented)
-        // const csv = await actor.export_history_csv(100);
-        // setCsvExport(csv);
       } catch (err) {
-        console.error('Failed to load game history:', err);
+        console.error('Failed to load history:', err);
       }
     };
-
     loadHistory();
-  }, [actor]); // Only depend on actor, not gameState to avoid loops
+  }, [actor]);
 
-  // Load initial balances on mount and set up periodic refresh
+  // Balance management
   useEffect(() => {
     if (actor) {
-      // Pre-fetch balances immediately on mount
-      refreshBalance().catch(console.error);
-
-      // Set up periodic refresh every 30 seconds
+      gameBalanceContext.refresh().catch(console.error);
       const intervalId = setInterval(() => {
-        refreshBalance().catch(console.error);
+        gameBalanceContext.refresh().catch(console.error);
       }, 30000);
-
-      // Refresh when tab regains focus
       const handleFocus = () => {
-        refreshBalance().catch(console.error);
+        gameBalanceContext.refresh().catch(console.error);
       };
       window.addEventListener('focus', handleFocus);
-
-      // Cleanup
       return () => {
         clearInterval(intervalId);
         window.removeEventListener('focus', handleFocus);
       };
     }
-  }, [actor]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [actor]);
 
-  // Refresh callback for accounting panel
-  const handleBalanceChange = useCallback(async () => {
-    await refreshBalance();
-  }, [refreshBalance]);
-
-  // Clear deposit animation when balance changes
   useEffect(() => {
     if (balance.game > 0n) {
       setShowDepositAnimation(false);
     }
   }, [balance.game]);
 
-  // Handle dice roll
+  // Roll Dice
   const rollDice = async () => {
-    // Step 1: Check authentication FIRST (before actor check)
     if (!isAuthenticated) {
-      gameState.setGameError('Please log in to play. Click the "Login" button in the top right.');
+      gameState.setGameError('Please log in to play.');
       return;
     }
-
-    // Step 2: Existing checks (actor, bet validation)
     if (!actor || !gameState.validateBet()) return;
-
-    // Step 3: Check for zero balance and trigger deposit animation
     if (balance.game === 0n) {
-      gameState.setGameError('Your dice game balance is empty. Please deposit ICP using the panel above.');
+      gameState.setGameError('Your dice game balance is empty.');
       setShowDepositAnimation(true);
       return;
     }
 
-    // Step 4: Frontend validation: Check if payout exceeds 10% of house balance (matching backend rule)
+    // Frontend limit check
     const maxPayout = BigInt(Math.floor(gameState.betAmount * multiplier * E8S_PER_ICP));
-    const maxAllowedPayout = (balance.house * BigInt(10)) / BigInt(100); // 10% of house balance
-
+    const maxAllowedPayout = (balance.house * BigInt(10)) / BigInt(100);
     if (maxPayout > maxAllowedPayout) {
-      const houseBalanceICP = Number(balance.house) / E8S_PER_ICP;
-      const maxPayoutICP = Number(maxPayout) / E8S_PER_ICP;
-      const maxAllowedICP = Number(maxAllowedPayout) / E8S_PER_ICP;
-      gameState.setGameError(
-        `⚠️ BET TOO LARGE - NO MONEY DEDUCTED\n\n` +
-        `Potential payout (${maxPayoutICP.toFixed(4)} ICP) exceeds house limit (${maxAllowedICP.toFixed(4)} ICP).\n` +
-        `House balance: ${houseBalanceICP.toFixed(4)} ICP | Max allowed payout: 10% of house\n\n` +
-        `Try:\n` +
-        `• Lower your bet amount\n` +
-        `• Choose different odds (higher win chance = lower payout)`
-      );
+      gameState.setGameError('Potential payout exceeds house limit.');
       return;
     }
 
     gameState.setIsPlaying(true);
     gameState.clearErrors();
     setAnimatingResult(null);
+    setAccountingError(null);
+    setAccountingSuccess(null);
 
-    // Create a timeout promise that rejects after 15 seconds
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Game timed out. Please try again.')), 15000);
+      setTimeout(() => reject(new Error('Game timed out.')), 15000);
     });
 
     try {
       const betAmountE8s = BigInt(Math.floor(gameState.betAmount * E8S_PER_ICP));
       const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
-
-      // Generate client seed for provable fairness
       const randomBytes = new Uint8Array(16);
       crypto.getRandomValues(randomBytes);
       const clientSeed = Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
 
-      // Race between the actual call and timeout
       const result = await Promise.race([
         actor.play_dice(betAmountE8s, targetNumber, directionVariant, clientSeed),
         timeoutPromise
@@ -299,29 +379,15 @@ export function DiceGame() {
       if ('Ok' in result) {
         setAnimatingResult(result.Ok.rolled_number);
         gameState.addToHistory(result.Ok);
-
-        // TODO: Refresh detailed history after each game (method not yet implemented)
-        // const detailed = await actor.get_detailed_history(20);
-        // setDetailedHistory(detailed);
-
-        // TODO: Refresh CSV export (method not yet implemented)
-        // const csv = await actor.export_history_csv(100);
-        // setCsvExport(csv);
-
-        // P1 fix: Refresh balance after game completes (non-blocking to avoid UI delay)
-        refreshBalance().catch(console.error);
+        gameBalanceContext.refresh().catch(console.error);
       } else {
-        console.error('[Dice] Roll error:', result.Err);
-        // Parse and improve error message before showing to user
         const userFriendlyError = parseBackendError(result.Err);
         gameState.setGameError(userFriendlyError);
         gameState.setIsPlaying(false);
       }
     } catch (err) {
-      console.error('[Dice] Roll exception:', err);
       const errorMsg = err instanceof Error ? err.message : 'Failed to roll dice';
-      const userFriendlyError = parseBackendError(errorMsg);
-      gameState.setGameError(userFriendlyError);
+      gameState.setGameError(parseBackendError(errorMsg));
       gameState.setIsPlaying(false);
     }
   };
@@ -330,15 +396,6 @@ export function DiceGame() {
     gameState.setIsPlaying(false);
   }, []);
 
-  // Prepare stats for GameStats component
-  const stats: GameStat[] = [
-    { label: 'Win Chance', value: `${winChance.toFixed(2)}%`, highlight: true, color: 'yellow' },
-    { label: 'Multiplier', value: `${multiplier.toFixed(2)}x`, highlight: true, color: 'green' },
-    { label: 'Max Bet', value: `${maxBet.toFixed(4)} ICP`, highlight: true, color: 'blue' },
-    { label: 'Win Amount', value: `${(gameState.betAmount * multiplier).toFixed(2)} ICP` },
-  ];
-
-  // Custom renderer for history items
   const renderHistoryItem = (item: DiceGameResult) => (
     <>
       <span className="font-mono">{item.rolled_number}</span>
@@ -348,278 +405,291 @@ export function DiceGame() {
     </>
   );
 
+  const copyHistoryToCSV = () => {
+     // Simple CSV generation from current history
+     const headers = "Time,Bet,Target,Roll,Outcome,Payout\n";
+     const rows = gameState.history.map(g => 
+       `${new Date(Number(g.timestamp) / 1_000_000).toISOString()},${Number(g.bet_amount)/E8S_PER_ICP},${g.target_number},${g.rolled_number},${g.is_win ? 'WIN' : 'LOSS'},${Number(g.payout)/E8S_PER_ICP}`
+     ).join('\n');
+     setCsvExport(headers + rows);
+     navigator.clipboard.writeText(headers + rows);
+     alert("History copied to clipboard!");
+  };
+
   return (
-    <GameLayout
-      minBet={0.01}
-      maxWin={10}
-      houseEdge={0.99}
-    >
-      {/* UNIFIED GAME CARD - Everything consolidated */}
-      <div className="card max-w-2xl mx-auto">
-        {/* ACCOUNTING PANEL - Balances and Fund Management */}
-        <div className="mb-4 pb-4 border-b border-gray-700">
+    <GameLayout minBet={0.01} maxWin={10} houseEdge={0.99}> 
+      
+      {/* UNIFIED GAME CARD */}
+      <div className="card max-w-5xl mx-auto bg-gray-900/50 border border-gray-700/50">
+
+        {/* INLINE BALANCE BAR */}
+        <div className="mb-6 pb-4 border-b border-gray-700/50">
           {!isAuthenticated ? (
-            <p className="text-center text-gray-400 text-sm">Please log in to manage funds</p>
+            <p className="text-center text-gray-400 text-sm">Please log in to play</p>
           ) : (
-            <DiceAccountingPanel
-              gameBalance={balance.game}
-              onBalanceChange={handleBalanceChange}
-              showDepositAnimation={showDepositAnimation}
-            />
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+              {/* Left: Balances */}
+              <div className="flex gap-6 text-sm bg-gray-800/40 px-4 py-2 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400">Wallet:</span>
+                  <span className="font-mono font-bold text-green-400">{formatBalance(walletBalance)} ICP</span>
+                </div>
+                <div className="w-px h-4 bg-gray-700"></div>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400">Game:</span>
+                  <span className="font-mono font-bold text-blue-400">{formatBalance(balance.game)} ICP</span>
+                </div>
+                <div className="w-px h-4 bg-gray-700 hidden sm:block"></div>
+                <div className="flex items-center gap-2 hidden sm:flex">
+                  <span className="text-gray-400">House:</span>
+                  <span className="font-mono font-bold text-yellow-400">{formatBalance(balance.house)} ICP</span>
+                </div>
+              </div>
+
+              {/* Right: Actions */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowDepositModal(true)}
+                  className={`px-4 py-1.5 bg-dfinity-turquoise text-pure-black text-sm font-bold rounded hover:bg-dfinity-turquoise/90 transition ${showDepositAnimation ? 'animate-pulse ring-2 ring-yellow-400' : ''}`}
+                >
+                  💰 Buy Chips
+                </button>
+                <button
+                  onClick={handleWithdrawAll}
+                  disabled={isWithdrawing || balance.game === 0n}
+                  className="px-4 py-1.5 bg-gray-700 text-white text-sm font-bold rounded hover:bg-gray-600 transition disabled:opacity-50"
+                >
+                  {isWithdrawing ? '...' : '💵 Cash Out'}
+                </button>
+                <button
+                  onClick={() => {
+                    refreshWalletBalance();
+                    gameBalanceContext.refresh();
+                  }}
+                  className="px-3 py-1.5 bg-gray-800 text-gray-400 hover:text-white rounded transition"
+                  title="Refresh Balances"
+                >
+                  🔄
+                </button>
+              </div>
+            </div>
+          )}
+          
+          {/* Accounting Messages */}
+          {(accountingError || accountingSuccess) && (
+            <div className={`mt-3 text-center text-xs py-1 rounded ${accountingError ? 'text-red-400 bg-red-900/20' : 'text-green-400 bg-green-900/20'}`}>
+              {accountingError || accountingSuccess}
+            </div>
           )}
         </div>
 
-        {/* BETTING CONTROLS */}
-        <BetAmountInput
-          value={gameState.betAmount}
-          onChange={gameState.setBetAmount}
-          min={0.01}
-          max={maxBet}
-          disabled={gameState.isPlaying}
-          isPracticeMode={gameMode.isPracticeMode}
-          error={gameState.betError}
-          variant="slider"
-        />
+        {/* MAIN GAME AREA: Side-by-Side */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
 
-        <DiceControls
-          targetNumber={targetNumber}
-          onTargetChange={setTargetNumber}
-          direction={direction}
-          onDirectionChange={setDirection}
-          disabled={gameState.isPlaying}
-        />
+          {/* LEFT COLUMN: CONTROLS */}
+          <div className="space-y-6">
+            
+            <BetAmountInput
+              value={gameState.betAmount}
+              onChange={gameState.setBetAmount}
+              min={0.01}
+              max={maxBet}
+              disabled={gameState.isPlaying}
+              isPracticeMode={gameMode.isPracticeMode}
+              error={gameState.betError}
+              variant="slider"
+            />
 
-        {/* Compact Stats Row */}
-        <div className="grid grid-cols-4 gap-2 mb-3 text-center text-xs">
-          <div className="bg-gray-800/50 rounded p-2">
-            <div className="text-gray-400">Chance</div>
-            <div className="font-bold text-yellow-400">{winChance.toFixed(1)}%</div>
-          </div>
-          <div className="bg-gray-800/50 rounded p-2">
-            <div className="text-gray-400">Multi</div>
-            <div className="font-bold text-green-400">{multiplier.toFixed(2)}x</div>
-          </div>
-          <div className="bg-gray-800/50 rounded p-2">
-            <div className="text-gray-400">Max</div>
-            <div className="font-bold text-blue-400">{maxBet.toFixed(2)}</div>
-          </div>
-          <div className="bg-gray-800/50 rounded p-2">
-            <div className="text-gray-400">Win</div>
-            <div className="font-bold text-dfinity-turquoise">{(gameState.betAmount * multiplier).toFixed(2)}</div>
-          </div>
-        </div>
+            <DiceControls
+              targetNumber={targetNumber}
+              onTargetChange={setTargetNumber}
+              direction={direction}
+              onDirectionChange={setDirection}
+              disabled={gameState.isPlaying}
+            />
 
-        {/* House Balance Status Indicator */}
-        {(() => {
-          const houseBalanceICP = Number(balance.house) / E8S_PER_ICP;
-          const maxAllowedPayout = houseBalanceICP * 0.1; // 10% of house balance
-          const currentPotentialPayout = gameState.betAmount * multiplier;
-          const utilizationPct = maxAllowedPayout > 0 ? (currentPotentialPayout / maxAllowedPayout) * 100 : 0;
-
-          // Color coding based on utilization
-          let statusColor = 'text-green-400';
-          let bgColor = 'bg-green-900/20 border-green-500/30';
-          let statusText = 'Healthy';
-
-          if (utilizationPct > 90) {
-            statusColor = 'text-red-400';
-            bgColor = 'bg-red-900/20 border-red-500/30';
-            statusText = 'At Limit';
-          } else if (utilizationPct > 70) {
-            statusColor = 'text-yellow-400';
-            bgColor = 'bg-yellow-900/20 border-yellow-500/30';
-            statusText = 'Near Limit';
-          }
-
-          return (
-            <div className={`mb-3 p-2 border rounded text-xs ${bgColor}`}>
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-gray-400">House Status</span>
-                <span className={`font-bold ${statusColor}`}>{statusText}</span>
+            {/* Inline Stats */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center">
+                <span className="text-gray-400 text-xs">Win Chance</span>
+                <span className="font-bold text-yellow-400">{winChance.toFixed(1)}%</span>
               </div>
-              <div className="flex justify-between text-gray-300">
-                <span>Balance: {houseBalanceICP.toFixed(4)} ICP</span>
-                <span>Max Payout: {maxAllowedPayout.toFixed(4)} ICP</span>
+              <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center">
+                <span className="text-gray-400 text-xs">Multiplier</span>
+                <span className="font-bold text-green-400">{multiplier.toFixed(2)}x</span>
               </div>
-              {utilizationPct > 70 && (
-                <div className={`mt-1 text-center ${statusColor} font-semibold`}>
-                  ⚠️ Your bet is using {utilizationPct.toFixed(0)}% of house limit
+              <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center">
+                <span className="text-gray-400 text-xs">Max Bet</span>
+                <span className="font-bold text-blue-400">{maxBet.toFixed(2)} ICP</span>
+              </div>
+              <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center border border-dfinity-turquoise/20">
+                <span className="text-gray-400 text-xs">Potential Win</span>
+                <span className="font-bold text-dfinity-turquoise">{(gameState.betAmount * multiplier).toFixed(2)} ICP</span>
+              </div>
+            </div>
+
+            <HouseStatusInline 
+              houseBalance={balance.house} 
+              betAmount={gameState.betAmount} 
+              multiplier={multiplier} 
+            />
+
+            <GameButton
+              onClick={rollDice}
+              disabled={!actor}
+              loading={gameState.isPlaying}
+              label="ROLL DICE"
+              loadingLabel="Rolling..."
+              icon="🎲"
+            />
+
+            {gameState.gameError && (
+              <div className="p-3 bg-red-900/20 border border-red-500/30 rounded text-red-400 text-sm whitespace-pre-wrap">
+                {gameState.gameError}
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT COLUMN: ANIMATION & RESULT */}
+          <div className="flex flex-col items-center justify-center min-h-[300px] bg-black/20 rounded-xl border border-gray-800/50 p-6 relative overflow-hidden">
+            
+            {/* Ambient Background Glow */}
+            <div className="absolute inset-0 bg-gradient-to-br from-dfinity-turquoise/5 to-purple-900/10 pointer-events-none"></div>
+
+            <div className="scale-125 mb-8 relative z-10">
+              <DiceAnimation
+                targetNumber={animatingResult}
+                isRolling={gameState.isPlaying}
+                onAnimationComplete={handleAnimationComplete}
+              />
+            </div>
+
+            {/* Result Display */}
+            <div className="h-24 flex items-center justify-center w-full relative z-10">
+              {gameState.lastResult && !gameState.isPlaying ? (
+                <div className={`text-center ${gameState.lastResult.is_win ? 'text-green-400' : 'text-red-400'} animate-in fade-in slide-in-from-bottom-4 duration-500`}>
+                  <div className="text-4xl font-black tracking-tight mb-1">
+                    {gameState.lastResult.is_win ? 'YOU WON!' : 'YOU LOST'}
+                  </div>
+                  
+                  {gameState.lastResult.is_win && (
+                    <div className="text-2xl font-mono text-dfinity-turquoise">
+                      +{(Number(gameState.lastResult.payout) / E8S_PER_ICP).toFixed(4)} ICP
+                    </div>
+                  )}
+
+                  {!gameState.lastResult.is_win && gameState.lastResult.is_house_hit && (
+                     <div className="text-sm text-yellow-400 mt-1 font-bold">
+                       🎯 Exact Hit! (House Edge)
+                     </div>
+                  )}
+                  
+                  <div className="text-xs text-gray-500 mt-2 font-mono">
+                     {gameState.lastResult.rolled_number} vs {gameState.lastResult.target_number} ({'Over' in gameState.lastResult.direction ? 'Over' : 'Under'})
+                  </div>
                 </div>
+              ) : (
+                !gameState.isPlaying && (
+                  <div className="text-gray-600 text-sm text-center italic">
+                    Ready to roll...
+                  </div>
+                )
               )}
             </div>
-          );
-        })()}
 
-        {/* Collapsible How It Works */}
-        <details className="mb-3">
-          <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-300 text-center">
-            💡 How it works
-          </summary>
-          <div className="text-xs text-gray-400 mt-2 p-2 bg-gray-800/50 rounded">
-            Choose a target number and direction. If you roll exactly on the target, the house wins (0.99% edge).
-            Otherwise, standard over/under rules apply. Clean multiplier: {multiplier.toFixed(2)}x = 100 ÷ {direction === 'Over' ? (100 - targetNumber) : targetNumber} winning numbers.
-          </div>
-        </details>
+            {/* Game History (Right column bottom) */}
+             <details className="mt-auto pt-4 w-full border-t border-gray-800/50 relative z-10">
+              <summary className="flex justify-between items-center cursor-pointer p-2">
+                <span className="text-lg font-bold text-gray-300">Game History</span>
+                <span className="text-xs text-gray-500">Click to expand</span>
+              </summary>
+              
+              <div className="mt-4 pt-4 border-t border-gray-800">
+                <div className="flex justify-end gap-2 mb-4">
+                  <button 
+                    className="text-xs px-2 py-1 bg-gray-800 rounded hover:bg-gray-700"
+                    onClick={copyHistoryToCSV}
+                  >
+                    📋 Copy CSV
+                  </button>
+                </div>
 
-        <GameButton
-          onClick={rollDice}
-          disabled={!actor}
-          loading={gameState.isPlaying}
-          label="ROLL"
-          loadingLabel="Rolling..."
-          icon="🎲"
-        />
-
-        {gameState.gameError && (
-          <div className="mt-4 p-4 bg-red-900/30 border border-red-500/50 rounded text-red-400 text-sm">
-            {gameState.gameError.split('\n').map((line, i) => (
-              <div key={i} className={i === 0 ? 'font-bold text-center mb-2' : 'text-left'}>
-                {line}
+                <GameHistory<DiceGameResult>
+                  items={gameState.history}
+                  maxDisplay={10}
+                  title=""
+                  renderCustom={renderHistoryItem}
+                />
               </div>
-            ))}
+            </details>
           </div>
-        )}
+
+        </div>
       </div>
 
-      {/* Dice Animation */}
-      <div className="card max-w-2xl mx-auto">
-        <DiceAnimation
-          targetNumber={animatingResult}
-          isRolling={gameState.isPlaying}
-          onAnimationComplete={handleAnimationComplete}
-        />
+      {/* DEPOSIT MODAL */}
+      {showDepositModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowDepositModal(false)}>
+          <div className="bg-gray-900 rounded-xl p-6 max-w-md w-full mx-4 border border-gray-700 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+              <span>💰</span> Buy Chips
+            </h3>
 
-        {/* Win/Loss message */}
-        {gameState.lastResult && !gameState.isPlaying && (
-          <div className={`text-center mt-6 ${
-            gameState.lastResult.is_win ? 'text-green-400' : 'text-red-400'
-          }`}>
-            <div className="text-3xl font-bold mb-2">
-              {gameState.lastResult.is_win ? '🎉 WIN!' : '😢 LOSE'}
+            <div className="mb-6">
+              <label className="block text-sm text-gray-400 mb-2">Amount (ICP)</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={depositAmount}
+                  onChange={(e) => setDepositAmount(e.target.value)}
+                  className="w-full bg-black/50 border border-gray-600 rounded-lg px-4 py-3 text-white text-lg focus:border-dfinity-turquoise focus:outline-none transition"
+                  placeholder="0.0"
+                  min="0.1"
+                  step="0.01"
+                  disabled={isDepositing}
+                  autoFocus
+                />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 font-mono">ICP</span>
+              </div>
+              <div className="flex justify-between items-center mt-2">
+                <p className="text-xs text-gray-500">Wallet: {formatBalance(walletBalance)} ICP</p>
+                <p className="text-xs text-gray-500">Min: 0.1 ICP</p>
+              </div>
             </div>
 
-            {/* Show exact hit message */}
-            {!gameState.lastResult.is_win && gameState.lastResult.is_house_hit && (
-              <div className="text-lg text-yellow-400 mb-2">
-                🎯 Exact Hit! (House Wins)
+            {accountingError && (
+              <div className="mb-4 p-3 bg-red-900/20 border border-red-500/20 rounded text-red-400 text-xs">
+                {accountingError}
               </div>
             )}
 
-            {/* Show payout for wins */}
-            {gameState.lastResult.is_win && (
-              <div className="text-xl">
-                +{(Number(gameState.lastResult.payout) / 100_000_000).toFixed(4)} ICP
-              </div>
-            )}
-
-            {/* Show roll details */}
-            <div className="text-sm text-gray-400 mt-2">
-              Rolled: {gameState.lastResult.rolled_number} |
-              Target: {gameState.lastResult.target_number} |
-              Direction: {'Over' in gameState.lastResult.direction ? 'Over' : 'Under'}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDepositModal(false)}
+                disabled={isDepositing}
+                className="flex-1 px-4 py-3 font-bold text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeposit}
+                disabled={isDepositing}
+                className="flex-1 px-4 py-3 bg-dfinity-turquoise text-black font-bold rounded-lg hover:bg-dfinity-turquoise/90 disabled:opacity-50 disabled:cursor-not-allowed transition relative overflow-hidden"
+              >
+                {isDepositing ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="animate-spin">↻</span>
+                    {depositStep === 'approving' ? 'Approving...' : 'Depositing...'}
+                  </span>
+                ) : (
+                  'Confirm Deposit'
+                )}
+              </button>
             </div>
-          </div>
-        )}
-      </div>
-
-      {/* Game History Section */}
-      <div className="card max-w-4xl mx-auto">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl font-bold">Game History</h3>
-          <div className="flex gap-2">
-            <button
-              className="btn btn-sm"
-              onClick={() => setShowDetailedView(!showDetailedView)}
-            >
-              {showDetailedView ? 'Simple' : 'Detailed'} View
-            </button>
-            <button
-              className="btn btn-sm"
-              onClick={() => {
-                navigator.clipboard.writeText(csvExport);
-                alert('History copied to clipboard!');
-              }}
-            >
-              Copy CSV
-            </button>
           </div>
         </div>
+      )}
 
-        {showDetailedView ? (
-          // Detailed table view
-          <div className="overflow-x-auto">
-            <table className="table table-sm">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Bet (ICP)</th>
-                  <th>Target</th>
-                  <th>Dir</th>
-                  <th>Roll</th>
-                  <th>Chance</th>
-                  <th>Multi</th>
-                  <th>Won (ICP)</th>
-                  <th>P/L</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detailedHistory.slice(0, 10).map((game) => (
-                  <tr key={String(game.game_id)} className={game.is_win ? 'text-green-400' : 'text-red-400'}>
-                    <td>{String(game.game_id)}</td>
-                    <td>{game.bet_icp.toFixed(4)}</td>
-                    <td>{game.target_number}</td>
-                    <td>{game.direction}</td>
-                    <td>{game.rolled_number}</td>
-                    <td>{game.win_chance.toFixed(1)}%</td>
-                    <td>{game.multiplier.toFixed(2)}x</td>
-                    <td>{game.won_icp.toFixed(4)}</td>
-                    <td>{game.is_win ? '+' : '-'}{Math.abs(Number(game.profit_loss) / E8S_PER_ICP).toFixed(4)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {/* Summary Stats */}
-            <div className="mt-4 p-4 bg-gray-800 rounded">
-              <h4 className="font-bold mb-2">Session Statistics</h4>
-              <div className="grid grid-cols-3 gap-4 text-sm">
-                <div>
-                  Total Games: {detailedHistory.length}
-                </div>
-                <div>
-                  Win Rate: {detailedHistory.length > 0 ? ((detailedHistory.filter(g => g.is_win).length / detailedHistory.length) * 100).toFixed(1) : '0.0'}%
-                </div>
-                <div>
-                  Total P/L: {(detailedHistory.reduce((sum, g) => sum + Number(g.profit_loss), 0) / E8S_PER_ICP).toFixed(4)} ICP
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          // Simple view (existing)
-          <GameHistory<DiceGameResult>
-            items={gameState.history}
-            maxDisplay={5}
-            title="Recent Rolls"
-            renderCustom={renderHistoryItem}
-          />
-        )}
-
-        {/* Copy-pasteable text area for analysis */}
-        {showDetailedView && (
-          <details className="mt-4">
-            <summary className="cursor-pointer text-sm text-gray-400">
-              Raw Data for Analysis (Click to expand)
-            </summary>
-            <textarea
-              className="w-full h-32 mt-2 p-2 bg-gray-900 text-xs font-mono"
-              readOnly
-              value={csvExport}
-              onClick={(e) => e.currentTarget.select()}
-            />
-          </details>
-        )}
-      </div>
     </GameLayout>
   );
 }
