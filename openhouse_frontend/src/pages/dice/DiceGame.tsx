@@ -597,7 +597,7 @@ export function DiceGame() {
               )}
             </div>
 
-            {/* How it works (Right column bottom) */}
+            {/* Game History (Right column bottom) */}
              <details className="mt-auto pt-4 w-full border-t border-gray-800/50 relative z-10">
               <summary className="flex justify-between items-center cursor-pointer p-2">
                 <span className="text-lg font-bold text-gray-300">Game History</span>
@@ -625,34 +625,6 @@ export function DiceGame() {
           </div>
 
         </div>
-      </div>
-
-      {/* GAME HISTORY */}
-      <div className="card max-w-5xl mx-auto mt-4 bg-gray-900/30 border border-gray-800">
-        <details>
-          <summary className="flex justify-between items-center cursor-pointer p-2">
-             <span className="text-lg font-bold text-gray-300">Game History</span>
-             <span className="text-xs text-gray-500">Click to expand</span>
-          </summary>
-          
-          <div className="mt-4 pt-4 border-t border-gray-800">
-            <div className="flex justify-end gap-2 mb-4">
-              <button 
-                className="text-xs px-2 py-1 bg-gray-800 rounded hover:bg-gray-700"
-                onClick={copyHistoryToCSV}
-              >
-                📋 Copy CSV
-              </button>
-            </div>
-
-            <GameHistory<DiceGameResult>
-              items={gameState.history}
-              maxDisplay={10}
-              title=""
-              renderCustom={renderHistoryItem}
-            />
-          </div>
-        </details>
       </div>
 
       {/* DEPOSIT MODAL */}
