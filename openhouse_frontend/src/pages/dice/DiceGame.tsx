@@ -150,6 +150,11 @@ export function DiceGame() {
         `The house doesn't have enough funds to cover this bet's potential payout. ` +
         `Try lowering your bet or changing odds.`;
     }
+    if (errorMsg.includes('Randomness seed initializing')) {
+      return `⏳ WARMING UP - PLEASE WAIT\n\n` +
+        `The randomness generator is initializing (happens once after updates). ` +
+        `Please try again in a few seconds. No funds were deducted.`;
+    }
     return errorMsg;
   };
 
