@@ -67,6 +67,7 @@ type DailySnapshot = record {
   pool_reserve_end: nat64;
   daily_pool_profit: int64;
   daily_volume: nat64;
+  share_price: nat64;
 };
 
 type ApyInfo = record {

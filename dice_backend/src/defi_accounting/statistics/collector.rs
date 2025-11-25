@@ -17,18 +17,24 @@ pub fn record_bet_volume(amount: u64) {
     DAILY_ACCUMULATOR.with(|acc| {
         let current = acc.borrow().get().clone();
 
-        // Check if new day started
-        if current.day_start != current_day_start && current.day_start > 0 {
+        // Check if new day started - need to snapshot previous day
+        let ending_reserve = if current.day_start != current_day_start && current.day_start > 0 {
             // New day - take snapshot of previous day first
-            take_snapshot_internal(&current);
-        }
+            // Returns the ending reserve to use as next day's starting reserve
+            take_snapshot_internal(&current)
+        } else {
+            None
+        };
 
         // Reset accumulator if new day OR first ever bet
         let mut new_acc = if current.day_start != current_day_start {
+            // CONSISTENCY FIX: Use the snapshot's ending reserve as the new day's starting reserve
+            // This ensures continuity even if concurrent transactions occur
+            let starting_reserve = ending_reserve.unwrap_or_else(|| liquidity_pool::get_pool_reserve());
             DailyAccumulator {
                 day_start: current_day_start,
                 volume_accumulated: 0,
-                last_pool_reserve: liquidity_pool::get_pool_reserve(),
+                last_pool_reserve: starting_reserve,
             }
         } else {
             current
@@ -42,31 +48,33 @@ pub fn record_bet_volume(amount: u64) {
 }
 
 /// Take snapshot of the accumulated day's data
-/// Returns true if snapshot was taken, false if duplicate (already exists for this day)
-fn take_snapshot_internal(acc: &DailyAccumulator) -> bool {
+/// Returns Some(ending_reserve) if snapshot was taken, None if duplicate (already exists for this day)
+fn take_snapshot_internal(acc: &DailyAccumulator) -> Option<u64> {
     // RACE CONDITION FIX: Check if we already have a snapshot for this day
     // This prevents duplicate snapshots when multiple bets arrive at day boundary
-    let already_exists = DAILY_SNAPSHOTS.with(|snapshots| {
+    let existing_reserve = DAILY_SNAPSHOTS.with(|snapshots| {
         let snapshots = snapshots.borrow();
         let len = snapshots.len();
         if len == 0 {
-            return false;
+            return None;
         }
-        // Check if last snapshot is for the same day
+        // Check if last snapshot is for the same day - return its reserve if so
         snapshots.get(len - 1)
-            .map(|last| last.day_timestamp == acc.day_start)
-            .unwrap_or(false)
+            .filter(|last| last.day_timestamp == acc.day_start)
+            .map(|last| last.pool_reserve_end)
     });
 
-    if already_exists {
+    if let Some(reserve) = existing_reserve {
         ic_cdk::println!(
             "Snapshot already exists for day={}, skipping duplicate",
             acc.day_start
         );
-        return false;
+        // Return the existing snapshot's reserve for consistency
+        return Some(reserve);
     }
 
     let current_reserve = liquidity_pool::get_pool_reserve();
+    let share_price = liquidity_pool::get_share_price();
 
     // Calculate profit (can be negative if house lost)
     let daily_profit = (current_reserve as i64) - (acc.last_pool_reserve as i64);
@@ -76,6 +84,7 @@ fn take_snapshot_internal(acc: &DailyAccumulator) -> bool {
         pool_reserve_end: current_reserve,
         daily_pool_profit: daily_profit,
         daily_volume: acc.volume_accumulated,
+        share_price,
     };
 
     DAILY_SNAPSHOTS.with(|snapshots| {
@@ -83,11 +92,11 @@ fn take_snapshot_internal(acc: &DailyAccumulator) -> bool {
     });
 
     ic_cdk::println!(
-        "Daily snapshot taken: day={}, reserve={}, profit={}, volume={}",
-        acc.day_start, current_reserve, daily_profit, acc.volume_accumulated
+        "Daily snapshot taken: day={}, reserve={}, profit={}, volume={}, share_price={}",
+        acc.day_start, current_reserve, daily_profit, acc.volume_accumulated, share_price
     );
 
-    true
+    Some(current_reserve)
 }
 
 /// Manual snapshot trigger (for timer backup on quiet days)
@@ -99,13 +108,15 @@ pub fn take_daily_snapshot() {
 
         // Only snapshot if we have data from a previous day
         if current.day_start > 0 && current.day_start != get_day_start(now) {
-            take_snapshot_internal(&current);
+            // Take snapshot and get ending reserve for consistency
+            let ending_reserve = take_snapshot_internal(&current);
 
-            // Reset for new day
+            // Reset for new day using snapshot's ending reserve
+            let starting_reserve = ending_reserve.unwrap_or_else(|| liquidity_pool::get_pool_reserve());
             let new_acc = DailyAccumulator {
                 day_start: get_day_start(now),
                 volume_accumulated: 0,
-                last_pool_reserve: liquidity_pool::get_pool_reserve(),
+                last_pool_reserve: starting_reserve,
             };
             acc.borrow_mut().set(new_acc);
         }

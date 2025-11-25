@@ -7,12 +7,15 @@ use std::borrow::Cow;
 pub struct DailySnapshot {
     /// Midnight timestamp for this day (nanoseconds)
     pub day_timestamp: u64,
-    /// Pool reserve at end of day (in decimals, divide by 1_000_000 for USDT)
+    /// Pool reserve at end of day (in decimals, divide by 100_000_000 for USDT)
     pub pool_reserve_end: u64,
     /// Day's profit/loss - SIGNED to handle negative days (decimals)
     pub daily_pool_profit: i64,
     /// Total wagered that day (decimals)
     pub daily_volume: u64,
+    /// Share price at end of day (in decimals, divide by 100_000_000 for USDT per share)
+    /// Calculated as pool_reserve / total_shares
+    pub share_price: u64,
 }
 
 impl Storable for DailySnapshot {

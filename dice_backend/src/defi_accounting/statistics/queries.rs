@@ -14,13 +14,27 @@ pub fn get_daily_snapshots(limit: u32) -> Vec<DailySnapshot> {
 
 /// Get snapshots in a date range
 /// Both timestamps are inclusive (nanoseconds)
+///
+/// PERFORMANCE: Uses early termination since snapshots are stored chronologically.
+/// Stops scanning once past end_ts instead of scanning entire history.
 pub fn get_snapshots_range(start_ts: u64, end_ts: u64) -> Vec<DailySnapshot> {
     DAILY_SNAPSHOTS.with(|snapshots| {
         let snapshots = snapshots.borrow();
-        (0..snapshots.len())
-            .filter_map(|i| snapshots.get(i))
-            .filter(|s| s.day_timestamp >= start_ts && s.day_timestamp <= end_ts)
-            .collect()
+        let mut result = Vec::new();
+
+        for i in 0..snapshots.len() {
+            if let Some(snap) = snapshots.get(i) {
+                // Early termination: snapshots are chronological, stop if past end
+                if snap.day_timestamp > end_ts {
+                    break;
+                }
+                if snap.day_timestamp >= start_ts {
+                    result.push(snap);
+                }
+            }
+        }
+
+        result
     })
 }
 

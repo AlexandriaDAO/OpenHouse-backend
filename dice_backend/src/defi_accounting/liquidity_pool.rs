@@ -449,6 +449,13 @@ pub fn get_pool_reserve_nat() -> Nat {
     POOL_STATE.with(|s| s.borrow().get().reserve.clone())
 }
 
+/// Get current share price in decimals (for statistics tracking)
+/// Returns pool_reserve / total_shares, or 100_000_000 (1 USDT) if no shares exist
+pub fn get_share_price() -> u64 {
+    let stats = get_pool_stats_internal();
+    stats.share_price.0.to_u64().unwrap_or(100_000_000)
+}
+
 #[query]
 pub fn can_accept_bets() -> bool {
     let pool_reserve = get_pool_reserve();
