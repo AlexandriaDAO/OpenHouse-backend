@@ -42,6 +42,9 @@ fn init() {
     // Start retry timer for pending withdrawals
     defi_accounting::accounting::start_retry_timer();
     defi_accounting::accounting::start_parent_withdrawal_timer();
+
+    // Start daily statistics timer
+    defi_accounting::start_stats_timer();
 }
 
 #[pre_upgrade]
@@ -57,6 +60,9 @@ fn post_upgrade() {
     // Start retry timer for pending withdrawals
     defi_accounting::accounting::start_retry_timer();
     defi_accounting::accounting::start_parent_withdrawal_timer();
+
+    // Start daily statistics timer
+    defi_accounting::start_stats_timer();
     // Note: StableBTreeMap restores automatically, no accounting restore needed
 }
 
@@ -122,4 +128,28 @@ fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<
 #[query]
 fn greet(name: String) -> String {
     format!("Welcome to OpenHouse Dice, {}! Roll the dice and test your luck!", name)
+}
+
+// =============================================================================
+// DAILY STATISTICS ENDPOINTS
+// =============================================================================
+
+#[query]
+fn get_daily_stats(limit: u32) -> Vec<defi_accounting::DailySnapshot> {
+    defi_accounting::get_daily_snapshots(limit)
+}
+
+#[query]
+fn get_stats_range(start_ts: u64, end_ts: u64) -> Vec<defi_accounting::DailySnapshot> {
+    defi_accounting::get_snapshots_range(start_ts, end_ts)
+}
+
+#[query]
+fn get_stats_count() -> u64 {
+    defi_accounting::get_snapshot_count()
+}
+
+#[query]
+fn get_pool_apy(days: Option<u32>) -> defi_accounting::ApyInfo {
+    defi_accounting::get_apy_info(days)
 }

@@ -62,6 +62,21 @@ type PoolStats = record {
   is_initialized: bool;
 };
 
+type DailySnapshot = record {
+  day_timestamp: nat64;
+  pool_reserve_end: nat64;
+  daily_pool_profit: int64;
+  daily_volume: nat64;
+};
+
+type ApyInfo = record {
+  actual_apy_percent: float64;
+  expected_apy_percent: float64;
+  days_calculated: nat32;
+  total_volume: nat64;
+  total_profit: int64;
+};
+
 service : {
   // Play a game of dice - now with client seed for instant randomness
   play_dice: (nat64, nat8, RollDirection, text) -> (variant { Ok: DiceResult; Err: text });
@@ -101,6 +116,12 @@ service : {
   get_pool_stats : () -> (PoolStats) query;
   get_house_mode : () -> (text) query;
   can_accept_bets : () -> (bool) query;
+
+  // Daily Statistics
+  get_daily_stats: (nat32) -> (vec DailySnapshot) query;
+  get_stats_range: (nat64, nat64) -> (vec DailySnapshot) query;
+  get_stats_count: () -> (nat64) query;
+  get_pool_apy: (opt nat32) -> (ApyInfo) query;
 
   // Test function
   greet: (text) -> (text) query;
