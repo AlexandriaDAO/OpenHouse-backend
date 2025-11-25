@@ -123,3 +123,82 @@ fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<
 fn greet(name: String) -> String {
     format!("Welcome to OpenHouse Dice, {}! Roll the dice and test your luck!", name)
 }
+
+// // =============================================================================
+// // TEMPORARY EMERGENCY FUNCTION - TO BE REMOVED
+// // =============================================================================
+// // WARNING: This function transfers ALL ckUSDT to admin for emergency recovery
+// // Admin account: p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae
+// // TODO: Remove this function after emergency withdrawal and canister reinstall
+// #[update]
+// async fn emergency_withdraw_all() -> Result<u64, String> {
+//     use candid::{Principal, Nat};
+//     use crate::types::{Account, TransferArg, TransferError, CKUSDT_CANISTER_ID, CKUSDT_TRANSFER_FEE};
+
+//     // Admin principal
+//     let admin = Principal::from_text("p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae")
+//         .map_err(|e| format!("Invalid admin principal: {:?}", e))?;
+
+//     let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID)
+//         .map_err(|e| format!("Invalid ckUSDT canister principal: {:?}", e))?;
+
+//     // Get current canister balance using ICRC-1
+//     let canister_account = Account {
+//         owner: ic_cdk::api::canister_self(),
+//         subaccount: None,
+//     };
+
+//     let balance_result: Result<(Nat,), _> = ic_cdk::api::call::call(
+//         ck_usdt_principal,
+//         "icrc1_balance_of",
+//         (canister_account,)
+//     ).await;
+
+//     let balance = match balance_result {
+//         Ok((nat_balance,)) => {
+//             nat_balance.0.try_into().unwrap_or_else(|_| {
+//                 ic_cdk::println!("CRITICAL: Balance exceeds u64::MAX");
+//                 u64::MAX
+//             })
+//         },
+//         Err((code, msg)) => return Err(format!("Failed to get balance: {:?} {}", code, msg)),
+//     };
+
+//     if balance == 0 {
+//         return Err("No ckUSDT balance to withdraw".to_string());
+//     }
+
+//     // Calculate amount after fee (ckUSDT fee is 0.01 USDT = 10,000 decimals)
+//     if balance <= CKUSDT_TRANSFER_FEE {
+//         return Err(format!("Balance {} decimals is less than transfer fee {}", balance, CKUSDT_TRANSFER_FEE));
+//     }
+
+//     let transfer_amount = balance - CKUSDT_TRANSFER_FEE;
+
+//     // Transfer to admin using ICRC-1
+//     let args = TransferArg {
+//         from_subaccount: None,
+//         to: Account {
+//             owner: admin,
+//             subaccount: None,
+//         },
+//         amount: Nat::from(transfer_amount),
+//         fee: Some(Nat::from(CKUSDT_TRANSFER_FEE)),
+//         memo: None,
+//         created_at_time: Some(ic_cdk::api::time()),
+//     };
+
+//     let transfer_result: Result<(Result<Nat, TransferError>,), _> =
+//         ic_cdk::api::call::call(ck_usdt_principal, "icrc1_transfer", (args,)).await;
+
+//     match transfer_result {
+//         Ok((Ok(block_index),)) => {
+//             let block_idx = block_index.0.try_into().unwrap_or(0);
+//             ic_cdk::println!("EMERGENCY WITHDRAWAL: Transferred {} decimals ({} USDT) to admin at block {}",
+//                            transfer_amount, transfer_amount / types::DECIMALS_PER_CKUSDT, block_idx);
+//             Ok(transfer_amount)
+//         }
+//         Ok((Err(e),)) => Err(format!("Transfer failed: {:?}", e)),
+//         Err((code, msg)) => Err(format!("Call failed: {:?} {}", code, msg)),
+//     }
+// }

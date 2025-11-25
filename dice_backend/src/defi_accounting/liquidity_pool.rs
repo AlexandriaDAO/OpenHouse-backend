@@ -162,7 +162,12 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
     }
 
     let caller = ic_cdk::api::msg_caller();
-    
+
+    // Prevent anonymous principal from depositing (they couldn't withdraw anyway)
+    if caller == Principal::anonymous() {
+        return Err("Anonymous principal cannot deposit".to_string());
+    }
+
     // No fee deduction needed - user already paid fee to ledger
     // ICRC-2 transfer_from behavior:
     // - User pays: amount + fee (to ledger)
@@ -236,6 +241,11 @@ pub async fn deposit_liquidity(amount: u64) -> Result<Nat, String> {
 //    This ensures the Reserve is always solvent (Reserve <= Balance).
 async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     let caller = ic_cdk::api::msg_caller();
+
+    // Prevent anonymous principal from withdrawing burned shares
+    if caller == Principal::anonymous() {
+        return Err("Anonymous principal cannot withdraw".to_string());
+    }
 
     // Validate shares
     if shares_to_burn == Nat::from(0u64) {
