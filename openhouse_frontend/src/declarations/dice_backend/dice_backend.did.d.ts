@@ -8,44 +8,29 @@ export interface AccountingStats {
   'house_balance' : bigint,
   'canister_balance' : bigint,
 }
-export interface DetailedGameHistory {
-  'multiplier' : number,
-  'expected_value' : number,
-  'direction' : string,
-  'player' : string,
-  'won_icp' : number,
-  'bet_icp' : number,
-  'is_win' : boolean,
-  'target_number' : number,
-  'game_id' : bigint,
-  'win_chance' : number,
-  'timestamp' : bigint,
-  'profit_loss' : bigint,
-  'rolled_number' : number,
-  'house_edge_actual' : number,
-}
-export interface DiceResult {
-  'multiplier' : number,
-  'bet_amount' : bigint,
-  'direction' : RollDirection,
-  'player' : Principal,
-  'is_win' : boolean,
-  'target_number' : number,
-  'win_chance' : number,
-  'timestamp' : bigint,
-  'rolled_number' : number,
-  'payout' : bigint,
-}
-export interface GameStats {
-  'total_games' : bigint,
-  'total_payouts' : bigint,
+export interface ApyInfo {
+  'days_calculated' : number,
   'total_volume' : bigint,
-  'house_profit' : bigint,
+  'expected_apy_percent' : number,
+  'actual_apy_percent' : number,
+  'total_profit' : bigint,
+}
+export interface DailySnapshot {
+  'day_timestamp' : bigint,
+  'daily_volume' : bigint,
+  'share_price' : bigint,
+  'pool_reserve_end' : bigint,
+  'daily_pool_profit' : bigint,
 }
 export interface LPPosition {
   'shares' : bigint,
   'redeemable_icp' : bigint,
   'pool_ownership_percent' : number,
+}
+export interface MinimalGameResult {
+  'is_win' : boolean,
+  'rolled_number' : number,
+  'payout' : bigint,
 }
 export interface PoolStats {
   'total_shares' : bigint,
@@ -71,27 +56,26 @@ export interface _SERVICE {
     { 'Ok' : bigint } |
       { 'Err' : string }
   >,
-  'export_history_csv' : ActorMethod<[number], string>,
   'get_accounting_stats' : ActorMethod<[], AccountingStats>,
   'get_balance' : ActorMethod<[Principal], bigint>,
   'get_canister_balance' : ActorMethod<[], bigint>,
   'get_current_seed_hash' : ActorMethod<[], string>,
-  'get_detailed_history' : ActorMethod<[number], Array<DetailedGameHistory>>,
-  'get_game' : ActorMethod<[bigint], [] | [DiceResult]>,
+  'get_daily_stats' : ActorMethod<[number], Array<DailySnapshot>>,
   'get_house_balance' : ActorMethod<[], bigint>,
   'get_house_mode' : ActorMethod<[], string>,
   'get_lp_position' : ActorMethod<[Principal], LPPosition>,
   'get_max_allowed_payout' : ActorMethod<[], bigint>,
   'get_my_balance' : ActorMethod<[], bigint>,
   'get_my_lp_position' : ActorMethod<[], LPPosition>,
+  'get_pool_apy' : ActorMethod<[[] | [number]], ApyInfo>,
   'get_pool_stats' : ActorMethod<[], PoolStats>,
-  'get_recent_games' : ActorMethod<[number], Array<DiceResult>>,
   'get_seed_info' : ActorMethod<[], [string, bigint, bigint]>,
-  'get_stats' : ActorMethod<[], GameStats>,
+  'get_stats_count' : ActorMethod<[], bigint>,
+  'get_stats_range' : ActorMethod<[bigint, bigint], Array<DailySnapshot>>,
   'greet' : ActorMethod<[string], string>,
   'play_dice' : ActorMethod<
     [bigint, number, RollDirection, string],
-    { 'Ok' : DiceResult } |
+    { 'Ok' : MinimalGameResult } |
       { 'Err' : string }
   >,
   'refresh_canister_balance' : ActorMethod<[], bigint>,

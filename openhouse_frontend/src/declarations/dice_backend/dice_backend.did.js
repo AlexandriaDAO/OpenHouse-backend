@@ -6,38 +6,24 @@ export const idlFactory = ({ IDL }) => {
     'house_balance' : IDL.Nat64,
     'canister_balance' : IDL.Nat64,
   });
-  const DetailedGameHistory = IDL.Record({
-    'multiplier' : IDL.Float64,
-    'expected_value' : IDL.Float64,
-    'direction' : IDL.Text,
-    'player' : IDL.Text,
-    'won_icp' : IDL.Float64,
-    'bet_icp' : IDL.Float64,
-    'is_win' : IDL.Bool,
-    'target_number' : IDL.Nat8,
-    'game_id' : IDL.Nat64,
-    'win_chance' : IDL.Float64,
-    'timestamp' : IDL.Nat64,
-    'profit_loss' : IDL.Int64,
-    'rolled_number' : IDL.Nat8,
-    'house_edge_actual' : IDL.Float64,
-  });
-  const DiceResult = IDL.Record({
-    'multiplier' : IDL.Float64,
-    'bet_amount' : IDL.Nat64,
-    'direction' : RollDirection,
-    'player' : IDL.Principal,
-    'is_win' : IDL.Bool,
-    'target_number' : IDL.Nat8,
-    'win_chance' : IDL.Float64,
-    'timestamp' : IDL.Nat64,
-    'rolled_number' : IDL.Nat8,
-    'payout' : IDL.Nat64,
+  const DailySnapshot = IDL.Record({
+    'day_timestamp' : IDL.Nat64,
+    'daily_volume' : IDL.Nat64,
+    'share_price' : IDL.Nat64,
+    'pool_reserve_end' : IDL.Nat64,
+    'daily_pool_profit' : IDL.Int64,
   });
   const LPPosition = IDL.Record({
     'shares' : IDL.Nat,
     'redeemable_icp' : IDL.Nat,
     'pool_ownership_percent' : IDL.Float64,
+  });
+  const ApyInfo = IDL.Record({
+    'days_calculated' : IDL.Nat32,
+    'total_volume' : IDL.Nat64,
+    'expected_apy_percent' : IDL.Float64,
+    'actual_apy_percent' : IDL.Float64,
+    'total_profit' : IDL.Int64,
   });
   const PoolStats = IDL.Record({
     'total_shares' : IDL.Nat,
@@ -47,11 +33,10 @@ export const idlFactory = ({ IDL }) => {
     'is_initialized' : IDL.Bool,
     'minimum_liquidity_burned' : IDL.Nat,
   });
-  const GameStats = IDL.Record({
-    'total_games' : IDL.Nat64,
-    'total_payouts' : IDL.Nat64,
-    'total_volume' : IDL.Nat64,
-    'house_profit' : IDL.Int64,
+  const MinimalGameResult = IDL.Record({
+    'is_win' : IDL.Bool,
+    'rolled_number' : IDL.Nat8,
+    'payout' : IDL.Nat64,
   });
   return IDL.Service({
     'audit_balances' : IDL.Func(
@@ -80,35 +65,34 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text })],
         [],
       ),
-    'export_history_csv' : IDL.Func([IDL.Nat32], [IDL.Text], ['query']),
     'get_accounting_stats' : IDL.Func([], [AccountingStats], ['query']),
     'get_balance' : IDL.Func([IDL.Principal], [IDL.Nat64], ['query']),
     'get_canister_balance' : IDL.Func([], [IDL.Nat64], []),
     'get_current_seed_hash' : IDL.Func([], [IDL.Text], ['query']),
-    'get_detailed_history' : IDL.Func(
+    'get_daily_stats' : IDL.Func(
         [IDL.Nat32],
-        [IDL.Vec(DetailedGameHistory)],
+        [IDL.Vec(DailySnapshot)],
         ['query'],
       ),
-    'get_game' : IDL.Func([IDL.Nat64], [IDL.Opt(DiceResult)], ['query']),
     'get_house_balance' : IDL.Func([], [IDL.Nat64], ['query']),
     'get_house_mode' : IDL.Func([], [IDL.Text], ['query']),
     'get_lp_position' : IDL.Func([IDL.Principal], [LPPosition], ['query']),
     'get_max_allowed_payout' : IDL.Func([], [IDL.Nat64], ['query']),
     'get_my_balance' : IDL.Func([], [IDL.Nat64], ['query']),
     'get_my_lp_position' : IDL.Func([], [LPPosition], ['query']),
+    'get_pool_apy' : IDL.Func([IDL.Opt(IDL.Nat32)], [ApyInfo], ['query']),
     'get_pool_stats' : IDL.Func([], [PoolStats], ['query']),
-    'get_recent_games' : IDL.Func(
-        [IDL.Nat32],
-        [IDL.Vec(DiceResult)],
+    'get_seed_info' : IDL.Func([], [IDL.Text, IDL.Nat64, IDL.Nat64], ['query']),
+    'get_stats_count' : IDL.Func([], [IDL.Nat64], ['query']),
+    'get_stats_range' : IDL.Func(
+        [IDL.Nat64, IDL.Nat64],
+        [IDL.Vec(DailySnapshot)],
         ['query'],
       ),
-    'get_seed_info' : IDL.Func([], [IDL.Text, IDL.Nat64, IDL.Nat64], ['query']),
-    'get_stats' : IDL.Func([], [GameStats], ['query']),
     'greet' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
     'play_dice' : IDL.Func(
         [IDL.Nat64, IDL.Nat8, RollDirection, IDL.Text],
-        [IDL.Variant({ 'Ok' : DiceResult, 'Err' : IDL.Text })],
+        [IDL.Variant({ 'Ok' : MinimalGameResult, 'Err' : IDL.Text })],
         [],
       ),
     'refresh_canister_balance' : IDL.Func([], [IDL.Nat64], []),

@@ -3,24 +3,10 @@ type RollDirection = variant {
   Under;
 };
 
-type DiceResult = record {
-  player: principal;
-  bet_amount: nat64;
-  target_number: nat8;
-  direction: RollDirection;
+type MinimalGameResult = record {
   rolled_number: nat8;
-  win_chance: float64;
-  multiplier: float64;
-  payout: nat64;
   is_win: bool;
-  timestamp: nat64;
-};
-
-type GameStats = record {
-  total_games: nat64;
-  total_volume: nat64;
-  total_payouts: nat64;
-  house_profit: int64;
+  payout: nat64;
 };
 
 type AccountingStats = record {
@@ -28,23 +14,6 @@ type AccountingStats = record {
   house_balance: nat64;
   canister_balance: nat64;
   unique_depositors: nat64;
-};
-
-type DetailedGameHistory = record {
-  game_id: nat64;
-  player: text;
-  bet_icp: float64;
-  won_icp: float64;
-  target_number: nat8;
-  direction: text;
-  rolled_number: nat8;
-  win_chance: float64;
-  multiplier: float64;
-  is_win: bool;
-  timestamp: nat64;
-  profit_loss: int64;
-  expected_value: float64;
-  house_edge_actual: float64;
 };
 
 type LPPosition = record {
@@ -62,17 +31,28 @@ type PoolStats = record {
   is_initialized: bool;
 };
 
+type DailySnapshot = record {
+  day_timestamp: nat64;
+  pool_reserve_end: nat64;
+  daily_pool_profit: int64;
+  daily_volume: nat64;
+  share_price: nat64;
+};
+
+type ApyInfo = record {
+  actual_apy_percent: float64;
+  expected_apy_percent: float64;
+  days_calculated: nat32;
+  total_volume: nat64;
+  total_profit: int64;
+};
+
 service : {
-  // Play a game of dice - now with client seed for instant randomness
-  play_dice: (nat64, nat8, RollDirection, text) -> (variant { Ok: DiceResult; Err: text });
+  // Play a game of dice - returns minimal result (3 fields)
+  play_dice: (nat64, nat8, RollDirection, text) -> (variant { Ok: MinimalGameResult; Err: text });
 
   // Query functions
-  get_stats: () -> (GameStats) query;
-  get_recent_games: (nat32) -> (vec DiceResult) query;
-  get_game: (nat64) -> (opt DiceResult) query;
   calculate_payout_info: (nat8, RollDirection) -> (variant { Ok: record { float64; float64 }; Err: text }) query;
-  get_detailed_history: (nat32) -> (vec DetailedGameHistory) query;
-  export_history_csv: (nat32) -> (text) query;
 
   // Provable fairness verification methods
   get_current_seed_hash: () -> (text) query;
@@ -101,6 +81,12 @@ service : {
   get_pool_stats : () -> (PoolStats) query;
   get_house_mode : () -> (text) query;
   can_accept_bets : () -> (bool) query;
+
+  // Daily Statistics
+  get_daily_stats: (nat32) -> (vec DailySnapshot) query;
+  get_stats_range: (nat64, nat64) -> (vec DailySnapshot) query;
+  get_stats_count: () -> (nat64) query;
+  get_pool_apy: (opt nat32) -> (ApyInfo) query;
 
   // Test function
   greet: (text) -> (text) query;
