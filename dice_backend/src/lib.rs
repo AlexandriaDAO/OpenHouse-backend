@@ -11,13 +11,12 @@ mod defi_accounting;
 pub mod types;
 pub mod seed;
 pub mod game;
-mod analytics;
 
 // =============================================================================
 // RE-EXPORTS
 // =============================================================================
 
-pub use types::{RollDirection, DiceResult, GameStats, DetailedGameHistory, SeedRotationRecord};
+pub use types::{RollDirection, MinimalGameResult};
 
 // =============================================================================
 // MEMORY MANAGEMENT
@@ -71,33 +70,8 @@ fn post_upgrade() {
 // =============================================================================
 
 #[update]
-async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, client_seed: String) -> Result<DiceResult, String> {
+async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, client_seed: String) -> Result<MinimalGameResult, String> {
     game::play_dice(bet_amount, target_number, direction, client_seed, ic_cdk::api::msg_caller()).await
-}
-
-#[query]
-fn get_stats() -> GameStats {
-    game::get_stats()
-}
-
-#[query]
-fn get_recent_games(limit: u32) -> Vec<DiceResult> {
-    game::get_recent_games(limit)
-}
-
-#[query]
-fn get_game(game_id: u64) -> Option<DiceResult> {
-    game::get_game(game_id)
-}
-
-#[query]
-fn get_detailed_history(limit: u32) -> Vec<DetailedGameHistory> {
-    analytics::get_detailed_history(limit)
-}
-
-#[query]
-fn export_history_csv(limit: u32) -> String {
-    analytics::export_history_csv(limit)
 }
 
 #[query]
@@ -113,11 +87,6 @@ fn verify_game_result(server_seed: [u8; 32], client_seed: String, nonce: u64, ex
 #[query]
 fn get_seed_info() -> (String, u64, u64) {
     seed::get_seed_info()
-}
-
-#[query]
-fn get_rotation_history(limit: u32) -> Vec<(u64, SeedRotationRecord)> {
-    seed::get_rotation_history(limit)
 }
 
 #[query]

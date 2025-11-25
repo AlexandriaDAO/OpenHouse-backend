@@ -1,29 +1,7 @@
-use crate::types::{DiceResult, GameStats, RollDirection, DECIMALS_PER_CKUSDT, MIN_BET, MAX_NUMBER};
+use crate::types::{MinimalGameResult, RollDirection, DECIMALS_PER_CKUSDT, MIN_BET, MAX_NUMBER};
 use crate::seed::{generate_dice_roll_instant, maybe_schedule_seed_rotation};
 use crate::defi_accounting::{self as accounting, liquidity_pool};
 use candid::Principal;
-use ic_stable_structures::memory_manager::MemoryId;
-use ic_stable_structures::StableBTreeMap;
-use std::cell::RefCell;
-
-// Re-export Memory type from parent
-use crate::Memory;
-
-// =============================================================================
-// THREAD-LOCAL STORAGE
-// =============================================================================
-
-thread_local! {
-    static GAME_STATS: RefCell<GameStats> = RefCell::new(GameStats::default());
-
-    pub(crate) static GAME_HISTORY: RefCell<StableBTreeMap<u64, DiceResult, Memory>> = RefCell::new(
-        StableBTreeMap::init(
-            crate::MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(0))),
-        )
-    );
-
-    static NEXT_GAME_ID: RefCell<u64> = RefCell::new(0);
-}
 
 // =============================================================================
 // CALCULATION FUNCTIONS
@@ -74,9 +52,7 @@ pub async fn play_dice(
     direction: RollDirection,
     client_seed: String,
     caller: Principal
-) -> Result<DiceResult, String> {
-    // Note: Balance is now calculated on-demand, no cache to manage
-
+) -> Result<MinimalGameResult, String> {
     // Check user has sufficient internal balance
     let user_balance = accounting::get_balance(caller);
     if user_balance < bet_amount {
@@ -114,39 +90,9 @@ pub async fn play_dice(
     }
 
     // Calculate win chance and multiplier for this specific bet
-    let win_chance = calculate_win_chance(target_number, &direction);
     let multiplier = calculate_multiplier_direct(target_number, &direction);
 
     // NEW SIMPLIFIED CHECK - 10% house limit (uses cached balance for speed)
-    //
-    // DESIGN DECISIONS & TRADE-OFFS:
-    //
-    // 1. Cache Staleness (Accepted):
-    //    - Cache refreshes ONLY via hourly heartbeat, NOT after deposits/withdrawals
-    //    - Max payout could be stale up to 1 hour after balance changes
-    //    - WHY: Performance > perfect accuracy. Deposit/withdrawal UX stays fast.
-    //    - Impact: After large deposit, max bet stays low temporarily. Self-corrects hourly.
-    //
-    // 2. Race Condition (Accepted):
-    //    - Multiple concurrent bets could collectively exceed 10% house limit
-    //    - Example: 10 players simultaneously bet max, actual total payout > 10%
-    //    - WHY: Complexity of atomic locks would hurt performance significantly
-    //    - Mitigation: Damage is self-limiting (can't lose more than house balance)
-    //
-    // 3. 10% Limit Rationale:
-    //    - Conservative enough to protect house from single large loss
-    //    - Flexible enough to scale with house balance growth
-    //    - Self-adjusting: Small house = smaller limits, large house = larger limits
-    //
-    // This is a CONSCIOUS SIMPLIFICATION that prioritizes:
-    // - Performance (fast queries, no locks)
-    // - Simplicity (one cache, straightforward logic)
-    // - Good-enough accuracy (hourly refresh sufficient for most cases)
-    //
-    // Over theoretical perfection that would require:
-    // - Atomic locks (complex, slower)
-    // - Real-time balance queries (500ms per bet)
-    // - Perfect synchronization (hard to maintain)
     let max_payout = (bet_amount as f64 * multiplier) as u64;
     let max_allowed = accounting::get_max_allowed_payout();
     if max_allowed == 0 {
@@ -169,14 +115,9 @@ pub async fn play_dice(
     maybe_schedule_seed_rotation();
 
     // Generate roll BEFORE deducting balance
-    // This prevents "ghost funds" where balance is deducted but roll fails (e.g. seed initializing)
-    // If this succeeds (nonce++) but deduction fails, we just burn a nonce (safe).
-    let (rolled_number, nonce, server_seed_hash) = generate_dice_roll_instant(&client_seed)?;
+    let (rolled_number, _nonce, _server_seed_hash) = generate_dice_roll_instant(&client_seed)?;
 
-    // P0-3 FIX: Deduct bet AFTER all validations and fallible operations pass
-    // This prevents:
-    // 1. Users losing bets on invalid inputs or system errors
-    // 2. Concurrent games from overdrawing balance (atomic deduction)
+    // Deduct bet AFTER all validations and fallible operations pass
     let balance_after_bet = user_balance.checked_sub(bet_amount)
         .ok_or("Balance underflow")?;
     accounting::update_balance(caller, balance_after_bet)?;
@@ -203,49 +144,7 @@ pub async fn play_dice(
         0
     };
 
-    // Get the game_id BEFORE creating the result
-    let game_id = NEXT_GAME_ID.with(|id| {
-        let current = *id.borrow();
-        *id.borrow_mut() = current + 1;
-        current
-    });
-
-    let result = DiceResult {
-        game_id,  // NEW: Include game ID
-        player: caller,
-        bet_amount,
-        target_number,
-        direction,
-        rolled_number,
-        win_chance,
-        multiplier,
-        payout,
-        is_win,
-        timestamp: ic_cdk::api::time(),
-        is_house_hit,
-        client_seed,
-        nonce,
-        server_seed_hash,
-    };
-
-    // Update stats
-    GAME_STATS.with(|stats| {
-        let mut stats = stats.borrow_mut();
-        stats.total_games += 1;
-        stats.total_volume += bet_amount;
-        stats.total_payouts += payout;
-        stats.house_profit = (stats.total_volume as i64) - (stats.total_payouts as i64);
-    });
-
-    // Store in history (game_id was already obtained above)
-    GAME_HISTORY.with(|history| {
-        history.borrow_mut().insert(game_id, result.clone());
-    });
-
     // Update user balance based on game result
-    // Bet was already deducted before game logic (P0-3 fix)
-    // Now only add winnings if player won
-
     if is_win {
         // Calculate profit to be deducted from pool
         let profit = payout.saturating_sub(bet_amount);
@@ -255,18 +154,18 @@ pub async fn play_dice(
         if profit > pool_reserve {
             // CRITICAL: Race condition hit. Pool was drained during game.
             // ACTION: Refund bet, Log error, Return failure.
-            
+
             // Refund the bet that was deducted earlier
             let current_balance = accounting::get_balance(caller);
             let refund_balance = current_balance.checked_add(bet_amount)
                 .ok_or("Balance overflow on refund")?;
             accounting::update_balance(caller, refund_balance)?;
-            
+
             // Log
             ic_cdk::println!("CRITICAL: Payout failure. Refunded {} to {}", bet_amount, caller);
-            
+
             return Err(format!(
-                "House cannot afford payout ({} USDT). Your bet of {} USDT has been REFUNDED. Pool was drained by concurrent games. Please try a smaller bet.", 
+                "House cannot afford payout ({} USDT). Your bet of {} USDT has been REFUNDED. Pool was drained by concurrent games. Please try a smaller bet.",
                 profit as f64 / DECIMALS_PER_CKUSDT as f64,
                 bet_amount as f64 / DECIMALS_PER_CKUSDT as f64
             ));
@@ -282,37 +181,16 @@ pub async fn play_dice(
         liquidity_pool::update_pool_on_loss(bet_amount);
     }
 
-    Ok(result)
+    Ok(MinimalGameResult {
+        rolled_number,
+        is_win,
+        payout,
+    })
 }
 
 // =============================================================================
 // QUERY FUNCTIONS
 // =============================================================================
-
-// Get game statistics
-pub fn get_stats() -> GameStats {
-    GAME_STATS.with(|stats| stats.borrow().clone())
-}
-
-// Get recent games
-pub fn get_recent_games(limit: u32) -> Vec<DiceResult> {
-    GAME_HISTORY.with(|history| {
-        let history = history.borrow();
-        history
-            .iter()
-            .rev()
-            .take(limit as usize)
-            .map(|entry| entry.value().clone())
-            .collect()
-    })
-}
-
-// Get a specific game by ID
-pub fn get_game(game_id: u64) -> Option<DiceResult> {
-    GAME_HISTORY.with(|history| {
-        history.borrow().get(&game_id)
-    })
-}
 
 // Calculate what the multiplier would be for given parameters (helper for UI)
 pub fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<(f64, f64), String> {
