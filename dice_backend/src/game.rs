@@ -181,6 +181,9 @@ pub async fn play_dice(
         .ok_or("Balance underflow")?;
     accounting::update_balance(caller, balance_after_bet)?;
 
+    // Record volume for daily statistics (game-agnostic)
+    crate::defi_accounting::record_bet_volume(bet_amount);
+
     // Check for exact hit (house wins on exact target match - 0.99% edge)
     let is_house_hit = rolled_number == target_number;
 
