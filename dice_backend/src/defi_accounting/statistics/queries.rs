@@ -29,7 +29,10 @@ pub fn get_snapshot_count() -> u64 {
     DAILY_SNAPSHOTS.with(|s| s.borrow().len())
 }
 
-/// Calculate APY over last N days (default 7)
+/// Maximum days allowed for APY calculation (prevents excessive computation)
+const MAX_APY_DAYS: u32 = 365;
+
+/// Calculate APY over last N days (default 7, max 365)
 ///
 /// Returns both actual APY (from real results) and expected APY (theoretical 1% edge)
 ///
@@ -47,8 +50,13 @@ pub fn get_snapshot_count() -> u64 {
 /// expected_profit = period_volume * 0.01
 /// expected_apy = (expected_profit / starting_reserve) * (365 / days) * 100
 /// ```
+///
+/// # Parameters
+/// - `days`: Number of days to calculate APY over (1-365, default 7)
+///   Values above 365 are capped to prevent excessive computation.
 pub fn get_apy_info(days: Option<u32>) -> ApyInfo {
-    let days = days.unwrap_or(7).max(1) as u64;
+    // Cap at MAX_APY_DAYS to prevent excessive computation
+    let days = days.unwrap_or(7).clamp(1, MAX_APY_DAYS) as u64;
 
     DAILY_SNAPSHOTS.with(|snapshots| {
         let snapshots = snapshots.borrow();
