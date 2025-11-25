@@ -56,99 +56,15 @@ impl Storable for RandomnessSeed {
     };
 }
 
-// Rotation history for verification
-#[derive(Clone, Debug, Serialize, Deserialize, CandidType)]
-pub struct SeedRotationRecord {
-    pub seed_hash: String,
-    pub start_nonce: u64,
-    pub end_nonce: u64,
-    pub timestamp: u64,
-}
-
-impl Storable for SeedRotationRecord {
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(serde_json::to_vec(self).unwrap())
-    }
-
-    fn into_bytes(self) -> Vec<u8> {
-        self.to_bytes().into_owned()
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        serde_json::from_slice(&bytes).unwrap()
-    }
-
-    const BOUND: ic_stable_structures::storable::Bound = ic_stable_structures::storable::Bound::Unbounded;
-}
-
 // =============================================================================
-// GAME STRUCTURES
+// MINIMAL GAME RESULT (NEW - Simplified return type)
 // =============================================================================
 
-// Dice game result
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
-pub struct DiceResult {
-    #[serde(default)]
-    pub game_id: u64,  // Unique game ID (default to 0 for backward compatibility)
-    pub player: Principal,
-    pub bet_amount: u64,
-    pub target_number: u8,
-    pub direction: RollDirection,
+pub struct MinimalGameResult {
     pub rolled_number: u8,
-    pub win_chance: f64,
-    pub multiplier: f64,
+    pub is_win: bool,
     pub payout: u64,
-    pub is_win: bool,
-    pub timestamp: u64,
-    #[serde(default)]
-    pub is_house_hit: bool,  // True when house wins on exact target hit (0.99% edge)
-    // Verification fields for provable fairness
-    pub client_seed: String,
-    pub nonce: u64,
-    pub server_seed_hash: String,
-}
-
-impl Storable for DiceResult {
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(serde_json::to_vec(self).unwrap())
-    }
-
-    fn into_bytes(self) -> Vec<u8> {
-        self.to_bytes().into_owned()
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        serde_json::from_slice(&bytes).unwrap()
-    }
-
-    const BOUND: ic_stable_structures::storable::Bound = ic_stable_structures::storable::Bound::Unbounded;
-}
-
-#[derive(CandidType, Deserialize, Clone, Default)]
-pub struct GameStats {
-    pub total_games: u64,
-    pub total_volume: u64,
-    pub total_payouts: u64,
-    pub house_profit: i64,
-}
-
-// Detailed history for analytics
-#[derive(CandidType, Deserialize, Serialize)]
-pub struct DetailedGameHistory {
-    pub game_id: u64,
-    pub player: String,
-    pub bet_usdt: f64,
-    pub won_usdt: f64,
-    pub target_number: u8,
-    pub direction: String,
-    pub rolled_number: u8,
-    pub win_chance: f64,
-    pub multiplier: f64,
-    pub is_win: bool,
-    pub timestamp: u64,
-    pub profit_loss: i64,  // decimals (6-decimal precision)
-    pub expected_value: f64,  // decimals
-    pub house_edge_actual: f64,  // percentage
 }
 
 // =============================================================================

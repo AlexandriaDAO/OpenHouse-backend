@@ -1,7 +1,7 @@
-use crate::types::{RandomnessSeed, SeedRotationRecord, MAX_NUMBER};
+use crate::types::{RandomnessSeed, MAX_NUMBER};
 use ic_cdk::management_canister::raw_rand;
 use ic_stable_structures::memory_manager::MemoryId;
-use ic_stable_structures::{StableBTreeMap, StableCell};
+use ic_stable_structures::StableCell;
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 
@@ -38,14 +38,6 @@ thread_local! {
             0u64
         )
     );
-
-    static ROTATION_HISTORY: RefCell<StableBTreeMap<u64, SeedRotationRecord, Memory>> = RefCell::new(
-        StableBTreeMap::init(
-            crate::MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(3))),
-        )
-    );
-
-    static NEXT_ROTATION_ID: RefCell<u64> = RefCell::new(0);
 }
 
 // =============================================================================
@@ -218,36 +210,6 @@ pub async fn rotate_seed_async() {
         return;
     }
 
-    // Save old seed to rotation history before rotating
-    let old_seed_info = SEED_STATE.with(|s| {
-        s.borrow().as_ref().map(|seed| {
-            let mut hasher = Sha256::new();
-            hasher.update(&seed.current_seed);
-            let seed_hash = format!("{:x}", hasher.finalize());
-            (seed_hash, seed.nonce, seed.games_used)
-        })
-    });
-
-    if let Some((seed_hash, end_nonce, _games_used)) = old_seed_info {
-        // Record rotation history
-        let record = SeedRotationRecord {
-            seed_hash,
-            start_nonce: 1,
-            end_nonce,
-            timestamp: now,
-        };
-
-        let rotation_id = NEXT_ROTATION_ID.with(|id| {
-            let current = *id.borrow();
-            *id.borrow_mut() = current + 1;
-            current
-        });
-
-        ROTATION_HISTORY.with(|history| {
-            history.borrow_mut().insert(rotation_id, record);
-        });
-    }
-
     // Get new VRF seed
     if let Ok(random_bytes) = raw_rand().await {
         let mut hasher = Sha256::new();
@@ -323,17 +285,5 @@ pub fn get_seed_info() -> (String, u64, u64) {
             };
             (hash, seed_state.games_used, seed_state.creation_time)
         }).unwrap_or(("Not initialized".to_string(), 0, 0))
-    })
-}
-
-// Get rotation history for verification
-pub fn get_rotation_history(limit: u32) -> Vec<(u64, SeedRotationRecord)> {
-    ROTATION_HISTORY.with(|history| {
-        history.borrow()
-            .iter()
-            .rev()
-            .take(limit as usize)
-            .map(|entry| (entry.key().clone(), entry.value().clone()))
-            .collect()
     })
 }

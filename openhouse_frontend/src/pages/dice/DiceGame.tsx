@@ -7,7 +7,6 @@ import {
   GameLayout,
   BetAmountInput,
   GameButton,
-  GameHistory,
   GameStats,
   type GameStat,
 } from '../../components/game-ui';
@@ -21,38 +20,11 @@ import { DECIMALS_PER_CKUSDT, formatUSDT, TRANSFER_FEE } from '../../types/balan
 
 const DICE_BACKEND_CANISTER_ID = 'whchi-hyaaa-aaaao-a4ruq-cai';
 
-interface DiceGameResult {
-  game_id?: bigint;
-  player: Principal;
-  bet_amount: bigint;
-  target_number: number;
-  direction: { Over: null } | { Under: null };
+// Minimal game result from backend (simplified - 3 fields only)
+interface MinimalGameResult {
   rolled_number: number;
-  win_chance: number;
-  multiplier: number;
+  is_win: boolean;
   payout: bigint;
-  is_win: boolean;
-  is_house_hit?: boolean;
-  timestamp: bigint;
-  clientId?: string;
-}
-
-// Detailed history interface
-interface DetailedGameHistory {
-  game_id: bigint;
-  player: string;
-  bet_usdt: number;
-  won_usdt: number;
-  target_number: number;
-  direction: string;
-  rolled_number: number;
-  win_chance: number;
-  multiplier: number;
-  is_win: boolean;
-  timestamp: bigint;
-  profit_loss: bigint;
-  expected_value: number;
-  house_edge_actual: number;
 }
 
 // Helper component for inline house status
@@ -87,7 +59,7 @@ const HouseStatusInline: React.FC <{
       </div>
       {utilizationPct > 70 && (
         <div className={`text-center mt-1 ${statusColor}`}>
-          ⚠️ Using {utilizationPct.toFixed(0)}% of house limit
+          Using {utilizationPct.toFixed(0)}% of house limit
         </div>
       )}
     </div>
@@ -99,17 +71,21 @@ export function DiceGame() {
   const { actor: ledgerActor } = useLedgerActor();
   const { isAuthenticated } = useAuth();
   const gameMode = useGameMode();
-  
+
   // Global Balance State
   const { balance: walletBalance, refreshBalance: refreshWalletBalance } = useBalance();
   const gameBalanceContext = useGameBalance('dice');
   const balance = gameBalanceContext.balance;
   const refreshGameBalance = gameBalanceContext.refresh;
 
-  // Game State
+  // Game State - using minimal result type
   const [maxBet, setMaxBet] = useState(10);
-  const gameState = useGameState<DiceGameResult>(0.01, maxBet);
-  
+  const [lastResult, setLastResult] = useState<MinimalGameResult | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [gameError, setGameError] = useState<string | null>(null);
+  const [betAmount, setBetAmount] = useState(0.01);
+  const [betError, setBetError] = useState<string | null>(null);
+
   // Dice-specific State
   const [targetNumber, setTargetNumber] = useState(50);
   const [direction, setDirection] = useState<DiceDirection>('Over');
@@ -127,31 +103,40 @@ export function DiceGame() {
   const [accountingError, setAccountingError] = useState<string | null>(null);
   const [accountingSuccess, setAccountingSuccess] = useState<string | null>(null);
 
-  // History State
-  const [detailedHistory, setDetailedHistory] = useState<DetailedGameHistory[]>([]);
-  const [showDetailedView, setShowDetailedView] = useState(false);
-  const [csvExport, setCsvExport] = useState<string>('');
+  // Bet validation
+  const validateBet = () => {
+    if (betAmount < 0.01) {
+      setBetError('Minimum bet is 0.01 USDT');
+      return false;
+    }
+    if (betAmount > maxBet) {
+      setBetError(`Maximum bet is ${maxBet.toFixed(2)} USDT`);
+      return false;
+    }
+    setBetError(null);
+    return true;
+  };
 
   // Helper to parse backend errors
   const parseBackendError = (errorMsg: string): string => {
     if (errorMsg.startsWith('INSUFFICIENT_BALANCE|')) {
       const parts = errorMsg.split('|');
       const userBalance = parts[1] || 'Unknown balance';
-      const betAmount = parts[2] || 'Unknown bet';
+      const betAmountStr = parts[2] || 'Unknown bet';
       setShowDepositAnimation(true);
-      return `💰 INSUFFICIENT CHIPS - BET NOT PLACED\n\n` +
+      return `INSUFFICIENT CHIPS - BET NOT PLACED\n\n` +
         `${userBalance}\n` +
-        `${betAmount}\n\n` +
+        `${betAmountStr}\n\n` +
         `${parts[3] || 'This bet was not placed and no funds were deducted.'}\n\n` +
-        `👇 Click "Buy Chips" above to add more USDT.`;
+        `Click "Buy Chips" above to add more USDT.`;
     }
     if (errorMsg.includes('exceeds house limit') || errorMsg.includes('house balance')) {
-      return `⚠️ BET REJECTED - NO MONEY LOST\n\n` +
+      return `BET REJECTED - NO MONEY LOST\n\n` +
         `The house doesn't have enough funds to cover this bet's potential payout. ` +
         `Try lowering your bet or changing odds.`;
     }
     if (errorMsg.includes('Randomness seed initializing')) {
-      return `⏳ WARMING UP - PLEASE WAIT\n\n` +
+      return `WARMING UP - PLEASE WAIT\n\n` +
         `The randomness generator is initializing (happens once after updates). ` +
         `Please try again in a few seconds. No funds were deducted.`;
     }
@@ -210,8 +195,7 @@ export function DiceGame() {
       const result = await actor.deposit(amount);
 
       if ('Ok' in result) {
-        const newBalance = result.Ok;
-        setAccountingSuccess(`💰 Bought ${depositAmount} USDT in chips!`);
+        setAccountingSuccess(`Bought ${depositAmount} USDT in chips!`);
         setDepositAmount('10');
         setShowDepositModal(false);
         await refreshWalletBalance();
@@ -240,7 +224,7 @@ export function DiceGame() {
       if ('Ok' in result) {
         const newBalance = result.Ok;
         const withdrawnAmount = (Number(balance.game) - Number(newBalance)) / DECIMALS_PER_CKUSDT;
-        setAccountingSuccess(`💵 Cashed out ${withdrawnAmount.toFixed(2)} USDT!`);
+        setAccountingSuccess(`Cashed out ${withdrawnAmount.toFixed(2)} USDT!`);
         await refreshWalletBalance();
         gameBalanceContext.refresh();
       } else {
@@ -260,7 +244,7 @@ export function DiceGame() {
       try {
         const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
         let mult = 0;
-        
+
         const result = await actor.calculate_payout_info(targetNumber, directionVariant);
         if ('Ok' in result) {
           const [chance, multiplier] = result.Ok;
@@ -268,7 +252,7 @@ export function DiceGame() {
           setWinChance(chance * 100);
           setMultiplier(mult);
         } else if ('Err' in result) {
-          gameState.setGameError(result.Err);
+          setGameError(result.Err);
         }
 
         try {
@@ -276,8 +260,8 @@ export function DiceGame() {
           const maxPayoutUSDT = Number(maxPayoutE8s) / DECIMALS_PER_CKUSDT;
           const maxBetUSDT = mult > 0 ? maxPayoutUSDT / mult : 0;
           setMaxBet(maxBetUSDT);
-          if (gameState.betAmount > maxBetUSDT) {
-            gameState.setBetAmount(maxBetUSDT);
+          if (betAmount > maxBetUSDT) {
+            setBetAmount(maxBetUSDT);
           }
         } catch (e) {
           setMaxBet(10);
@@ -288,26 +272,6 @@ export function DiceGame() {
     };
     updateOdds();
   }, [targetNumber, direction, actor]);
-
-  // Load history
-  useEffect(() => {
-    const loadHistory = async () => {
-      if (!actor) return;
-      try {
-        const games = await actor.get_recent_games(10);
-        const processedGames = games.map((game: DiceGameResult) => ({
-          ...game,
-          clientId: crypto.randomUUID()
-        }));
-        processedGames.forEach((game: DiceGameResult) => {
-          gameState.addToHistory(game);
-        });
-      } catch (err) {
-        console.error('Failed to load history:', err);
-      }
-    };
-    loadHistory();
-  }, [actor]);
 
   // Balance management
   useEffect(() => {
@@ -336,26 +300,26 @@ export function DiceGame() {
   // Roll Dice
   const rollDice = async () => {
     if (!isAuthenticated) {
-      gameState.setGameError('Please log in to play.');
+      setGameError('Please log in to play.');
       return;
     }
-    if (!actor || !gameState.validateBet()) return;
+    if (!actor || !validateBet()) return;
     if (balance.game === 0n) {
-      gameState.setGameError('Your dice game balance is empty.');
+      setGameError('Your dice game balance is empty.');
       setShowDepositAnimation(true);
       return;
     }
 
     // Frontend limit check
-    const maxPayout = BigInt(Math.floor(gameState.betAmount * multiplier * DECIMALS_PER_CKUSDT));
+    const maxPayout = BigInt(Math.floor(betAmount * multiplier * DECIMALS_PER_CKUSDT));
     const maxAllowedPayout = (balance.house * BigInt(10)) / BigInt(100);
     if (maxPayout > maxAllowedPayout) {
-      gameState.setGameError('Potential payout exceeds house limit.');
+      setGameError('Potential payout exceeds house limit.');
       return;
     }
 
-    gameState.setIsPlaying(true);
-    gameState.clearErrors();
+    setIsPlaying(true);
+    setGameError(null);
     setAnimatingResult(null);
     setAccountingError(null);
     setAccountingSuccess(null);
@@ -365,60 +329,45 @@ export function DiceGame() {
     });
 
     try {
-      const betAmount = BigInt(Math.floor(gameState.betAmount * DECIMALS_PER_CKUSDT));
+      const betAmountBigInt = BigInt(Math.floor(betAmount * DECIMALS_PER_CKUSDT));
       const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
       const randomBytes = new Uint8Array(16);
       crypto.getRandomValues(randomBytes);
       const clientSeed = Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
 
       const result = await Promise.race([
-        actor.play_dice(betAmount, targetNumber, directionVariant, clientSeed),
+        actor.play_dice(betAmountBigInt, targetNumber, directionVariant, clientSeed),
         timeoutPromise
       ]);
 
       if ('Ok' in result) {
-        setAnimatingResult(result.Ok.rolled_number);
-        gameState.addToHistory(result.Ok);
+        const gameResult: MinimalGameResult = {
+          rolled_number: result.Ok.rolled_number,
+          is_win: result.Ok.is_win,
+          payout: result.Ok.payout,
+        };
+        setAnimatingResult(gameResult.rolled_number);
+        setLastResult(gameResult);
         gameBalanceContext.refresh().catch(console.error);
       } else {
         const userFriendlyError = parseBackendError(result.Err);
-        gameState.setGameError(userFriendlyError);
-        gameState.setIsPlaying(false);
+        setGameError(userFriendlyError);
+        setIsPlaying(false);
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to roll dice';
-      gameState.setGameError(parseBackendError(errorMsg));
-      gameState.setIsPlaying(false);
+      setGameError(parseBackendError(errorMsg));
+      setIsPlaying(false);
     }
   };
 
   const handleAnimationComplete = useCallback(() => {
-    gameState.setIsPlaying(false);
+    setIsPlaying(false);
   }, []);
 
-  const renderHistoryItem = (item: DiceGameResult) => (
-    <>
-      <span className="font-mono">{item.rolled_number}</span>
-      <span className={item.is_win ? 'text-green-400' : 'text-red-400'}>
-        {item.is_win ? '✓' : '✗'}
-      </span>
-    </>
-  );
-
-  const copyHistoryToCSV = () => {
-     // Simple CSV generation from current history
-     const headers = "Time,Bet,Target,Roll,Outcome,Payout\n";
-     const rows = gameState.history.map(g => 
-       `${new Date(Number(g.timestamp) / 1_000_000).toISOString()},${Number(g.bet_amount)/DECIMALS_PER_CKUSDT},${g.target_number},${g.rolled_number},${g.is_win ? 'WIN' : 'LOSS'},${Number(g.payout)/DECIMALS_PER_CKUSDT}`
-     ).join('\n');
-     setCsvExport(headers + rows);
-     navigator.clipboard.writeText(headers + rows);
-     alert("History copied to clipboard!");
-  };
-
   return (
-    <GameLayout minBet={0.01} maxWin={10} houseEdge={0.99}> 
-      
+    <GameLayout minBet={0.01} maxWin={10} houseEdge={0.99}>
+
       {/* UNIFIED GAME CARD */}
       <div className="card max-w-5xl mx-auto bg-gray-900/50 border border-gray-700/50">
 
@@ -452,14 +401,14 @@ export function DiceGame() {
                   onClick={() => setShowDepositModal(true)}
                   className={`px-4 py-1.5 bg-dfinity-turquoise text-pure-black text-sm font-bold rounded hover:bg-dfinity-turquoise/90 transition ${showDepositAnimation ? 'animate-pulse ring-2 ring-yellow-400' : ''}`}
                 >
-                  💰 Buy Chips
+                  Buy Chips
                 </button>
                 <button
                   onClick={handleWithdrawAll}
                   disabled={isWithdrawing || balance.game === 0n}
                   className="px-4 py-1.5 bg-gray-700 text-white text-sm font-bold rounded hover:bg-gray-600 transition disabled:opacity-50"
                 >
-                  {isWithdrawing ? '...' : '💵 Cash Out'}
+                  {isWithdrawing ? '...' : 'Cash Out'}
                 </button>
                 <button
                   onClick={() => {
@@ -469,12 +418,12 @@ export function DiceGame() {
                   className="px-3 py-1.5 bg-gray-800 text-gray-400 hover:text-white rounded transition"
                   title="Refresh Balances"
                 >
-                  🔄
+                  Refresh
                 </button>
               </div>
             </div>
           )}
-          
+
           {/* Accounting Messages */}
           {(accountingError || accountingSuccess) && (
             <div className={`mt-3 text-center text-xs py-1 rounded ${accountingError ? 'text-red-400 bg-red-900/20' : 'text-green-400 bg-green-900/20'}`}>
@@ -488,15 +437,15 @@ export function DiceGame() {
 
           {/* LEFT COLUMN: CONTROLS */}
           <div className="space-y-6">
-            
+
             <BetAmountInput
-              value={gameState.betAmount}
-              onChange={gameState.setBetAmount}
+              value={betAmount}
+              onChange={setBetAmount}
               min={0.01}
               max={maxBet}
-              disabled={gameState.isPlaying}
+              disabled={isPlaying}
               isPracticeMode={gameMode.isPracticeMode}
-              error={gameState.betError}
+              error={betError}
               variant="slider"
             />
 
@@ -505,7 +454,7 @@ export function DiceGame() {
               onTargetChange={setTargetNumber}
               direction={direction}
               onDirectionChange={setDirection}
-              disabled={gameState.isPlaying}
+              disabled={isPlaying}
             />
 
             {/* Inline Stats */}
@@ -524,104 +473,72 @@ export function DiceGame() {
               </div>
               <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center border border-dfinity-turquoise/20">
                 <span className="text-gray-400 text-xs">Potential Win</span>
-                <span className="font-bold text-dfinity-turquoise">{(gameState.betAmount * multiplier).toFixed(2)} USDT</span>
+                <span className="font-bold text-dfinity-turquoise">{(betAmount * multiplier).toFixed(2)} USDT</span>
               </div>
             </div>
 
-            <HouseStatusInline 
-              houseBalance={balance.house} 
-              betAmount={gameState.betAmount} 
-              multiplier={multiplier} 
+            <HouseStatusInline
+              houseBalance={balance.house}
+              betAmount={betAmount}
+              multiplier={multiplier}
             />
 
             <GameButton
               onClick={rollDice}
               disabled={!actor}
-              loading={gameState.isPlaying}
+              loading={isPlaying}
               label="ROLL DICE"
               loadingLabel="Rolling..."
-              icon="🎲"
+              icon="D"
             />
 
-            {gameState.gameError && (
+            {gameError && (
               <div className="p-3 bg-red-900/20 border border-red-500/30 rounded text-red-400 text-sm whitespace-pre-wrap">
-                {gameState.gameError}
+                {gameError}
               </div>
             )}
           </div>
 
           {/* RIGHT COLUMN: ANIMATION & RESULT */}
           <div className="flex flex-col items-center justify-center min-h-[300px] bg-black/20 rounded-xl border border-gray-800/50 p-6 relative overflow-hidden">
-            
+
             {/* Ambient Background Glow */}
             <div className="absolute inset-0 bg-gradient-to-br from-dfinity-turquoise/5 to-purple-900/10 pointer-events-none"></div>
 
             <div className="scale-125 mb-8 relative z-10">
               <DiceAnimation
                 targetNumber={animatingResult}
-                isRolling={gameState.isPlaying}
+                isRolling={isPlaying}
                 onAnimationComplete={handleAnimationComplete}
               />
             </div>
 
             {/* Result Display */}
             <div className="h-24 flex items-center justify-center w-full relative z-10">
-              {gameState.lastResult && !gameState.isPlaying ? (
-                <div className={`text-center ${gameState.lastResult.is_win ? 'text-green-400' : 'text-red-400'} animate-in fade-in slide-in-from-bottom-4 duration-500`}>
+              {lastResult && !isPlaying ? (
+                <div className={`text-center ${lastResult.is_win ? 'text-green-400' : 'text-red-400'} animate-in fade-in slide-in-from-bottom-4 duration-500`}>
                   <div className="text-4xl font-black tracking-tight mb-1">
-                    {gameState.lastResult.is_win ? 'YOU WON!' : 'YOU LOST'}
+                    {lastResult.is_win ? 'YOU WON!' : 'YOU LOST'}
                   </div>
-                  
-                  {gameState.lastResult.is_win && (
+
+                  {lastResult.is_win && (
                     <div className="text-2xl font-mono text-dfinity-turquoise">
-                      +{formatUSDT(gameState.lastResult.payout)}
+                      +{formatUSDT(lastResult.payout)}
                     </div>
                   )}
 
-                  {!gameState.lastResult.is_win && gameState.lastResult.is_house_hit && (
-                     <div className="text-sm text-yellow-400 mt-1 font-bold">
-                       🎯 Exact Hit! (House Edge)
-                     </div>
-                  )}
-                  
                   <div className="text-xs text-gray-500 mt-2 font-mono">
-                     {gameState.lastResult.rolled_number} vs {gameState.lastResult.target_number} ({'Over' in gameState.lastResult.direction ? 'Over' : 'Under'})
+                     Rolled: {lastResult.rolled_number} | Target: {targetNumber} ({direction})
                   </div>
                 </div>
               ) : (
-                !gameState.isPlaying && (
+                !isPlaying && (
                   <div className="text-gray-600 text-sm text-center italic">
                     Ready to roll...
                   </div>
                 )
               )}
             </div>
-
-            {/* Game History (Right column bottom) */}
-             <details className="mt-auto pt-4 w-full border-t border-gray-800/50 relative z-10">
-              <summary className="flex justify-between items-center cursor-pointer p-2">
-                <span className="text-lg font-bold text-gray-300">Game History</span>
-                <span className="text-xs text-gray-500">Click to expand</span>
-              </summary>
-              
-              <div className="mt-4 pt-4 border-t border-gray-800">
-                <div className="flex justify-end gap-2 mb-4">
-                  <button 
-                    className="text-xs px-2 py-1 bg-gray-800 rounded hover:bg-gray-700"
-                    onClick={copyHistoryToCSV}
-                  >
-                    📋 Copy CSV
-                  </button>
-                </div>
-
-                <GameHistory<DiceGameResult>
-                  items={gameState.history}
-                  maxDisplay={10}
-                  title=""
-                  renderCustom={renderHistoryItem}
-                />
-              </div>
-            </details>
           </div>
 
         </div>
@@ -632,7 +549,7 @@ export function DiceGame() {
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowDepositModal(false)}>
           <div className="bg-gray-900 rounded-xl p-6 max-w-md w-full mx-4 border border-gray-700 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-              <span>💰</span> Buy Chips
+              <span>Buy Chips</span>
             </h3>
 
             <div className="mb-6">
@@ -678,7 +595,7 @@ export function DiceGame() {
               >
                 {isDepositing ? (
                   <span className="flex items-center justify-center gap-2">
-                    <span className="animate-spin">↻</span>
+                    <span className="animate-spin">...</span>
                     {depositStep === 'approving' ? 'Approving...' : 'Depositing...'}
                   </span>
                 ) : (
