@@ -165,18 +165,21 @@ pub async fn play_dice(
         return Err("Client seed too long (max 256 characters)".to_string());
     }
 
-    // P0-3 FIX: Deduct bet AFTER all validations pass, but BEFORE game logic
+    // Check if seed needs rotation
+    maybe_schedule_seed_rotation();
+
+    // Generate roll BEFORE deducting balance
+    // This prevents "ghost funds" where balance is deducted but roll fails (e.g. seed initializing)
+    // If this succeeds (nonce++) but deduction fails, we just burn a nonce (safe).
+    let (rolled_number, nonce, server_seed_hash) = generate_dice_roll_instant(&client_seed)?;
+
+    // P0-3 FIX: Deduct bet AFTER all validations and fallible operations pass
     // This prevents:
-    // 1. Users losing bets on invalid inputs (all validations passed)
+    // 1. Users losing bets on invalid inputs or system errors
     // 2. Concurrent games from overdrawing balance (atomic deduction)
     let balance_after_bet = user_balance.checked_sub(bet_amount)
         .ok_or("Balance underflow")?;
     accounting::update_balance(caller, balance_after_bet)?;
-
-    // Check if seed needs rotation
-    maybe_schedule_seed_rotation();
-
-    let (rolled_number, nonce, server_seed_hash) = generate_dice_roll_instant(&client_seed)?;
 
     // Check for exact hit (house wins on exact target match - 0.99% edge)
     let is_house_hit = rolled_number == target_number;
