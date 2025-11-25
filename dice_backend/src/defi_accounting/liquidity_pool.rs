@@ -401,7 +401,7 @@ pub(crate) fn get_pool_stats_internal() -> PoolStats {
 
     // Calculate share price
     let share_price = if total_shares == Nat::from(0u64) {
-        Nat::from(100_000_000u64) // 1 ICP initial price
+        Nat::from(100_000_000u64) // 1 USDT initial price (100M decimals = 1.00 USDT)
     } else if pool_reserve == Nat::from(0u64) {
         Nat::from(1u64) // Minimum price if drained
     } else {

@@ -6,11 +6,6 @@ use std::cell::RefCell;
 use std::time::Duration;
 // Note: This module now uses ckUSDT (ICRC-2), not ICP ledger
 // ckUSDT types defined in types.rs
-// use ic_ledger_types::{
-//     AccountIdentifier, TransferArgs, Tokens, DEFAULT_SUBACCOUNT,
-//     MAINNET_LEDGER_CANISTER_ID, Memo, AccountBalanceArgs, BlockIndex, Timestamp,
-// };
-use ic_ledger_types::BlockIndex; // Still used for TransferResult
 use crate::types::{Account, TransferFromArgs, TransferFromError, TransferArg, TransferError, CKUSDT_CANISTER_ID, CKUSDT_TRANSFER_FEE};
 
 use crate::{MEMORY_MANAGER, Memory};
@@ -69,7 +64,7 @@ pub struct AccountingStats {
 }
 
 enum TransferResult {
-    Success(BlockIndex),
+    Success(u64),
     DefiniteError(String),
     UncertainError(String),
 }
