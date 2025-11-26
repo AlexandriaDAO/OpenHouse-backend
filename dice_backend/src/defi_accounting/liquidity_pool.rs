@@ -207,8 +207,8 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
             accounting::credit_balance(caller, amount)?;
 
             return Err(format!(
-                "Slippage exceeded: expected min {} shares, would receive {}. Amount refunded to betting balance.",
-                min_shares, shares_to_mint
+                "Slippage exceeded: expected min {} shares but would receive {} (pool conditions changed). Your {} e8s has been credited to your betting balance. You can withdraw it or try depositing again with adjusted parameters.",
+                min_shares, shares_to_mint, amount
             ));
         }
     }
@@ -585,6 +585,9 @@ async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> 
     }
 }
 
+/// Calculate shares preview for a deposit amount.
+/// WARNING: This is a query call. Share calculation may differ when deposit actually executes
+/// due to concurrent state changes. Always use min_shares_expected for protection.
 #[query]
 pub fn calculate_shares_preview(amount: u64) -> Result<Nat, String> {
     calculate_shares_for_deposit(&Nat::from(amount))
