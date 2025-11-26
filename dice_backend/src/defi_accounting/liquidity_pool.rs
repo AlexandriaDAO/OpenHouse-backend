@@ -188,12 +188,6 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
         if min_shares == &Nat::from(0u64) {
              return Err("min_shares_expected must be > 0".to_string());
         }
-        if min_shares > &projected_shares {
-             return Err(format!(
-                 "min_shares_expected ({}) exceeds projected shares ({}) based on current pool state",
-                 min_shares, projected_shares
-             ));
-        }
     }
 
     // Transfer from user (requires prior ICRC-2 approval)
