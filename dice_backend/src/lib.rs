@@ -38,8 +38,7 @@ fn init() {
     // Initialize game state
     ic_cdk::println!("Dice Game Backend Initialized");
 
-    // Start retry timer for pending withdrawals
-    defi_accounting::accounting::start_retry_timer();
+    // Start parent auto-withdrawal timer (weekly fee collection)
     defi_accounting::accounting::start_parent_withdrawal_timer();
 
     // Start daily statistics timer
@@ -56,8 +55,9 @@ fn post_upgrade() {
     // Restore game state
     seed::restore_seed_state();
 
-    // Start retry timer for pending withdrawals
-    defi_accounting::accounting::start_retry_timer();
+    // Start parent auto-withdrawal timer (weekly fee collection)
+    // NOTE: We removed start_retry_timer() - users now retry manually via retry_withdrawal()
+    // This eliminates the double-spend vulnerability from automatic TooOld rollbacks
     defi_accounting::accounting::start_parent_withdrawal_timer();
 
     // Start daily statistics timer

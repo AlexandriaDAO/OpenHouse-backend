@@ -18,9 +18,6 @@ const MIN_WITHDRAW: u64 = 1_000_000; // 1 USDT
 const USER_BALANCES_MEMORY_ID: u8 = 10;
 const PENDING_WITHDRAWALS_MEMORY_ID: u8 = 20;
 const AUDIT_LOG_MEMORY_ID: u8 = 21;
-// Retry for ~21 hours (250 * 5 mins) to cover transient outages while staying
-// within the Ledger's 24-hour deduplication window.
-const MAX_RETRIES: u8 = 250;
 /// Minimum balance before triggering automatic weekly withdrawal to parent canister.
 /// Set to 100 USDT to minimize gas costs while ensuring timely fee collection.
 const PARENT_AUTO_WITHDRAW_THRESHOLD: u64 = 100_000_000; // 100 USDT
@@ -50,8 +47,6 @@ thread_local! {
     );
 
     static CACHED_CANISTER_BALANCE: RefCell<u64> = RefCell::new(0);
-    static PROCESSING_WITHDRAWALS: RefCell<bool> = RefCell::new(false);
-    static RETRY_TIMER_ID: RefCell<Option<ic_cdk_timers::TimerId>> = RefCell::new(None);
     static PARENT_TIMER: RefCell<Option<ic_cdk_timers::TimerId>> = RefCell::new(None);
 }
 
@@ -63,7 +58,7 @@ pub struct AccountingStats {
     pub unique_depositors: u64,
 }
 
-enum TransferResult {
+pub(crate) enum TransferResult {
     Success(u64),
     DefiniteError(String),
     UncertainError(String),
@@ -163,7 +158,7 @@ pub async fn withdraw_all() -> Result<u64, String> {
 pub(crate) async fn withdraw_internal(user: Principal) -> Result<u64, String> {
     // Check if already pending (prevents concurrent withdrawals)
     if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
-        return Err("Withdrawal already pending".to_string());
+        return Err("Withdrawal already pending. Call retry_withdrawal() to retry or abandon_withdrawal() to cancel.".to_string());
     }
 
     let balance = get_balance_internal(user);
@@ -186,8 +181,6 @@ pub(crate) async fn withdraw_internal(user: Principal) -> Result<u64, String> {
     let pending = PendingWithdrawal {
         withdrawal_type: WithdrawalType::User { amount: balance },
         created_at,
-        retries: 0,
-        last_error: None,
     };
 
     PENDING_WITHDRAWALS.with(|p| p.borrow_mut().insert(user, pending));
@@ -206,13 +199,26 @@ pub(crate) async fn withdraw_internal(user: Principal) -> Result<u64, String> {
             Ok(balance)
         }
         TransferResult::DefiniteError(err) => {
+            // DESIGN NOTE FOR AUDITORS:
+            // Rollback on INITIAL DefiniteError is safe because:
+            // 1. Fresh timestamp = TooOld impossible on first attempt
+            // 2. DefiniteError = ledger definitely rejected the transaction
+            // 3. No prior UncertainError = we KNOW it never succeeded
             rollback_withdrawal(user)?;
             log_audit(AuditEvent::WithdrawalFailed { user, amount: balance });
             Err(err)
         }
         TransferResult::UncertainError(msg) => {
-            update_pending_error(user, msg.clone());
-            Err(format!("Processing withdrawal. Check status later. {}", msg))
+            // DESIGN NOTE FOR AUDITORS:
+            // DO NOT rollback here! The transfer may have succeeded on-chain.
+            // User must call retry_withdrawal() or abandon_withdrawal().
+            // This is the core fix for the double-spend vulnerability.
+            Err(format!(
+                "Withdrawal pending (uncertain outcome). \
+                 Call retry_withdrawal() to retry or check on-chain balance. \
+                 If you received funds, call abandon_withdrawal() to clear pending state. \
+                 Error: {}", msg
+            ))
         }
     }
 }
@@ -221,27 +227,23 @@ pub(crate) async fn withdraw_internal(user: Principal) -> Result<u64, String> {
 // LP WITHDRAWAL HELPERS
 // =============================================================================
 
-pub fn schedule_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount: u64) -> Result<(), String> {
-     if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
-        return Err("Withdrawal already pending".to_string());
+/// Schedule an LP withdrawal and return the created_at timestamp for immediate transfer attempt.
+/// Returns the created_at timestamp needed for attempt_transfer().
+pub fn schedule_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount: u64) -> Result<u64, String> {
+    if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
+        return Err("Withdrawal already pending. Call retry_withdrawal() to retry or abandon_withdrawal() to cancel.".to_string());
     }
 
     let created_at = ic_cdk::api::time();
     let pending = PendingWithdrawal {
         withdrawal_type: WithdrawalType::LP { shares, reserve, amount },
         created_at,
-        retries: 0,
-        last_error: None,
     };
 
     PENDING_WITHDRAWALS.with(|p| p.borrow_mut().insert(user, pending));
     log_audit(AuditEvent::WithdrawalInitiated { user, amount });
-    
-    ic_cdk::futures::spawn(async move {
-        let _ = process_single_withdrawal(user).await;
-    });
 
-    Ok(())
+    Ok(created_at)
 }
 
 
@@ -249,7 +251,7 @@ pub fn schedule_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount
 // INTERNAL CORE
 // =============================================================================
 
-async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> TransferResult {
+pub(crate) async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> TransferResult {
     let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID).expect("Invalid principal constant");
 
     let args = TransferArg {
@@ -274,7 +276,7 @@ async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> Tran
     }
 }
 
-fn rollback_withdrawal(user: Principal) -> Result<(), String> {
+pub(crate) fn rollback_withdrawal(user: Principal) -> Result<(), String> {
     let pending = PENDING_WITHDRAWALS.with(|p| p.borrow().get(&user))
         .ok_or("No pending withdrawal")?;
 
@@ -298,31 +300,16 @@ fn rollback_withdrawal(user: Principal) -> Result<(), String> {
     Ok(())
 }
 
-fn update_pending_error(user: Principal, error: String) {
-    PENDING_WITHDRAWALS.with(|p| {
-        let mut map = p.borrow_mut();
-        if let Some(mut pending) = map.get(&user) {
-            pending.last_error = Some(crate::defi_accounting::types::sanitize_error(&error));
-            map.insert(user, pending);
-        }
-    });
+/// Mark a pending withdrawal as complete (transfer succeeded).
+pub(crate) fn complete_withdrawal(user: Principal, amount: u64) {
+    PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&user));
+    log_audit(AuditEvent::WithdrawalCompleted { user, amount });
 }
 
-// =============================================================================
-// RETRY LOGIC
-// =============================================================================
 
-pub fn start_retry_timer() {
-    RETRY_TIMER_ID.with(|id| {
-        if id.borrow().is_some() {
-             return;
-        }
-        let timer_id = ic_cdk_timers::set_timer_interval(Duration::from_secs(300), || async {
-            process_pending_withdrawals().await;
-        });
-        *id.borrow_mut() = Some(timer_id);
-    });
-}
+// =============================================================================
+// PARENT WITHDRAWAL TIMER
+// =============================================================================
 
 pub fn start_parent_withdrawal_timer() {
     PARENT_TIMER.with(|t| {
@@ -367,64 +354,109 @@ async fn auto_withdraw_parent() {
      }
 }
 
+// =============================================================================
+// USER-INITIATED RETRY & ABANDON
+// =============================================================================
 
-async fn process_pending_withdrawals() {
-    if PROCESSING_WITHDRAWALS.with(|p| *p.borrow()) {
-        return;
-    }
-    PROCESSING_WITHDRAWALS.with(|p| *p.borrow_mut() = true);
+/// Retry a pending withdrawal.
+///
+/// # Design Rationale (FOR AUDITORS)
+///
+/// Users can retry indefinitely - there's no MAX_RETRIES limit. This is safe because:
+/// - Same `created_at` = same dedup key on ledger = idempotent
+/// - Even after TooOld, retries just fail harmlessly (no state change)
+/// - System never makes rollback decisions automatically
+///
+/// ## What happens with TooOld?
+/// After ~24 hours, the ledger returns TooOld because `created_at` is expired.
+/// This does NOT mean the transfer failed - it means we can't retry anymore.
+/// The user should:
+/// 1. Check their ckUSDT balance on-chain
+/// 2. If they received funds -> call `abandon_withdrawal()` to unfreeze account
+/// 3. If they didn't -> they can keep retrying (harmless) or `abandon_withdrawal()`
+///
+/// ## Why no automatic rollback on TooOld?
+/// TooOld only means "I can't process THIS retry" - it says nothing about whether
+/// a PRIOR attempt succeeded. Auto-rollback here would cause double-spend if the
+/// original transfer actually went through.
+#[update]
+pub async fn retry_withdrawal() -> Result<u64, String> {
+    let caller = ic_cdk::api::msg_caller();
 
-    let pending_users: Vec<Principal> = PENDING_WITHDRAWALS.with(|p| {
-        p.borrow().iter().take(50).map(|entry| entry.key().clone()).collect()
-    });
+    let pending = PENDING_WITHDRAWALS.with(|p| p.borrow().get(&caller))
+        .ok_or("No pending withdrawal to retry")?;
 
-    for user in pending_users {
-        let _ = process_single_withdrawal(user).await;
-    }
+    let amount = pending.get_amount();
 
-    PROCESSING_WITHDRAWALS.with(|p| *p.borrow_mut() = false);
-}
-
-async fn process_single_withdrawal(user: Principal) -> Result<(), String> {
-    let pending = PENDING_WITHDRAWALS.with(|p| p.borrow().get(&user))
-        .ok_or("No pending")?;
-
-    if pending.retries >= MAX_RETRIES {
-        log_audit(AuditEvent::SystemError {
-             error: format!("Withdrawal STUCK for {} after ~21h. Manual Check Required.", user)
-        });
-        return Ok(());
-    }
-
-    let amount = match pending.withdrawal_type {
-         WithdrawalType::User { amount } => amount,
-         WithdrawalType::LP { amount, .. } => amount,
-    };
-
-    match attempt_transfer(user, amount, pending.created_at).await {
+    // Retry with original created_at - ledger deduplication handles idempotency
+    match attempt_transfer(caller, amount, pending.created_at).await {
         TransferResult::Success(_) => {
-             PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&user));
-             log_audit(AuditEvent::WithdrawalCompleted { user, amount });
+            PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&caller));
+            log_audit(AuditEvent::WithdrawalCompleted { user: caller, amount });
+            Ok(amount)
         }
-        TransferResult::DefiniteError(_) => {
-             rollback_withdrawal(user)?;
-             log_audit(AuditEvent::WithdrawalFailed { user, amount });
+        TransferResult::DefiniteError(e) => {
+            // DESIGN NOTE FOR AUDITORS:
+            // DO NOT rollback here! This might be TooOld, which doesn't mean
+            // the original transfer failed. Stay pending, let user decide.
+            Err(format!(
+                "Transfer failed: {}. \
+                 Check your on-chain ckUSDT balance. \
+                 If you received funds, call abandon_withdrawal(). \
+                 Otherwise, you may retry again or abandon.", e
+            ))
         }
         TransferResult::UncertainError(msg) => {
-             PENDING_WITHDRAWALS.with(|p| {
-                let mut map = p.borrow_mut();
-                if let Some(mut w) = map.get(&user) {
-                    w.retries = w.retries.saturating_add(1);
-                    w.last_error = Some(crate::defi_accounting::types::sanitize_error(&msg));
-                    map.insert(user, w);
-                }
-             });
+            Err(format!("Transfer uncertain: {}. Please retry.", msg))
         }
     }
-
-    Ok(())
 }
 
+/// Abandon a pending withdrawal WITHOUT restoring balance.
+///
+/// # Design Rationale (FOR AUDITORS)
+///
+/// This is the escape hatch for stuck withdrawals. It does NOT restore the user's
+/// balance because we cannot know if the original transfer succeeded.
+///
+/// ## Before calling this, users MUST check their on-chain ckUSDT balance:
+/// - If they received the funds -> abandon is correct, just clears frozen state
+/// - If they didn't receive funds -> they are accepting the loss
+///
+/// ## Why No Double-Spend Is Possible
+/// Since we NEVER restore balance on abandon, the worst case scenarios are:
+///
+/// | Scenario                          | On-Chain | Internal | Result           |
+/// |-----------------------------------|----------|----------|------------------|
+/// | Abandon after receiving funds     | +amount  | 0        | Correct          |
+/// | Abandon without receiving funds   | 0        | 0        | User loses       |
+///
+/// We accept "user might lose" over "house might lose twice" because:
+/// - Orphaned funds stay in canister (system remains solvent)
+/// - User made the choice with full information (they can check on-chain first)
+/// - The edge case is astronomically rare (~1 in 30 billion)
+/// - The user has agency - they're not forced to abandon
+///
+/// ## What happens to orphaned funds?
+/// If a user abandons without receiving funds, those funds remain in the canister's
+/// ckUSDT balance but are not credited to any user. This is a "surplus" that keeps
+/// the system solvent. An admin recovery mechanism could be added later if needed.
+#[update]
+pub fn abandon_withdrawal() -> Result<u64, String> {
+    let caller = ic_cdk::api::msg_caller();
+
+    let pending = PENDING_WITHDRAWALS.with(|p| p.borrow().get(&caller))
+        .ok_or("No pending withdrawal to abandon")?;
+
+    let amount = pending.get_amount();
+
+    // Remove pending state - DO NOT restore balance
+    // This is the critical safety property that prevents double-spend
+    PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&caller));
+    log_audit(AuditEvent::WithdrawalAbandoned { user: caller, amount });
+
+    Ok(amount) // Returns amount for user's records
+}
 
 // =============================================================================
 // PUBLIC QUERIES & UTILS

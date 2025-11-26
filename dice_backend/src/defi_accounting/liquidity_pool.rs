@@ -313,50 +313,57 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         Ok::<(), String>(())
     })?;
 
-    // Schedule Safe Withdrawal
-    match accounting::schedule_lp_withdrawal(caller, shares_to_burn.clone(), payout_nat.clone(), lp_amount) {
-        Ok(_) => {
-            // SAFE ACCOUNTING: Credit parent internally
-            // No ledger transfer needed, so we save the TRANSFER_FEE.
-            // PROTOCOL BENEFIT: Since no ledger transfer occurs, the saved TRANSFER_FEE
-            // is retained as protocol revenue.
-            if fee_amount > 0 {
-                 let parent = get_parent_principal();
-                 if !accounting::credit_parent_fee(parent, fee_amount) {
-                     // Parent is busy (pending withdrawal).
-                     // Return fee to the pool reserve (LPs get the bonus).
-                     // This ensures Reserve + Deposits == Canister Balance.
-                     POOL_STATE.with(|state| {
-                        let mut pool_state = state.borrow().get().clone();
-                        pool_state.reserve += Nat::from(fee_amount);
-                        state.borrow_mut().set(pool_state);
-                    });
-
-                    accounting::log_audit(crate::defi_accounting::types::AuditEvent::ParentFeeFallback {
-                        amount: fee_amount,
-                        reason: "Credit failed".to_string()
-                    });
-                 }
-            }
-
-            Ok(lp_amount)
-        }
+    // Schedule withdrawal and get created_at for transfer
+    let created_at = match accounting::schedule_lp_withdrawal(caller, shares_to_burn.clone(), payout_nat.clone(), lp_amount) {
+        Ok(ts) => ts,
         Err(e) => {
             // If scheduling fails (e.g. duplicate), rollback state immediately
-            
-            // 1. Restore shares
             LP_SHARES.with(|shares| {
                 shares.borrow_mut().insert(caller, StorableNat(user_shares));
             });
-
-            // 2. Restore reserve (add back FULL payout)
             POOL_STATE.with(|state| {
                 let mut pool_state = state.borrow().get().clone();
                 pool_state.reserve += payout_nat;
                 state.borrow_mut().set(pool_state);
             });
+            return Err(e);
+        }
+    };
 
-            Err(e)
+    // Credit parent fee (best-effort, before transfer attempt)
+    if fee_amount > 0 {
+        let parent = get_parent_principal();
+        if !accounting::credit_parent_fee(parent, fee_amount) {
+            // Parent busy - return fee to pool reserve
+            POOL_STATE.with(|state| {
+                let mut pool_state = state.borrow().get().clone();
+                pool_state.reserve += Nat::from(fee_amount);
+                state.borrow_mut().set(pool_state);
+            });
+            accounting::log_audit(crate::defi_accounting::types::AuditEvent::ParentFeeFallback {
+                amount: fee_amount,
+                reason: "Credit failed".to_string()
+            });
+        }
+    }
+
+    // Attempt transfer immediately (same pattern as user withdrawals)
+    match accounting::attempt_transfer(caller, lp_amount, created_at).await {
+        accounting::TransferResult::Success(_) => {
+            accounting::complete_withdrawal(caller, lp_amount);
+            Ok(lp_amount)
+        }
+        accounting::TransferResult::DefiniteError(err) => {
+            // Safe to rollback on initial attempt (fresh timestamp = TooOld impossible)
+            let _ = accounting::rollback_withdrawal(caller);
+            Err(err)
+        }
+        accounting::TransferResult::UncertainError(msg) => {
+            // Stay pending - user can call retry_withdrawal()
+            Err(format!(
+                "Withdrawal pending (uncertain outcome). \
+                 Call retry_withdrawal() to retry. Error: {}", msg
+            ))
         }
     }
 }

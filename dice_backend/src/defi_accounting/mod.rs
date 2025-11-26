@@ -7,6 +7,8 @@ pub mod statistics;
 // Re-export types and update functions from original modules
 pub use accounting::{
     update_balance,
+    retry_withdrawal,
+    abandon_withdrawal,
 };
 
 // Re-export query functions from query module

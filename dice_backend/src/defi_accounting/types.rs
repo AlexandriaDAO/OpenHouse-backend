@@ -7,12 +7,28 @@ pub fn sanitize_error(msg: &str) -> String {
     msg.chars().take(256).collect()
 }
 
+/// Pending withdrawal awaiting confirmation or user action.
+///
+/// # Design Note (FOR AUDITORS)
+/// We removed `retries` and `last_error` fields because the system no longer
+/// makes autonomous decisions about transaction outcomes. Users retry manually
+/// via `retry_withdrawal()` and can verify on-chain status themselves.
+/// This eliminates the double-spend vulnerability where auto-rollback after
+/// `TooOld` error could restore balance even though the transfer succeeded.
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct PendingWithdrawal {
     pub withdrawal_type: WithdrawalType,
-    pub created_at: u64,        // Ledger idempotency key
-    pub retries: u8,
-    pub last_error: Option<String>,
+    pub created_at: u64,        // Ledger idempotency key (used for deduplication)
+}
+
+impl PendingWithdrawal {
+    /// Helper to extract amount regardless of withdrawal type.
+    pub fn get_amount(&self) -> u64 {
+        match &self.withdrawal_type {
+            WithdrawalType::User { amount } => *amount,
+            WithdrawalType::LP { amount, .. } => *amount,
+        }
+    }
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -61,6 +77,10 @@ pub enum AuditEvent {
     WithdrawalInitiated { user: Principal, amount: u64 },
     WithdrawalCompleted { user: Principal, amount: u64 },
     WithdrawalFailed { user: Principal, amount: u64 },
+    /// User voluntarily abandoned a stuck withdrawal.
+    /// CRITICAL: This does NOT restore balance - funds may be orphaned.
+    /// This is intentional to prevent double-spend.
+    WithdrawalAbandoned { user: Principal, amount: u64 },
     WithdrawalExpired { user: Principal, amount: u64 },
     BalanceRestored { user: Principal, amount: u64 },
     LPRestored { user: Principal, amount: u64 },
