@@ -58,7 +58,7 @@ pub struct AccountingStats {
     pub unique_depositors: u64,
 }
 
-enum TransferResult {
+pub(crate) enum TransferResult {
     Success(u64),
     DefiniteError(String),
     UncertainError(String),
@@ -227,16 +227,11 @@ pub(crate) async fn withdraw_internal(user: Principal) -> Result<u64, String> {
 // LP WITHDRAWAL HELPERS
 // =============================================================================
 
-/// Schedule an LP withdrawal. The actual transfer must be triggered via retry_withdrawal().
-///
-/// # Design Note (FOR AUDITORS)
-/// LP withdrawals follow the same pattern as user withdrawals:
-/// - Shares are burned and pending state created
-/// - User must call retry_withdrawal() to complete the transfer
-/// - If stuck, user can call abandon_withdrawal() (no share restoration)
-pub fn schedule_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount: u64) -> Result<(), String> {
+/// Schedule an LP withdrawal and return the created_at timestamp for immediate transfer attempt.
+/// Returns the created_at timestamp needed for attempt_transfer().
+pub fn schedule_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount: u64) -> Result<u64, String> {
     if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
-        return Err("Withdrawal already pending. Call retry_withdrawal() to retry.".to_string());
+        return Err("Withdrawal already pending. Call retry_withdrawal() to retry or abandon_withdrawal() to cancel.".to_string());
     }
 
     let created_at = ic_cdk::api::time();
@@ -248,12 +243,7 @@ pub fn schedule_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount
     PENDING_WITHDRAWALS.with(|p| p.borrow_mut().insert(user, pending));
     log_audit(AuditEvent::WithdrawalInitiated { user, amount });
 
-    // NOTE: We removed the automatic spawn() call that processed the withdrawal.
-    // LP users now use retry_withdrawal() just like regular users.
-    // The immediate transfer attempt happens in withdraw_liquidity() which calls
-    // attempt_transfer directly after calling this function.
-
-    Ok(())
+    Ok(created_at)
 }
 
 
@@ -261,7 +251,7 @@ pub fn schedule_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount
 // INTERNAL CORE
 // =============================================================================
 
-async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> TransferResult {
+pub(crate) async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> TransferResult {
     let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID).expect("Invalid principal constant");
 
     let args = TransferArg {
@@ -286,7 +276,7 @@ async fn attempt_transfer(user: Principal, amount: u64, created_at: u64) -> Tran
     }
 }
 
-fn rollback_withdrawal(user: Principal) -> Result<(), String> {
+pub(crate) fn rollback_withdrawal(user: Principal) -> Result<(), String> {
     let pending = PENDING_WITHDRAWALS.with(|p| p.borrow().get(&user))
         .ok_or("No pending withdrawal")?;
 
@@ -308,6 +298,12 @@ fn rollback_withdrawal(user: Principal) -> Result<(), String> {
 
     PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&user));
     Ok(())
+}
+
+/// Mark a pending withdrawal as complete (transfer succeeded).
+pub(crate) fn complete_withdrawal(user: Principal, amount: u64) {
+    PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&user));
+    log_audit(AuditEvent::WithdrawalCompleted { user, amount });
 }
 
 
