@@ -6,7 +6,6 @@ pub enum OpResult {
     InsufficientPoolReserve,
     BelowMinimum,
     Overflow,
-    ZeroAmount,
 }
 
 #[derive(Debug, Clone)]
@@ -16,4 +15,5 @@ pub enum Operation {
     PlaceBet { user: u64, amount: u64, win: bool, multiplier_bps: u64 },
     LPDeposit { user: u64, amount: u64 },
     LPWithdraw { user: u64 },
+    WithdrawFees,
 }

@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use super::{Operation, OpResult};
 
-// Constants matching production (from types.rs)
-// const DECIMALS_PER_USDT: u64 = 1_000_000;
-const MIN_BET: u64 = 10_000;
-const LP_WITHDRAWAL_FEE_BPS: u64 = 100;
+// Constants matching production
+const MIN_BET: u64 = 10_000;              // 0.01 USDT (game.rs)
+const MIN_USER_DEPOSIT: u64 = 10_000_000; // 10 USDT (accounting.rs)
+const MIN_LP_DEPOSIT: u64 = 1_000_000;    // 1 USDT (liquidity_pool.rs)
+const LP_WITHDRAWAL_FEE_BPS: u64 = 100;   // 1%
 const MINIMUM_LIQUIDITY: u64 = 1000;
 
 pub struct AccountingModel {
@@ -19,6 +20,7 @@ pub struct AccountingModel {
     pub pool_reserve: u64,
 
     // Tracking for invariant checking
+    // Total funds in system (Reserve + User Balances + Accumulated Fees)
     pub total_system_funds: u64,
     pub accumulated_fees: u64,
 
@@ -87,14 +89,15 @@ impl AccountingModel {
                 self.place_bet(user, amount, win, multiplier_bps),
             Operation::LPDeposit { user, amount } => self.lp_deposit(user, amount),
             Operation::LPWithdraw { user } => self.lp_withdraw(user),
+            Operation::WithdrawFees => self.withdraw_fees(),
         }
     }
 
     // Each method mirrors exact production logic
     fn user_deposit(&mut self, user: u64, amount: u64) -> OpResult {
         // Mirror accounting.rs:170-176
-        if amount == 0 {
-             return OpResult::ZeroAmount;
+        if amount < MIN_USER_DEPOSIT {
+             return OpResult::BelowMinimum;
         }
         // Add amount to user balance
         let balance = self.user_balances.entry(user).or_insert(0);
@@ -132,72 +135,50 @@ impl AccountingModel {
             return OpResult::BelowMinimum;
         }
 
+        if multiplier_bps < 10000 {
+            // Casinos generally don't support sub-1x multipliers (loss guarantees)
+            return OpResult::BelowMinimum;
+        }
+
         // Check user has sufficient balance
         let balance = self.user_balances.entry(user).or_insert(0);
         if *balance < amount {
             return OpResult::InsufficientBalance;
         }
 
-        // Calculate potential payout
-        // multiplier is bps (e.g. 20000 = 2.0x)
-        // payout = amount * multiplier / 10000
-        // profit = payout - amount
-        // For Dice/Crash/etc, usually the payout includes the original bet.
-        
-        // Checking implementation details from plan context or typical logic.
-        // "Deduct bet from user"
-        
         let payout = (amount as u128 * multiplier_bps as u128 / 10000) as u64;
         
         if win {
-            let _profit = if payout > amount { payout - amount } else { 0 };
+            let profit = if payout > amount { payout - amount } else { 0 };
             
-            // Check if pool can afford it? 
-            // Usually max profit is capped by pool size, but here checking simple afford logic
-            // "If win: calculate payout, check pool can afford"
-            
-            // If payout > amount, the pool loses (payout - amount).
-            // If payout < amount (multiplier < 1x), pool gains.
-            
-            if payout > amount {
-                let amount_from_pool = payout - amount;
-                if self.pool_reserve < amount_from_pool {
-                    return OpResult::InsufficientPoolReserve;
-                }
-                // Deduct bet from user first?
-                // Logic: user balance -= amount.
-                // Then user balance += payout.
-                // Net: user balance += (payout - amount).
-                // Pool: pool reserve -= (payout - amount).
-                
-                *balance = balance.checked_sub(amount).unwrap(); // Deduct bet
-                *balance = balance.checked_add(payout).expect("User balance overflow"); // Add winnings
-                
-                self.pool_reserve = self.pool_reserve.checked_sub(amount_from_pool).unwrap();
-            } else {
-                 // Multiplier < 1.0x (Loss technically for user relative to bet)
-                 // amount_to_pool = amount - payout
-                 let amount_to_pool = amount - payout;
-                 *balance = balance.checked_sub(amount).unwrap();
-                 *balance = balance.checked_add(payout).unwrap();
-                 
-                 self.pool_reserve = self.pool_reserve.checked_add(amount_to_pool).expect("Pool overflow");
+            // Check if pool can afford profit
+            if self.pool_reserve < profit {
+                return OpResult::InsufficientPoolReserve;
             }
+
+            // Deduct bet from user, Add payout to user
+            *balance = balance.checked_sub(amount).unwrap(); 
+            *balance = balance.checked_add(payout).expect("User balance overflow");
+            
+            // Pool pays out Profit
+            // Note: In production (game.rs), pool is updated via update_pool_on_win(profit).
+            // This effectively reduces reserve by profit.
+            self.pool_reserve = self.pool_reserve.checked_sub(profit).unwrap();
+
         } else {
-            // Loss
-            // "If loss: add bet to pool"
+            // Loss: User loses bet, Pool gains bet
             *balance = balance.checked_sub(amount).unwrap();
             self.pool_reserve = self.pool_reserve.checked_add(amount).expect("Pool overflow");
         }
         
-        // total_system_funds unchanged (internal transfer)
+        // total_system_funds unchanged (internal transfer between user and pool)
         OpResult::Success
     }
 
     fn lp_deposit(&mut self, user: u64, amount: u64) -> OpResult {
         // Mirror liquidity_pool.rs:126-231
-        if amount == 0 {
-            return OpResult::ZeroAmount;
+        if amount < MIN_LP_DEPOSIT {
+            return OpResult::BelowMinimum;
         }
 
         // Calculate shares: (amount * total_shares) / pool_reserve
@@ -212,31 +193,23 @@ impl AccountingModel {
             let shares_minted = amount - MINIMUM_LIQUIDITY;
             shares = shares_minted;
             
-            // Burned shares
-            // The plan says "Burn MINIMUM_LIQUIDITY to address 0"
-            // But usually burned shares means total_shares increases but they aren't assigned to user?
-            // Or assigned to 0?
-            // "Burn MINIMUM_LIQUIDITY to address 0 (mirrors liquidity_pool.rs:214)"
-            
+            // Burn MINIMUM_LIQUIDITY shares to address 0
+            // Note: In production, these are added to total_shares when burned.
+            // Then user shares are added to total_shares.
+            // Total = MINIMUM + (amount - MINIMUM) = amount.
             let burned_shares = MINIMUM_LIQUIDITY;
-            // We track burned shares as shares held by 0? Or just exist in total_shares but nobody holds them?
-            // Usually uniswap V2 burns by sending to address 0.
-            // Let's assign to 0 to keep accounting clean (sum of shares == total_shares)
             *self.lp_shares.entry(0).or_insert(0) += burned_shares;
             self.total_shares += burned_shares;
         } else {
             // amount * total_shares / pool_reserve
-            // Use u128 for calc
             if self.pool_reserve == 0 {
-                // Should not happen if total_shares > 0 usually, unless reserve drained fully?
-                // If reserve is 0 but shares > 0, new deposit gets shares?
-                // Typically undefined or 0.
-                // If reserve is 0, shares = amount?
-                // Let's assume standard proportional
-                shares = (amount as u128 * self.total_shares as u128 / self.pool_reserve as u128) as u64;
-            } else {
-                shares = (amount as u128 * self.total_shares as u128 / self.pool_reserve as u128) as u64;
+                // CRITICAL FIX: Prevent division by zero
+                // If reserve is 0 but shares > 0 (e.g. depleted pool), 
+                // assigning shares is tricky. Production code returns 0 shares in this case?
+                // liquidity_pool.rs:148: if current_reserve == 0 { return Ok(0); }
+                return OpResult::BelowMinimum; // effectively 0 shares
             }
+            shares = (amount as u128 * self.total_shares as u128 / self.pool_reserve as u128) as u64;
         }
         
         if shares == 0 {
@@ -264,10 +237,7 @@ impl AccountingModel {
             return OpResult::InsufficientShares;
         }
 
-        // Withdraw ALL shares? Plan: "Operation::LPWithdraw { user }" -> implies all?
-        // Or maybe just "withdraw" action.
-        // Usually simpler to test withdraw all or random amount.
-        // The plan says "Remove user shares" -> implies all for the simplified operation.
+        // Withdraw ALL shares
         let shares_to_withdraw = user_shares;
 
         // Calculate payout: (shares * pool_reserve) / total_shares
@@ -281,25 +251,13 @@ impl AccountingModel {
         self.lp_shares.remove(&user);
         self.total_shares -= shares_to_withdraw;
 
-        // Deduct payout from pool_reserve
-        // Note: pool_reserve reduces by gross_payout?
-        // Usually: reserve reduces by gross_payout.
-        // User gets net_payout.
-        // Fee goes to fee accumulator?
-        // "Deduct payout from pool_reserve" -> ambiguous if gross or net.
-        // "Add fee to accumulated_fees"
-        // "Deduct (payout - fee) from total_system_funds" -> this implies user leaves with net_payout.
-        // So pool_reserve must lose gross_payout?
-        // No, fee stays in system (accumulated_fees).
-        // So pool_reserve loses gross_payout.
-        // accumulated_fees gains fee.
-        // Wait, if reserve loses gross, where does fee go?
-        // Typically fee stays in pool or goes to separate pot.
-        // Plan: "Add fee to accumulated_fees". "Deduct (payout - fee) from total_system_funds".
-        // Since total_system_funds = reserve + users + fees.
-        // If we reduce reserve by gross, add fee to fees.
-        // Then total funds change = -gross + fee = -net.
-        // This matches "Deduct (payout - fee) from total_system_funds".
+        // Fee Accounting Flow:
+        // 1. Reserve is reduced by GROSS payout (money leaves pool)
+        // 2. Fee is added to accumulated_fees (money stays in system/parent)
+        // 3. User receives NET payout (money leaves system)
+        //
+        // Total System Funds Change:
+        // - Gross (from reserve) + Fee (retained) = - (Gross - Fee) = - Net
         
         self.pool_reserve = self.pool_reserve.checked_sub(gross_payout).expect("Pool reserve underflow");
         self.accumulated_fees = self.accumulated_fees.checked_add(fee).expect("Fees overflow");
@@ -307,6 +265,17 @@ impl AccountingModel {
         // User gets net_payout (simulated by leaving system)
         self.total_system_funds = self.total_system_funds.checked_sub(net_payout).expect("System funds underflow");
 
+        OpResult::Success
+    }
+
+    fn withdraw_fees(&mut self) -> OpResult {
+        // Simulate auto_withdraw_parent
+        if self.accumulated_fees == 0 {
+            return OpResult::Success;
+        }
+        let amount = self.accumulated_fees;
+        self.accumulated_fees = 0;
+        self.total_system_funds = self.total_system_funds.checked_sub(amount).expect("System funds underflow");
         OpResult::Success
     }
 }

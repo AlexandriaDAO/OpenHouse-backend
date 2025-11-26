@@ -6,12 +6,13 @@ pub fn user_id() -> impl Strategy<Value = u64> {
     1..=100u64
 }
 
-// Deposit amounts: mix of small/medium/large
+// Deposit amounts: mix of small (but valid), medium, large
 pub fn deposit_amount() -> impl Strategy<Value = u64> {
     prop_oneof![
-        (10_000..1_000_000u64),           // 0.01 - 1 USDT
-        (1_000_000..100_000_000u64),      // 1 - 100 USDT
-        (100_000_000..10_000_000_000u64), // 100 - 10,000 USDT
+        (10_000_000..100_000_000u64),      // 10 - 100 USDT (Valid User Deposits)
+        (100_000_000..10_000_000_000u64),  // 100 - 10,000 USDT
+        // Note: We exclude < 10 USDT to avoid BelowMinimum noise in general tests,
+        // but edge case tests explicitly check small amounts.
     ]
 }
 
@@ -46,6 +47,7 @@ pub fn operation() -> impl Strategy<Value = Operation> {
         4 => (user_id(), bet_amount(), win_probability(), multiplier_bps()).prop_map(|(user, amount, win, multiplier_bps)| Operation::PlaceBet { user, amount, win, multiplier_bps }),      // 20%
         10 => (user_id(), deposit_amount()).prop_map(|(user, amount)| Operation::LPDeposit { user, amount }),    // 50%
         2 => user_id().prop_map(|user| Operation::LPWithdraw { user }),    // 10%
+        1 => Just(Operation::WithdrawFees), // 5% roughly
     ]
 }
 
