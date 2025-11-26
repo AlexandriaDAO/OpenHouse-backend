@@ -72,7 +72,7 @@ export const DiceLiquidityPanel: React.FC = () => {
 
       // Validate (Min 10 USDT)
       if (amount < BigInt(10_000_000)) {
-        setError('Minimum deposit is 10 USDT');
+        setError('Minimum LP deposit is 10 USDT');
         setIsDepositing(false);
         return;
       }

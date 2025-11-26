@@ -12,7 +12,7 @@ use super::accounting;
 // Constants
 
 const MINIMUM_LIQUIDITY: u64 = 1000;
-const MIN_DEPOSIT: u64 = 1_000_000; // 1 USDT minimum for LP (lower than regular deposits to encourage liquidity)
+const MIN_DEPOSIT: u64 = 10_000_000; // 10 USDT minimum for LP (higher barrier than user deposits)
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.1 USDT
 const MIN_OPERATING_BALANCE: u64 = 100_000_000; // 100 USDT to operate games
 const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
@@ -158,7 +158,7 @@ fn calculate_shares_for_deposit(amount_nat: &Nat) -> Result<Nat, String> {
 pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) -> Result<Nat, String> {
     // Validate
     if amount < MIN_DEPOSIT {
-        return Err(format!("Minimum deposit is {} e8s", MIN_DEPOSIT));
+        return Err(format!("Minimum LP deposit is {} USDT", MIN_DEPOSIT / 1_000_000));
     }
 
     let caller = ic_cdk::api::msg_caller();

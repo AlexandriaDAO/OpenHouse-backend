@@ -9,7 +9,7 @@ pub fn user_id() -> impl Strategy<Value = u64> {
 // Deposit amounts: mix of small (but valid), medium, large
 pub fn deposit_amount() -> impl Strategy<Value = u64> {
     prop_oneof![
-        (10_000_000..100_000_000u64),      // 10 - 100 USDT (Valid User Deposits)
+        (1_000_000..100_000_000u64),       // 1 - 100 USDT (Valid User Deposits)
         (100_000_000..10_000_000_000u64),  // 100 - 10,000 USDT
         // Note: We exclude < 10 USDT to avoid BelowMinimum noise in general tests,
         // but edge case tests explicitly check small amounts.

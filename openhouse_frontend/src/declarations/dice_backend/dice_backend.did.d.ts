@@ -54,10 +54,15 @@ export interface _SERVICE {
     { 'Ok' : [number, number] } |
       { 'Err' : string }
   >,
+  'calculate_shares_preview' : ActorMethod<
+    [bigint],
+    { 'Ok' : bigint } |
+      { 'Err' : string }
+  >,
   'can_accept_bets' : ActorMethod<[], boolean>,
   'deposit' : ActorMethod<[bigint], { 'Ok' : bigint } | { 'Err' : string }>,
   'deposit_liquidity' : ActorMethod<
-    [bigint],
+    [bigint, [] | [bigint]],
     { 'Ok' : bigint } |
       { 'Err' : string }
   >,

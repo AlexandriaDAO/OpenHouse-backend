@@ -96,7 +96,7 @@ export function DiceGame() {
   const [showOddsExplainer, setShowOddsExplainer] = useState(false);
 
   // Accounting State
-  const [depositAmount, setDepositAmount] = useState('10');
+  const [depositAmount, setDepositAmount] = useState('1');
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [isDepositing, setIsDepositing] = useState(false);
   const [depositStep, setDepositStep] = useState<'idle' | 'approving' | 'depositing'>('idle');
@@ -155,9 +155,9 @@ export function DiceGame() {
     try {
       const amount = BigInt(Math.floor(parseFloat(depositAmount) * DECIMALS_PER_CKUSDT));
 
-      // Min deposit 10 USDT for game balance
-      if (amount < BigInt(10_000_000)) {
-        setAccountingError('Minimum deposit is 10 USDT');
+      // Min deposit 1 USDT for game balance
+      if (amount < BigInt(1_000_000)) {
+        setAccountingError('Minimum deposit is 1 USDT');
         setIsDepositing(false);
         return;
       }
@@ -197,7 +197,7 @@ export function DiceGame() {
 
       if ('Ok' in result) {
         setAccountingSuccess(`Bought ${depositAmount} USDT in chips!`);
-        setDepositAmount('10');
+        setDepositAmount('1');
         setShowDepositModal(false);
         await refreshWalletBalance();
         gameBalanceContext.refresh();
@@ -649,8 +649,8 @@ export function DiceGame() {
                   value={depositAmount}
                   onChange={(e) => setDepositAmount(e.target.value)}
                   className="w-full bg-black/50 border border-gray-600 rounded-lg px-4 py-3 text-white text-lg focus:border-dfinity-turquoise focus:outline-none transition"
-                  placeholder="10.0"
-                  min="10"
+                  placeholder="1.0"
+                  min="1"
                   step="1"
                   disabled={isDepositing}
                   autoFocus
@@ -659,7 +659,7 @@ export function DiceGame() {
               </div>
               <div className="flex justify-between items-center mt-2">
                 <p className="text-xs text-gray-500">Wallet: {formatUSDT(walletBalance)}</p>
-                <p className="text-xs text-gray-500">Min: 10 USDT</p>
+                <p className="text-xs text-gray-500">Min: 1 USDT</p>
               </div>
             </div>
 

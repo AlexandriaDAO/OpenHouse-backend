@@ -74,10 +74,19 @@ service : {
   refresh_canister_balance: () -> (nat64);
 
   // Liquidity Pool Management
-  deposit_liquidity : (nat64) -> (variant { Ok: nat; Err: text });
+  // Deposit liquidity into the pool
+  // Args:
+  //   amount: Amount to deposit in e8s (min 10 USDT for LP deposits)
+  //   min_shares_expected: Optional minimum shares to accept (for slippage protection)
+  // Returns: Number of LP shares minted
+  deposit_liquidity : (nat64, opt nat) -> (variant { Ok: nat; Err: text });
   withdraw_all_liquidity : () -> (variant { Ok: nat64; Err: text });
 
   // LP Queries
+  // WARNING: This is a query call. Actual shares may differ due to concurrent 
+  // state changes. ALWAYS use min_shares_expected parameter for slippage protection.
+  // Do NOT rely on this preview for exact share amounts as state may change by the time your tx executes.
+  calculate_shares_preview : (nat64) -> (variant { Ok: nat; Err: text }) query;
   get_lp_position : (principal) -> (LPPosition) query;
   get_my_lp_position : () -> (LPPosition) query;
   get_pool_stats : () -> (PoolStats) query;

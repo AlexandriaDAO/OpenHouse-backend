@@ -8,7 +8,7 @@ const LP_INFO_TEXT = `Liquidity Pool Mechanics:
 • Share price = Total Reserve / Total Shares
 • Earn as players lose (1% house edge)
 • Withdraw anytime (1% fee applies)
-• Minimum deposit: 1 USDT
+• Minimum deposit: 10 USDT
 • Minimum withdrawal: 0.1 USDT`;
 
 const HOW_IT_WORKS_DETAILS = `Share Price Calculation:

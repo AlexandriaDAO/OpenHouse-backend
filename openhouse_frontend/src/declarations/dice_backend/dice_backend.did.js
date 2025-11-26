@@ -59,6 +59,11 @@ export const idlFactory = ({ IDL }) => {
         ],
         ['query'],
       ),
+    'calculate_shares_preview' : IDL.Func(
+        [IDL.Nat64],
+        [IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text })],
+        ['query'],
+      ),
     'can_accept_bets' : IDL.Func([], [IDL.Bool], ['query']),
     'deposit' : IDL.Func(
         [IDL.Nat64],
@@ -66,7 +71,7 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'deposit_liquidity' : IDL.Func(
-        [IDL.Nat64],
+        [IDL.Nat64, IDL.Opt(IDL.Nat)],
         [IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text })],
         [],
       ),

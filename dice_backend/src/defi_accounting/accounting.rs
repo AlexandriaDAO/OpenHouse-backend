@@ -13,7 +13,7 @@ use super::liquidity_pool;
 use super::types::{PendingWithdrawal, WithdrawalType, AuditEntry, AuditEvent};
 
 // Constants
-const MIN_DEPOSIT: u64 = 10_000_000; // 10 USDT
+const MIN_DEPOSIT: u64 = 1_000_000; // 1 USDT
 const MIN_WITHDRAW: u64 = 1_000_000; // 1 USDT
 const USER_BALANCES_MEMORY_ID: u8 = 10;
 const PENDING_WITHDRAWALS_MEMORY_ID: u8 = 20;

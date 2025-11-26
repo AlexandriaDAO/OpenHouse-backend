@@ -76,7 +76,7 @@ service : {
   // Liquidity Pool Management
   // Deposit liquidity into the pool
   // Args:
-  //   amount: Amount to deposit in e8s (min 1 USDT)
+  //   amount: Amount to deposit in e8s (min 10 USDT for LP deposits)
   //   min_shares_expected: Optional minimum shares to accept (for slippage protection)
   // Returns: Number of LP shares minted
   deposit_liquidity : (nat64, opt nat) -> (variant { Ok: nat; Err: text });

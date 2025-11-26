@@ -3,8 +3,8 @@ use super::{Operation, OpResult};
 
 // Constants matching production
 const MIN_BET: u64 = 10_000;              // 0.01 USDT (game.rs)
-const MIN_USER_DEPOSIT: u64 = 10_000_000; // 10 USDT (accounting.rs)
-const MIN_LP_DEPOSIT: u64 = 1_000_000;    // 1 USDT (liquidity_pool.rs)
+const MIN_USER_DEPOSIT: u64 = 1_000_000; // 1 USDT (accounting.rs)
+const MIN_LP_DEPOSIT: u64 = 10_000_000;    // 10 USDT (liquidity_pool.rs)
 const LP_WITHDRAWAL_FEE_BPS: u64 = 100;   // 1%
 const MINIMUM_LIQUIDITY: u64 = 1000;
 

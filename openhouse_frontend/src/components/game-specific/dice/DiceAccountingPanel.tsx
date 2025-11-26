@@ -29,7 +29,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
   const gameBalanceContext = useGameBalance('dice');
   const houseBalance = gameBalanceContext.balance.house;
 
-  const [depositAmount, setDepositAmount] = useState('10');
+  const [depositAmount, setDepositAmount] = useState('1');
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [isDepositing, setIsDepositing] = useState(false);
   const [depositStep, setDepositStep] = useState<'idle' | 'approving' | 'depositing'>('idle');
@@ -48,9 +48,9 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
     try {
       const amount = BigInt(Math.floor(parseFloat(depositAmount) * DECIMALS_PER_CKUSDT));
 
-      // Validate amount (Min 10 USDT)
-      if (amount < BigInt(10_000_000)) {
-        setError('Minimum deposit is 10 USDT');
+      // Validate amount (Min 1 USDT)
+      if (amount < BigInt(1_000_000)) {
+        setError('Minimum deposit is 1 USDT');
         setIsDepositing(false);
         return;
       }
@@ -94,7 +94,7 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
       if ('Ok' in result) {
         const newBalance = result.Ok;
         setSuccess(`💰 Bought ${depositAmount} USDT in chips! New balance: ${formatUSDT(newBalance)}`);
-        setDepositAmount('10');
+        setDepositAmount('1');
         setShowDepositModal(false);
 
         // Refresh all balances
@@ -238,12 +238,12 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
                 onChange={(e) => setDepositAmount(e.target.value)}
                 className="w-full bg-gray-900/50 border border-gray-700 rounded px-4 py-2 text-white"
                 placeholder="Enter amount"
-                min="10"
+                min="1"
                 step="1"
                 disabled={isDepositing}
                 autoFocus
               />
-              <p className="text-xs text-gray-500 mt-1">Minimum: 10 USDT</p>
+              <p className="text-xs text-gray-500 mt-1">Minimum: 1 USDT</p>
               <p className="text-xs text-blue-400 mt-2 bg-blue-900/20 border border-blue-500/20 rounded px-2 py-1">
                 ℹ️ Deposit requires two steps: approve spending, then transfer
               </p>
