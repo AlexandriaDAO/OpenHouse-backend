@@ -183,6 +183,27 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
         return Err("Deposit too small: results in 0 shares".to_string());
     }
 
+    // Validation: Check min_shares parameters (P2 fix)
+    if let Some(min_shares) = &min_shares_expected {
+        if min_shares == &Nat::from(0u64) {
+             return Err("min_shares_expected must be > 0".to_string());
+        }
+        if min_shares > &projected_shares {
+             return Err(format!(
+                 "min_shares_expected ({}) exceeds projected shares ({}) based on current pool state",
+                 min_shares, projected_shares
+             ));
+        }
+        
+        // P0 FIX: Check slippage BEFORE transfer to save user fees
+        if &projected_shares < min_shares {
+             return Err(format!(
+                "Slippage exceeded (Pre-Flight): expected min {} shares but would receive {} based on current pool state. Transaction cancelled to save transfer fees.",
+                min_shares, projected_shares
+            ));
+        }
+    }
+
     // Transfer from user (requires prior ICRC-2 approval)
     match transfer_from_user(caller, amount).await {
         Err(e) => return Err(format!("Transfer failed: {}", e)),
@@ -190,9 +211,10 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
     }
 
     // Calculate shares to mint (reuse shared logic)
+    // Note: State could have changed during await above
     let shares_to_mint = calculate_shares_for_deposit(&amount_nat)?;
 
-    // Slippage protection: if shares below minimum, refund to betting balance
+    // Slippage protection (Post-Transfer): if shares below minimum, refund to betting balance
     if let Some(min_shares) = min_shares_expected {
         if shares_to_mint < min_shares {
             // Log the slippage event
@@ -206,9 +228,15 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
             // Refund to user's betting balance (safe - they can withdraw normally)
             accounting::credit_balance(caller, amount)?;
 
+            // P5 FIX: Actionable error message
             return Err(format!(
-                "Slippage exceeded: expected min {} shares but would receive {} (pool conditions changed). Your {} e8s has been credited to your betting balance. You can withdraw it or try depositing again with adjusted parameters.",
-                min_shares, shares_to_mint, amount
+                "Slippage exceeded: expected min {} shares but would receive {} (pool conditions changed during transfer). \n\
+                Your {} e8s has been credited to your betting balance. \n\
+                Next steps: \n\
+                1. Call calculate_shares_preview({}) to get updated share estimate \n\
+                2. Try depositing again with adjusted min_shares_expected \n\
+                3. Or withdraw your balance via withdraw_balance()",
+                min_shares, shares_to_mint, amount, amount
             ));
         }
     }
