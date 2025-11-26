@@ -1,11 +1,18 @@
-Status
+## Status
 
-- Fixed crit-1 in https://github.com/AlexandriaDAO/OpenHouse/pull/99/files
-
-
-- High-1 is real
-- High-3 is real
-- crit 3 is real
+- **CRIT-1**: Fixed in https://github.com/AlexandriaDAO/OpenHouse/pull/99
+- **CRIT-2**: Fixed in https://github.com/AlexandriaDAO/OpenHouse/pull/101
+- **CRIT-3**: Invalid — no await point between share capture and rollback, IC atomic execution prevents the described race condition.
+- **HIGH-1**: Fixed — audit log now prunes at 1000 entries via `MAX_AUDIT_ENTRIES` and `prune_oldest_audit_entries()`.
+- **HIGH-2**: Invalid — confusing UX at worst; the pending withdrawal check correctly prevents double-spending.
+- **HIGH-3**: N/A — parent canister is trusted and under our control.
+- **HIGH-4**: Invalid — "blockchain is transparent" is not a vulnerability.
+- **MED-1**: Invalid — audit self-corrected; u64 with 6 decimals holds ~18 trillion USDT.
+- **MED-2**: Downgrade to INFO — stale cache only affects audit display, not fund safety.
+- **MED-3**: Invalid — accounting complexity is not a vulnerability; money is never lost.
+- **MED-4**: Invalid — expected Uniswap v2 pattern; 0.001 USDT burn on first deposit is by design.
+- **LOW-1 through LOW-5**: Tech debt or explicitly marked "not a vulnerability" / "acceptable risk" in the audit itself.
+- **INFO-1 through INFO-5**: Informational only.
 
 
 
@@ -171,7 +178,7 @@ if pending.retries >= MAX_RETRIES {
 
 --- -->
 
-### CRIT-2: LP Share Dilution via Concurrent Deposit Race Condition
+<!-- ### CRIT-2: LP Share Dilution via Concurrent Deposit Race Condition
 
 **Location:** `liquidity_pool.rs:180-231`
 
@@ -213,7 +220,7 @@ let shares_to_mint = calculate_shares_for_deposit(&amount_nat)?;
 **Recommendation:**
 - Store the calculated shares from pre-flight and use that exact value
 - Or implement slippage protection (min_shares_expected parameter)
-- Or use atomic operations with snapshot isolation
+- Or use atomic operations with snapshot isolation -->
 
 ---
 
