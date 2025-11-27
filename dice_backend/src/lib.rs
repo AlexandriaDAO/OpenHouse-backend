@@ -160,7 +160,7 @@ fn audit_balances() -> Result<String, String> {
 
 #[update]
 async fn refresh_canister_balance() -> u64 {
-    defi_accounting::accounting::get_canister_balance().await
+    defi_accounting::accounting::refresh_canister_balance().await
 }
 
 // =============================================================================
