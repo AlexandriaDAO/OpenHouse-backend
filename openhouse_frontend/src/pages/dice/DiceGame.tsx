@@ -26,45 +26,6 @@ interface MinimalGameResult {
   payout: bigint;
 }
 
-// Helper component for inline house status
-const HouseStatusInline: React.FC <{
-  houseBalance: bigint;
-  betAmount: number;
-  multiplier: number;
-}> = ({ houseBalance, betAmount, multiplier }) => {
-  const houseBalanceUSDT = Number(houseBalance) / DECIMALS_PER_CKUSDT;
-  const maxAllowedPayout = houseBalanceUSDT * 0.1;
-  const currentPotentialPayout = betAmount * multiplier;
-  const utilizationPct = maxAllowedPayout > 0
-    ? (currentPotentialPayout / maxAllowedPayout) * 100
-    : 0;
-
-  let statusColor = 'text-green-400';
-  let statusText = 'Healthy';
-
-  if (utilizationPct > 90) {
-    statusColor = 'text-red-400';
-    statusText = 'At Limit';
-  } else if (utilizationPct > 70) {
-    statusColor = 'text-yellow-400';
-    statusText = 'Near Limit';
-  }
-
-  return (
-    <div className="text-xs text-gray-400 bg-gray-800/30 rounded p-2 mt-4">
-      <div className="flex justify-between items-center">
-        <span>House Status</span>
-        <span className={`font-bold ${statusColor}`}>{statusText}</span>
-      </div>
-      {utilizationPct > 70 && (
-        <div className={`text-center mt-1 ${statusColor}`}>
-          Using {utilizationPct.toFixed(0)}% of house limit
-        </div>
-      )}
-    </div>
-  );
-};
-
 export function DiceGame() {
   const { actor } = useDiceActor();
   const { actor: ledgerActor } = useLedgerActor();
@@ -371,74 +332,53 @@ export function DiceGame() {
       {/* UNIFIED GAME CARD */}
       <div className="card max-w-5xl mx-auto bg-gray-900/50 border border-gray-700/50">
 
-        {/* INLINE BALANCE BAR */}
-        <div className="mb-6 pb-4 border-b border-gray-700/50">
+        {/* COMPACT TOP BAR */}
+        <div className="mb-4 flex items-center justify-between text-xs">
           {!isAuthenticated ? (
-            <p className="text-center text-gray-400 text-sm">Please log in to play</p>
+            <p className="text-gray-400">Please log in to play</p>
           ) : (
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-              {/* Left: Balances */}
-              <div className="flex gap-6 text-sm bg-gray-800/40 px-4 py-2 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-400">Wallet:</span>
-                  <span className="font-mono font-bold text-green-400">{formatUSDT(walletBalance)}</span>
-                </div>
-                <div className="w-px h-4 bg-gray-700"></div>
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-400">Game:</span>
-                  <div className="flex items-center gap-2">
-                    <ChipStack
-                      amount={Number(balance.game) / 1_000_000}
-                      maxChipsShown={5}
-                      showValue={false}
-                      size="sm"
-                    />
-                    <span className="font-mono font-bold text-blue-400">{formatUSDT(balance.game)}</span>
-                  </div>
-                </div>
-                <div className="w-px h-4 bg-gray-700 hidden sm:block"></div>
-                <div className="flex items-center gap-2 hidden sm:flex">
-                  <span className="text-gray-400">House:</span>
-                  <span className="font-mono font-bold text-yellow-400">{formatUSDT(balance.house)}</span>
-                </div>
+            <>
+              {/* Compact balance display */}
+              <div className="flex items-center gap-3 text-gray-400">
+                <span>
+                  Chips: <span className="font-mono text-blue-400">{formatUSDT(balance.game)}</span>
+                </span>
+                <span className="text-gray-600">|</span>
+                <span>
+                  Wallet: <span className="font-mono text-gray-500">{formatUSDT(walletBalance)}</span>
+                </span>
               </div>
 
-              {/* Right: Actions */}
-              <div className="flex gap-2">
+              {/* Compact actions */}
+              <div className="flex items-center gap-2">
                 <button
                   onClick={() => setShowDepositModal(true)}
-                  className={`px-4 py-1.5 bg-dfinity-turquoise text-pure-black text-sm font-bold rounded hover:bg-dfinity-turquoise/90 transition ${showDepositAnimation ? 'animate-pulse ring-2 ring-yellow-400' : ''}`}
+                  className={`px-3 py-1 text-xs font-bold rounded transition ${
+                    showDepositAnimation
+                      ? 'bg-yellow-500 text-black animate-pulse'
+                      : 'bg-dfinity-turquoise/80 text-black hover:bg-dfinity-turquoise'
+                  }`}
                 >
-                  Buy Chips
+                  + Chips
                 </button>
                 <button
                   onClick={handleWithdrawAll}
                   disabled={isWithdrawing || balance.game === 0n}
-                  className="px-4 py-1.5 bg-gray-700 text-white text-sm font-bold rounded hover:bg-gray-600 transition disabled:opacity-50"
+                  className="px-3 py-1 text-xs text-gray-400 hover:text-white transition disabled:opacity-30"
                 >
-                  {isWithdrawing ? '...' : 'Cash Out'}
-                </button>
-                <button
-                  onClick={() => {
-                    refreshWalletBalance();
-                    gameBalanceContext.refresh();
-                  }}
-                  className="px-3 py-1.5 bg-gray-800 text-gray-400 hover:text-white rounded transition"
-                  title="Refresh Balances"
-                >
-                  Refresh
+                  Cash Out
                 </button>
               </div>
-            </div>
-          )}
-
-          {/* Accounting Messages */}
-          {(accountingError || accountingSuccess) && (
-            <div className={`mt-3 text-center text-xs py-1 rounded ${accountingError ? 'text-red-400 bg-red-900/20' : 'text-green-400 bg-green-900/20'}`}>
-              {accountingError || accountingSuccess}
-            </div>
+            </>
           )}
         </div>
+
+        {/* Accounting Messages */}
+        {(accountingError || accountingSuccess) && (
+          <div className={`mb-4 text-center text-xs py-1.5 rounded ${accountingError ? 'text-red-400 bg-red-900/20' : 'text-green-400 bg-green-900/20'}`}>
+            {accountingError || accountingSuccess}
+          </div>
+        )}
 
         {/* MAIN GAME AREA: Side-by-Side */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
@@ -452,6 +392,17 @@ export function DiceGame() {
               gameBalance={balance.game}
               maxBet={maxBet}
               disabled={isPlaying}
+              houseLimitStatus={
+                (() => {
+                  const houseBalanceUSDT = Number(balance.house) / DECIMALS_PER_CKUSDT;
+                  const maxAllowedPayout = houseBalanceUSDT * 0.1;
+                  const currentPotentialPayout = betAmount * multiplier;
+                  const utilizationPct = maxAllowedPayout > 0 ? (currentPotentialPayout / maxAllowedPayout) * 100 : 0;
+                  if (utilizationPct > 90) return 'danger';
+                  if (utilizationPct > 70) return 'warning';
+                  return 'healthy';
+                })()
+              }
             />
 
             <DiceControls
@@ -462,36 +413,27 @@ export function DiceGame() {
               disabled={isPlaying}
             />
 
-            {/* Inline Stats with Help Button */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Payout Info</span>
+            {/* Compact payout summary - just potential win and multiplier inline */}
+            <div className="flex items-center justify-between text-xs px-1">
+              <div className="flex items-center gap-4 text-gray-400">
+                <span>
+                  <span className="text-yellow-400 font-bold">{winChance.toFixed(0)}%</span> chance
+                </span>
+                <span>
+                  <span className="text-green-400 font-bold">{multiplier.toFixed(2)}x</span> payout
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-dfinity-turquoise font-mono font-bold">
+                  Win ${(betAmount * multiplier).toFixed(2)}
+                </span>
                 <button
-                  onClick={() => setShowOddsExplainer(!showOddsExplainer)}
-                  className="w-5 h-5 rounded-full bg-dfinity-turquoise/20 text-dfinity-turquoise hover:bg-dfinity-turquoise/30 flex items-center justify-center text-xs font-bold transition"
+                  onClick={() => setShowOddsExplainer(true)}
+                  className="text-gray-500 hover:text-dfinity-turquoise transition"
                   title="How odds work"
                 >
                   ?
                 </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center">
-                  <span className="text-gray-400 text-xs">Win Chance</span>
-                  <span className="font-bold text-yellow-400">{winChance.toFixed(1)}%</span>
-                </div>
-                <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center">
-                  <span className="text-gray-400 text-xs">Multiplier</span>
-                  <span className="font-bold text-green-400">{multiplier.toFixed(2)}x</span>
-                </div>
-                <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center">
-                  <span className="text-gray-400 text-xs">Max Bet</span>
-                  <span className="font-bold text-blue-400">{maxBet.toFixed(2)} USDT</span>
-                </div>
-                <div className="bg-gray-800/30 rounded p-3 flex justify-between items-center border border-dfinity-turquoise/20">
-                  <span className="text-gray-400 text-xs">Potential Win</span>
-                  <span className="font-bold text-dfinity-turquoise">{(betAmount * multiplier).toFixed(2)} USDT</span>
-                </div>
               </div>
             </div>
 
@@ -570,12 +512,6 @@ export function DiceGame() {
                 </div>
               </div>
             )}
-
-            <HouseStatusInline
-              houseBalance={balance.house}
-              betAmount={betAmount}
-              multiplier={multiplier}
-            />
 
             <GameButton
               onClick={rollDice}

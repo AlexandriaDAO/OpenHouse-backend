@@ -8,12 +8,15 @@ import {
 import { ChipStack } from './ChipStack';
 import { DECIMALS_PER_CKUSDT } from '../../../types/balance';
 
+type HouseLimitStatus = 'healthy' | 'warning' | 'danger';
+
 interface ChipBettingProps {
   betAmount: number;
   onBetChange: (amount: number) => void;
   gameBalance: bigint;
   maxBet: number;
   disabled?: boolean;
+  houseLimitStatus?: HouseLimitStatus;
 }
 
 export const ChipBetting: React.FC<ChipBettingProps> = ({
@@ -22,6 +25,7 @@ export const ChipBetting: React.FC<ChipBettingProps> = ({
   gameBalance,
   maxBet,
   disabled = false,
+  houseLimitStatus = 'healthy',
 }) => {
   // Track chip history for LIFO undo (stores chip values in order added)
   const [chipHistory, setChipHistory] = useState<number[]>([]);
@@ -77,91 +81,98 @@ export const ChipBetting: React.FC<ChipBettingProps> = ({
     onBetChange(0);
   }, [onBetChange, disabled]);
 
+  // Border color based on house limit status
+  const borderClass = houseLimitStatus === 'danger'
+    ? 'border-red-500/70 shadow-lg shadow-red-500/20'
+    : houseLimitStatus === 'warning'
+    ? 'border-yellow-500/50'
+    : 'border-gray-700/50';
+
   return (
-    <div className="space-y-4">
-      {/* Current Bet Display - Click to undo */}
-      <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-gray-400 uppercase tracking-wide">Your Bet</span>
-          {betAmount > 0 && (
-            <button
-              onClick={clearBet}
-              disabled={disabled}
-              className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50"
-            >
-              Clear All
-            </button>
-          )}
+    <div className={`bg-gray-800/30 rounded-lg p-3 border ${borderClass} transition-all`}>
+      {/* House limit warning badge */}
+      {houseLimitStatus !== 'healthy' && (
+        <div className={`text-[10px] mb-2 px-2 py-0.5 rounded inline-block ${
+          houseLimitStatus === 'danger'
+            ? 'bg-red-500/20 text-red-400'
+            : 'bg-yellow-500/20 text-yellow-400'
+        }`}>
+          {houseLimitStatus === 'danger' ? 'Near house limit!' : 'Approaching limit'}
         </div>
+      )}
 
-        <div
-          className="flex items-center justify-center min-h-[100px] cursor-pointer hover:bg-gray-700/30 rounded-lg transition"
-          onClick={undoLastChip}
-          title={betAmount > 0 ? "Click to remove last chip" : ""}
-        >
-          {betAmount > 0 ? (
-            <ChipStack
-              amount={betAmount}
-              maxChipsShown={12}
-              showValue={true}
-              size="md"
-            />
-          ) : (
-            <div className="text-gray-500 text-sm italic">
-              Click chips below to place bet
-            </div>
-          )}
-        </div>
-
-        {betAmount > 0 && (
-          <p className="text-center text-xs text-gray-500 mt-2">
-            Click stack to undo last chip
-          </p>
-        )}
-      </div>
-
-      {/* Chip Tray - Click to add */}
-      <div>
-        <span className="text-xs text-gray-400 uppercase tracking-wide block mb-2">
-          Add Chips
-        </span>
-
-        <div className="flex flex-wrap justify-center gap-2">
+      {/* Unified horizontal layout: chips on left, bet on right */}
+      <div className="flex items-center gap-4">
+        {/* Chip buttons - compact horizontal row */}
+        <div className="flex gap-1.5">
           {CHIP_DENOMINATIONS.map((chip) => {
             const canAdd = canAddChip(chip.value);
-
             return (
               <button
                 key={chip.color}
                 onClick={() => addChip(chip)}
                 disabled={!canAdd}
                 className={`
-                  flex flex-col items-center p-2 rounded-lg transition-all
+                  flex flex-col items-center p-1.5 rounded transition-all
                   ${canAdd
-                    ? 'bg-gray-800/50 hover:bg-gray-700/50 hover:scale-105 cursor-pointer border border-gray-700/50 hover:border-dfinity-turquoise/50'
-                    : 'bg-gray-900/30 opacity-40 cursor-not-allowed border border-gray-800/30'
+                    ? 'hover:bg-gray-700/50 hover:scale-110 cursor-pointer'
+                    : 'opacity-30 cursor-not-allowed'
                   }
                 `}
-                title={canAdd ? `Add ${chip.label} USDT` : `Cannot add (exceeds ${betAmount + chip.value > maxBet ? 'max bet' : 'balance'})`}
+                title={canAdd ? `+${chip.label}` : `Max reached`}
               >
                 <img
                   src={chip.topImg}
-                  alt={`${chip.color} chip - ${chip.label} USDT`}
-                  className="w-12 h-12 object-contain drop-shadow-lg"
+                  alt={`${chip.label}`}
+                  className="w-10 h-10 object-contain drop-shadow-lg"
                 />
-                <span className={`text-xs font-mono mt-1 ${canAdd ? 'text-gray-300' : 'text-gray-600'}`}>
-                  {chip.label}
-                </span>
               </button>
             );
           })}
         </div>
-      </div>
 
-      {/* Limits info */}
-      <div className="flex justify-between text-xs text-gray-500 px-1">
-        <span>Balance: {gameBalanceUSDT.toFixed(2)} USDT</span>
-        <span>Max bet: {maxBet.toFixed(2)} USDT</span>
+        {/* Divider */}
+        <div className="w-px h-12 bg-gray-700/50"></div>
+
+        {/* Bet display - compact */}
+        <div
+          className="flex-1 flex items-center justify-between cursor-pointer hover:bg-gray-700/20 rounded px-2 py-1 transition"
+          onClick={undoLastChip}
+          title={betAmount > 0 ? "Click to undo" : ""}
+        >
+          <div className="flex items-center gap-3">
+            {betAmount > 0 ? (
+              <ChipStack
+                amount={betAmount}
+                maxChipsShown={6}
+                showValue={false}
+                size="sm"
+              />
+            ) : (
+              <div className="text-gray-600 text-xs">No bet</div>
+            )}
+            <div className="text-right">
+              <div className="font-mono font-bold text-lg text-white">
+                {betAmount > 0 ? `$${betAmount.toFixed(2)}` : '$0.00'}
+              </div>
+              <div className="text-[10px] text-gray-500">
+                max ${maxBet.toFixed(2)}
+              </div>
+            </div>
+          </div>
+
+          {/* Clear button */}
+          {betAmount > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); clearBet(); }}
+              disabled={disabled}
+              className="text-xs text-gray-500 hover:text-red-400 transition px-2"
+              title="Clear bet"
+            >
+              ×
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

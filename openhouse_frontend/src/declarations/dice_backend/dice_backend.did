@@ -101,7 +101,4 @@ service : {
 
   // Test function
   greet: (text) -> (text) query;
-
-  // Emergency admin function (TEMPORARY - REMOVE AFTER USE)
-  emergency_drain_all_ckusdt: () -> (variant { Ok: text; Err: text });
 }

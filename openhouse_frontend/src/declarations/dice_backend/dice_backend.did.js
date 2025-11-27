@@ -75,11 +75,6 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text })],
         [],
       ),
-    'emergency_drain_all_ckusdt' : IDL.Func(
-        [],
-        [IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text })],
-        [],
-      ),
     'get_accounting_stats' : IDL.Func([], [AccountingStats], ['query']),
     'get_balance' : IDL.Func([IDL.Principal], [IDL.Nat64], ['query']),
     'get_canister_balance' : IDL.Func([], [IDL.Nat64], []),
