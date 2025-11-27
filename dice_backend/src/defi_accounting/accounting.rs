@@ -655,7 +655,11 @@ pub async fn get_canister_balance() -> u64 {
 
     match result {
         Ok((balance,)) => {
-            balance.0.try_into().unwrap_or(0)
+            let bal: u64 = balance.0.try_into().unwrap_or(0);
+            CACHED_CANISTER_BALANCE.with(|cache| {
+                *cache.borrow_mut() = bal;
+            });
+            bal
         }
         Err(e) => {
             ic_cdk::println!("Failed to query canister balance: {:?}", e);
