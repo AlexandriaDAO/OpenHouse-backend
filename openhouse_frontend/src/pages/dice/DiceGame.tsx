@@ -5,12 +5,11 @@ import useDiceActor from '../../hooks/actors/useDiceActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import {
   GameLayout,
-  BetAmountInput,
   GameButton,
   GameStats,
   type GameStat,
 } from '../../components/game-ui';
-import { DiceAnimation, DiceControls, type DiceDirection } from '../../components/game-specific/dice';
+import { DiceAnimation, DiceControls, type DiceDirection, ChipBetting, ChipStack } from '../../components/game-specific/dice';
 import { useGameMode, useGameState } from '../../hooks/games';
 import { useGameBalance } from '../../providers/GameBalanceProvider';
 import { useBalance } from '../../providers/BalanceProvider';
@@ -387,7 +386,15 @@ export function DiceGame() {
                 <div className="w-px h-4 bg-gray-700"></div>
                 <div className="flex items-center gap-2">
                   <span className="text-gray-400">Game:</span>
-                  <span className="font-mono font-bold text-blue-400">{formatUSDT(balance.game)}</span>
+                  <div className="flex items-center gap-2">
+                    <ChipStack
+                      amount={Number(balance.game) / 1_000_000}
+                      maxChipsShown={5}
+                      showValue={false}
+                      size="sm"
+                    />
+                    <span className="font-mono font-bold text-blue-400">{formatUSDT(balance.game)}</span>
+                  </div>
                 </div>
                 <div className="w-px h-4 bg-gray-700 hidden sm:block"></div>
                 <div className="flex items-center gap-2 hidden sm:flex">
@@ -439,15 +446,12 @@ export function DiceGame() {
           {/* LEFT COLUMN: CONTROLS */}
           <div className="space-y-6">
 
-            <BetAmountInput
-              value={betAmount}
-              onChange={setBetAmount}
-              min={0.01}
-              max={maxBet}
+            <ChipBetting
+              betAmount={betAmount}
+              onBetChange={setBetAmount}
+              gameBalance={balance.game}
+              maxBet={maxBet}
               disabled={isPlaying}
-              isPracticeMode={gameMode.isPracticeMode}
-              error={betError}
-              variant="slider"
             />
 
             <DiceControls
