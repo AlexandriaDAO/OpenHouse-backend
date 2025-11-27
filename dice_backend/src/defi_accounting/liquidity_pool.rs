@@ -1,5 +1,4 @@
 use candid::{CandidType, Deserialize, Nat, Principal};
-use ic_cdk::{query, update};
 use ic_stable_structures::{StableBTreeMap, StableCell, memory_manager::VirtualMemory, DefaultMemoryImpl, Storable};
 use serde::Serialize;
 use std::cell::RefCell;
@@ -154,7 +153,6 @@ fn calculate_shares_for_deposit(amount_nat: &Nat) -> Result<Nat, String> {
 // to spend their funds (ICRC-2 approval flow). This is different from user deposits
 // in `accounting.rs` which use the legacy `transfer` (ICRC-1) where the user sends
 // funds directly to the canister's subaccount.
-#[update]
 pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) -> Result<Nat, String> {
     // Validate
     if amount < MIN_DEPOSIT {
@@ -413,7 +411,6 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     }
 }
 
-#[update]
 pub async fn withdraw_all_liquidity() -> Result<u64, String> {
     let caller = ic_cdk::api::msg_caller();
     let shares = LP_SHARES.with(|s| s.borrow().get(&caller).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64)));
@@ -518,7 +515,6 @@ pub fn get_share_price() -> u64 {
     stats.share_price.0.to_u64().unwrap_or(100_000_000)
 }
 
-#[query]
 pub fn can_accept_bets() -> bool {
     let pool_reserve = get_pool_reserve();
     pool_reserve >= MIN_OPERATING_BALANCE
@@ -672,7 +668,6 @@ async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> 
 /// Calculate shares preview for a deposit amount.
 /// WARNING: This is a query call. Share calculation may differ when deposit actually executes
 /// due to concurrent state changes. Always use min_shares_expected for protection.
-#[query]
 pub fn calculate_shares_preview(amount: u64) -> Result<Nat, String> {
     calculate_shares_for_deposit(&Nat::from(amount))
 }

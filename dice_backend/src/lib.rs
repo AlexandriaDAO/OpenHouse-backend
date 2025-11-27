@@ -100,6 +100,114 @@ fn greet(name: String) -> String {
 }
 
 // =============================================================================
+// ACCOUNTING ENDPOINTS
+// =============================================================================
+
+#[update]
+async fn deposit(amount: u64) -> Result<u64, String> {
+    defi_accounting::accounting::deposit(amount).await
+}
+
+#[update]
+async fn withdraw_all() -> Result<u64, String> {
+    defi_accounting::accounting::withdraw_all().await
+}
+
+#[update]
+async fn retry_withdrawal() -> Result<u64, String> {
+    defi_accounting::accounting::retry_withdrawal().await
+}
+
+#[update]
+fn abandon_withdrawal() -> Result<u64, String> {
+    defi_accounting::accounting::abandon_withdrawal()
+}
+
+#[query]
+fn get_balance(principal: candid::Principal) -> u64 {
+    defi_accounting::query::get_balance(principal)
+}
+
+#[query]
+fn get_my_balance() -> u64 {
+    defi_accounting::query::get_my_balance()
+}
+
+#[query]
+fn get_house_balance() -> u64 {
+    defi_accounting::query::get_house_balance()
+}
+
+#[query]
+fn get_max_allowed_payout() -> u64 {
+    defi_accounting::query::get_max_allowed_payout()
+}
+
+#[update]
+async fn get_canister_balance() -> u64 {
+    defi_accounting::accounting::get_canister_balance().await
+}
+
+#[query]
+fn get_accounting_stats() -> defi_accounting::accounting::AccountingStats {
+    defi_accounting::query::get_accounting_stats()
+}
+
+#[query]
+fn audit_balances() -> Result<String, String> {
+    defi_accounting::query::audit_balances()
+}
+
+#[update]
+async fn refresh_canister_balance() -> u64 {
+    defi_accounting::accounting::get_canister_balance().await
+}
+
+// =============================================================================
+// LIQUIDITY POOL ENDPOINTS
+// =============================================================================
+
+#[update]
+async fn deposit_liquidity(amount: u64, min_shares_expected: Option<candid::Nat>) -> Result<candid::Nat, String> {
+    defi_accounting::liquidity_pool::deposit_liquidity(amount, min_shares_expected).await
+}
+
+#[update]
+async fn withdraw_all_liquidity() -> Result<u64, String> {
+    defi_accounting::liquidity_pool::withdraw_all_liquidity().await
+}
+
+#[query]
+fn calculate_shares_preview(amount: u64) -> Result<candid::Nat, String> {
+    defi_accounting::liquidity_pool::calculate_shares_preview(amount)
+}
+
+#[query]
+fn get_lp_position(principal: candid::Principal) -> defi_accounting::liquidity_pool::LPPosition {
+    defi_accounting::query::get_lp_position(principal)
+}
+
+#[query]
+fn get_my_lp_position() -> defi_accounting::liquidity_pool::LPPosition {
+    defi_accounting::query::get_my_lp_position()
+}
+
+#[query]
+fn get_pool_stats() -> defi_accounting::liquidity_pool::PoolStats {
+    defi_accounting::query::get_pool_stats()
+}
+
+#[query]
+fn get_house_mode() -> String {
+    defi_accounting::query::get_house_mode()
+}
+
+#[query]
+fn can_accept_bets() -> bool {
+    defi_accounting::liquidity_pool::can_accept_bets()
+}
+
+// =============================================================================
 // DAILY STATISTICS ENDPOINTS
 // =============================================================================
 
@@ -122,3 +230,4 @@ fn get_stats_count() -> u64 {
 fn get_pool_apy(days: Option<u32>) -> defi_accounting::ApyInfo {
     defi_accounting::get_apy_info(days)
 }
+

@@ -106,7 +106,8 @@ export const DiceLiquidityPanel: React.FC = () => {
       }
 
       // Step 2: Call deposit_liquidity (uses transfer_from internally)
-      const result = await diceActor.deposit_liquidity(amount);
+      // Second parameter is optional min_shares_expected for slippage protection ([] = no slippage check)
+      const result = await diceActor.deposit_liquidity(amount, []);
 
       if ('Ok' in result) {
         const shares = result.Ok;

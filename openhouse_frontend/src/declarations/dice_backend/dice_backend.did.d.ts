@@ -66,6 +66,11 @@ export interface _SERVICE {
     { 'Ok' : bigint } |
       { 'Err' : string }
   >,
+  'emergency_drain_all_ckusdt' : ActorMethod<
+    [],
+    { 'Ok' : string } |
+      { 'Err' : string }
+  >,
   'get_accounting_stats' : ActorMethod<[], AccountingStats>,
   'get_balance' : ActorMethod<[Principal], bigint>,
   'get_canister_balance' : ActorMethod<[], bigint>,

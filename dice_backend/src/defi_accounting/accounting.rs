@@ -1,5 +1,4 @@
 use candid::{CandidType, Deserialize, Principal, Nat};
-use ic_cdk::{query, update};
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::{StableBTreeMap, StableCell};
 use std::cell::RefCell;
@@ -128,7 +127,6 @@ fn calculate_total_deposits() -> u64 {
 // DEPOSIT FUNCTION (ICRC-2)
 // =============================================================================
 
-#[update]
 #[allow(deprecated)]
 pub async fn deposit(amount: u64) -> Result<u64, String> {
     if amount < MIN_DEPOSIT {
@@ -186,7 +184,6 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
 // WITHDRAW FUNCTION
 // =============================================================================
 
-#[update]
 pub async fn withdraw_all() -> Result<u64, String> {
     let caller = ic_cdk::api::msg_caller();
     withdraw_internal(caller).await
@@ -416,7 +413,6 @@ async fn auto_withdraw_parent() {
 /// TooOld only means "I can't process THIS retry" - it says nothing about whether
 /// a PRIOR attempt succeeded. Auto-rollback here would cause double-spend if the
 /// original transfer actually went through.
-#[update]
 pub async fn retry_withdrawal() -> Result<u64, String> {
     let caller = ic_cdk::api::msg_caller();
 
@@ -478,7 +474,6 @@ pub async fn retry_withdrawal() -> Result<u64, String> {
 /// If a user abandons without receiving funds, those funds remain in the canister's
 /// ckUSDT balance but are not credited to any user. This is a "surplus" that keeps
 /// the system solvent. An admin recovery mechanism could be added later if needed.
-#[update]
 pub fn abandon_withdrawal() -> Result<u64, String> {
     let caller = ic_cdk::api::msg_caller();
 
@@ -602,13 +597,11 @@ pub fn credit_parent_fee(user: Principal, amount: u64) -> bool {
 }
 
 
-#[query]
 pub fn get_withdrawal_status() -> Option<PendingWithdrawal> {
     let caller = ic_cdk::api::msg_caller();
     PENDING_WITHDRAWALS.with(|p| p.borrow().get(&caller))
 }
 
-#[query]
 pub fn get_audit_log(offset: usize, limit: usize) -> Vec<AuditEntry> {
     AUDIT_LOG_MAP.with(|log| {
         let log = log.borrow();
@@ -621,7 +614,6 @@ pub fn get_audit_log(offset: usize, limit: usize) -> Vec<AuditEntry> {
     })
 }
 
-#[update]
 #[allow(deprecated)]
 pub async fn refresh_canister_balance() -> u64 {
     let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID).expect("Invalid principal constant");
@@ -650,7 +642,6 @@ pub async fn refresh_canister_balance() -> u64 {
     }
 }
 
-#[update]
 #[allow(deprecated)]
 pub async fn get_canister_balance() -> u64 {
     let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID).expect("Invalid principal constant");

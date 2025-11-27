@@ -5,24 +5,13 @@ pub mod types;
 pub mod statistics;
 
 // Re-export types and update functions from original modules
-pub use accounting::{
-    update_balance,
-    retry_withdrawal,
-    abandon_withdrawal,
-};
+pub use accounting::update_balance;
 
 // Re-export query functions from query module
 pub use query::{
     get_balance,
     get_max_allowed_payout,
 };
-
-// Re-export game settlement function (primary game integration point)
-pub use liquidity_pool::settle_bet;
-
-// Re-export pool queries for pre-flight validation
-pub use liquidity_pool::get_pool_reserve;
-pub use liquidity_pool::can_accept_bets;
 
 // Re-export statistics functions for daily volume and APY tracking
 pub use statistics::{
