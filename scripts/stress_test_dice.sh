@@ -1,10 +1,22 @@
 #!/bin/bash
 # Comprehensive Dice Backend Stress Test
 # Simulates concurrent users to expose race conditions and bugs
+#
+# LIMITATION: This script runs all concurrent operations using the SAME principal
+# (the current dfx identity). It tests concurrency race conditions for a single
+# user account, but does not simulate multi-user scenarios (e.g., multiple
+# distinct players interacting simultaneously). For multi-user testing,
+# distinct dfx identities must be used.
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
+# Check for required tools
+if ! command -v bc &> /dev/null; then
+    echo "Error: 'bc' is required but not installed."
+    exit 1
+fi
+
 # Use plaintext identity to avoid keyring contention with concurrent processes
 export DFX_WARNING=-mainnet_plaintext_identity
 
@@ -113,7 +125,7 @@ function simulate_user() {
             [ $? -eq 0 ] && ((SUCCESS++)) || ((EXPECTED_ERRORS++))
         fi
 
-        # Small random delay (10-100ms) to vary timing
+        # Small random delay (100-1000ms) to vary timing
         sleep 0.$((RANDOM % 90 + 10))
     done
 
@@ -159,11 +171,11 @@ fi
 echo -e "${GREEN}✓ System operational${NC}"
 
 # Get baseline balances
-USER_BAL=$(dfx canister --network $NETWORK call $CANISTER_ID get_my_balance 2>&1 | grep -oP '^\(\K\d+|(?<=^\()\d+' | head -n1)
+USER_BAL=$(dfx canister --network $NETWORK call $CANISTER_ID get_my_balance 2>&1 | grep -v "WARN" | awk -F'[:)]' '{print $1}' | sed 's/[^0-9]//g' | tail -n1)
 if [ -z "$USER_BAL" ]; then USER_BAL=0; fi
 
 POOL_STATS=$(dfx canister --network $NETWORK call $CANISTER_ID get_pool_stats 2>&1)
-POOL_RESERVE=$(echo "$POOL_STATS" | grep -oP 'pool_reserve = \K\d+' | head -n1)
+POOL_RESERVE=$(echo "$POOL_STATS" | grep "pool_reserve" | awk -F'=' '{print $2}' | sed 's/[^0-9]//g' | tail -n1)
 if [ -z "$POOL_RESERVE" ]; then POOL_RESERVE=0; fi
 
 echo ""
@@ -272,11 +284,11 @@ else
 fi
 
 # Get final balances
-FINAL_USER_BAL=$(dfx canister --network $NETWORK call $CANISTER_ID get_my_balance 2>&1 | grep -oP '^\(\K\d+|(?<=^\()\d+' | head -n1)
+FINAL_USER_BAL=$(dfx canister --network $NETWORK call $CANISTER_ID get_my_balance 2>&1 | grep -v "WARN" | awk -F'[:)]' '{print $1}' | sed 's/[^0-9]//g' | tail -n1)
 if [ -z "$FINAL_USER_BAL" ]; then FINAL_USER_BAL=0; fi
 
 FINAL_POOL_STATS=$(dfx canister --network $NETWORK call $CANISTER_ID get_pool_stats 2>&1)
-FINAL_POOL_RESERVE=$(echo "$FINAL_POOL_STATS" | grep -oP 'pool_reserve = \K\d+' | head -n1)
+FINAL_POOL_RESERVE=$(echo "$FINAL_POOL_STATS" | grep "pool_reserve" | awk -F'=' '{print $2}' | sed 's/[^0-9]//g' | tail -n1)
 if [ -z "$FINAL_POOL_RESERVE" ]; then FINAL_POOL_RESERVE=0; fi
 
 echo ""
