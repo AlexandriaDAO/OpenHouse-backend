@@ -1,133 +1,64 @@
 /* ========================================
-   BETTING RAIL - Poker Table Aesthetic
+   BETTING RAIL - Semicircle Design
    ======================================== */
 
-/* Curved top edge - the "lip" of the table */
-.betting-rail-curve {
-  height: 28px;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    transparent 40%,
-    #1a472a 100%
-  );
-  border-top-left-radius: 50% 100%;
-  border-top-right-radius: 50% 100%;
+/* Main surface - semicircle shape */
+.betting-rail {
+  background: linear-gradient(180deg, #1e2328 0%, #1a1d21 100%);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 -4px 30px rgba(0, 0, 0, 0.5);
+  border-top-left-radius: 50% 80px;
+  border-top-right-radius: 50% 80px;
   position: relative;
-  pointer-events: none;
-  margin-bottom: -1px;
-  z-index: 0;
+  overflow: visible;
 }
 
-/* Subtle gold/brass accent line at curve peak - like table edging */
-.betting-rail-curve::before {
+/* Subtle inner glow on the curve */
+.betting-rail::before {
   content: '';
   position: absolute;
   top: 0;
-  left: 20%;
-  right: 20%;
-  height: 2px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(218, 165, 32, 0.3),
-    rgba(218, 165, 32, 0.5),
-    rgba(218, 165, 32, 0.3),
-    transparent
-  );
-  border-top-left-radius: 50% 100%;
-  border-top-right-radius: 50% 100%;
-}
-
-/* Inner highlight for depth */
-.betting-rail-curve::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 25%;
-  right: 25%;
+  left: 10%;
+  right: 10%;
   height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.08),
-    transparent
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 100%
   );
-  border-top-left-radius: 50% 100%;
-  border-top-right-radius: 50% 100%;
-}
-
-/* Main felt surface */
-.betting-rail {
-  background:
-    /* Felt noise texture overlay */
-    url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E"),
-    /* Radial highlight in center */
-    radial-gradient(ellipse 60% 100% at 50% -20%, rgba(255,255,255,0.04) 0%, transparent 70%),
-    /* Main felt gradient */
-    linear-gradient(
-      180deg,
-      #1a5a32 0%,
-      #165a2d 30%,
-      #134d26 60%,
-      #0f3d1e 100%
-    );
-  box-shadow:
-    0 -6px 40px rgba(0, 0, 0, 0.6),
-    inset 0 2px 4px rgba(0, 0, 0, 0.3),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.02);
-  position: relative;
-  z-index: 1;
-  /* Subtle inner border effect */
-  border-top: 1px solid rgba(255, 255, 255, 0.03);
+  border-radius: 50%;
 }
 
 /* ========================================
-   CHIP SELECTOR BUTTONS (Left side)
+   CHIP BUTTONS - Simple hover
    ======================================== */
 
 .chip-button {
-  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 0.15s ease, filter 0.15s ease;
   border-radius: 50%;
   background: transparent;
   border: none;
   padding: 2px;
   cursor: pointer;
-  position: relative;
-}
-
-.chip-button::after {
-  content: '';
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,255,255,0.1), transparent 70%);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.chip-button:hover:not(:disabled)::after {
-  opacity: 1;
 }
 
 .chip-button:hover:not(:disabled) {
-  transform: translateY(-6px) scale(1.05);
-  filter: brightness(1.15) drop-shadow(0 8px 12px rgba(0,0,0,0.4));
+  transform: scale(1.1);
+  filter: drop-shadow(0 0 8px rgba(34, 197, 94, 0.3));
 }
 
 .chip-button:active:not(:disabled) {
-  transform: translateY(-3px) scale(1.02);
-  transition-duration: 0.1s;
+  transform: scale(1.05);
 }
 
 .chip-button:disabled {
-  opacity: 0.25;
+  opacity: 0.3;
   cursor: not-allowed;
-  filter: grayscale(0.6) brightness(0.8);
+  filter: grayscale(0.5);
 }
 
 /* ========================================
-   CHIP STACK (Center - Interactive)
+   CHIP STACK - Simplified
    ======================================== */
 
 .chip-stack-container {
@@ -135,44 +66,37 @@
   flex-direction: row;
   align-items: flex-end;
   justify-content: center;
-  gap: 0;
-  position: relative;
-  min-height: 80px;
+  min-height: 0;
 }
 
-/* Individual chip pile */
 .chip-pile {
   position: relative;
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   cursor: pointer;
-  margin: 0 -6px; /* Overlap piles slightly */
+  margin: 0 -6px;
+  transition: transform 0.2s ease;
 }
 
 .chip-pile:hover {
-  transform: translateY(-4px);
-  z-index: 100 !important;
+  transform: translateY(-2px);
 }
 
-/* Individual chip in a pile */
 .chip-in-pile {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  transition: transform 0.15s ease;
   cursor: pointer;
-  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.4));
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.3));
+  transition: transform 0.1s ease;
 }
 
 .chip-in-pile:hover {
-  transform: translateX(-50%) translateY(3px);
+  transform: translateX(-50%) translateY(-2px);
 }
 
-/* Click feedback */
-.chip-in-pile:active {
-  transform: translateX(-50%) translateY(5px);
-}
+/* ========================================
+   ANIMATIONS
+   ======================================== */
 
-/* Chip removal animation */
 @keyframes chip-remove {
   0% {
     opacity: 1;
@@ -180,50 +104,20 @@
   }
   100% {
     opacity: 0;
-    transform: translateX(-50%) translateY(-30px) scale(0.5);
+    transform: translateX(-50%) translateY(-20px) scale(0.8);
   }
 }
 
 .chip-removing {
-  animation: chip-remove 0.3s ease-out forwards;
+  animation: chip-remove 0.25s ease-out forwards;
 }
-
-/* ========================================
-   BET PLACEHOLDER (when empty)
-   ======================================== */
-
-.bet-placeholder {
-  width: 100px;
-  height: 100px;
-  border: 2px dashed rgba(255, 255, 255, 0.15);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.4;
-  font-size: 11px;
-  font-weight: bold;
-  text-transform: uppercase;
-  letter-spacing: 2px;
-  color: rgba(255, 255, 255, 0.3);
-  transition: all 0.3s ease;
-}
-
-.bet-placeholder:hover {
-  border-color: rgba(255, 255, 255, 0.25);
-  opacity: 0.6;
-}
-
-/* ========================================
-   LOW BALANCE PULSE ANIMATION
-   ======================================== */
 
 @keyframes deposit-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.6);
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5);
   }
   50% {
-    box-shadow: 0 0 0 8px rgba(234, 179, 8, 0);
+    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
   }
 }
 
@@ -232,7 +126,23 @@
 }
 
 /* ========================================
-   ACTION BUTTONS
+   PLACEHOLDER
+   ======================================== */
+
+.bet-placeholder {
+  width: 60px;
+  height: 60px;
+  border: 2px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* ========================================
+   RAIL BUTTONS
    ======================================== */
 
 .rail-button {
@@ -242,22 +152,18 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
   cursor: pointer;
-  white-space: nowrap;
 }
 
 .rail-button-primary {
-  background: linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
+  background: #22c55e;
   color: white;
   border: none;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.2);
 }
 
 .rail-button-primary:hover {
-  background: linear-gradient(180deg, #2dd468 0%, #1eb854 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.2);
+  background: #16a34a;
 }
 
 .rail-button-secondary {
@@ -269,25 +175,24 @@
 .rail-button-secondary:hover {
   color: white;
   border-color: #6b7280;
-  background: rgba(255,255,255,0.05);
 }
 
 .rail-button:disabled {
   opacity: 0.3;
   cursor: not-allowed;
-  transform: none !important;
 }
 
 /* ========================================
-   RESPONSIVE / MOBILE
+   RESPONSIVE
    ======================================== */
 
 @media (max-width: 768px) {
-  .betting-rail-curve {
-    height: 24px;
+  .betting-rail {
+    border-top-left-radius: 50% 40px;
+    border-top-right-radius: 50% 40px;
   }
 
   .chip-button:hover:not(:disabled) {
-    transform: translateY(-3px) scale(1.02);
+    transform: scale(1.05);
   }
 }

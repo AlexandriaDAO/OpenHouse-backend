@@ -22,23 +22,23 @@ export const CHIP_DENOMINATIONS: ChipDenomination[] = [
     color: 'red',
     topImg: '/chips/red_top.png',
     sideImg: '/chips/red_side.png',
-    consolidateAt: 10  // 10 red = 1 blue
+    consolidateAt: 10  // 10 red = 1 green
   },
   {
     value: 1.00,
     label: '1',
-    color: 'blue',
-    topImg: '/chips/blue_top.png',
-    sideImg: '/chips/blue_side.png',
-    consolidateAt: 5   // 5 blue = 1 green
+    color: 'green',
+    topImg: '/chips/green_top.png',
+    sideImg: '/chips/green_side.png',
+    consolidateAt: 5   // 5 green = 1 blue
   },
   {
     value: 5.00,
     label: '5',
-    color: 'green',
-    topImg: '/chips/green_top.png',
-    sideImg: '/chips/green_side.png',
-    consolidateAt: 2   // 2 green = 1 black
+    color: 'blue',
+    topImg: '/chips/blue_top.png',
+    sideImg: '/chips/blue_side.png',
+    consolidateAt: 2   // 2 blue = 1 black
   },
   {
     value: 10.00,
@@ -69,7 +69,7 @@ export function getNextHigherChip(chip: ChipDenomination): ChipDenomination | un
 /**
  * Decompose a total amount into optimal chip counts.
  * Uses greedy algorithm: largest chips first.
- * Returns array of {chip, count} sorted largest to smallest.
+ * Returns array of {chip, count} sorted smallest to largest (left to right).
  */
 export function decomposeIntoChips(amount: number): { chip: ChipDenomination; count: number }[] {
   const result: { chip: ChipDenomination; count: number }[] = [];
@@ -85,7 +85,8 @@ export function decomposeIntoChips(amount: number): { chip: ChipDenomination; co
     }
   }
 
-  return result;
+  // Reverse so lowest denomination is first (matches button order: left to right)
+  return result.reverse();
 }
 
 /**

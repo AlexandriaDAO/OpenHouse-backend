@@ -55,12 +55,18 @@ export const InteractiveChipStack: React.FC<InteractiveChipStackProps> = ({
     })
   );
 
+  // Calculate the offset to center all piles
+  const containerWidth = totalWidth + 20;
+  const centerOffset = (containerWidth - totalWidth) / 2;
+
   return (
     <div
       className="chip-stack-container"
       style={{
-        width: totalWidth + 20, // padding
-        height: maxStackHeight + 20,
+        width: containerWidth,
+        height: maxStackHeight,
+        position: 'relative',
+        marginBottom: -8,
       }}
     >
       {chipData.map(({ chip, count }, pileIndex) => {
@@ -68,8 +74,8 @@ export const InteractiveChipStack: React.FC<InteractiveChipStackProps> = ({
         const hasOverflow = count > maxChipsPerPile;
         const stackHeight = chipHeight + (visibleCount - 1) * stackOffset;
 
-        // Position this pile
-        const pileLeft = pileIndex * (chipWidth + pileOverlap);
+        // Position this pile, centered within container
+        const pileLeft = centerOffset + pileIndex * (chipWidth + pileOverlap);
 
         return (
           <div
