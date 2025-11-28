@@ -1,8 +1,8 @@
 /* Poker table aesthetic */
 
-/* Curved top edge - minimal gradient */
+/* Curved top edge - taller for central focus */
 .betting-rail-curve {
-  height: 16px;
+  height: 40px; /* Increased from 16px to 40px for higher center */
   background: linear-gradient(
     to bottom,
     transparent 0%,
@@ -12,6 +12,8 @@
   border-top-right-radius: 50% 100%;
   position: relative;
   pointer-events: none;
+  margin-bottom: -5px; /* Slight overlap to blend */
+  z-index: 0;
 }
 
 /* Subtle accent line at curve peak */
@@ -19,13 +21,13 @@
   content: '';
   position: absolute;
   top: 0;
-  left: 10%;
-  right: 10%;
+  left: 15%; /* Tighter highlight */
+  right: 15%;
   height: 1px;
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(255, 255, 255, 0.12),
+    rgba(255, 255, 255, 0.15),
     transparent
   );
   border-top-left-radius: 50% 100%;
@@ -41,9 +43,11 @@
     #122f1c 100%
   );
   box-shadow:
-    0 -4px 20px rgba(0, 0, 0, 0.4),
+    0 -4px 30px rgba(0, 0, 0, 0.5),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  padding-top: 0; /* Reset from wood styling */
+  padding-top: 0;
+  position: relative;
+  z-index: 1;
 }
 
 /* Chip button interactions */

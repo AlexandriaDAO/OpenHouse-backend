@@ -194,10 +194,11 @@ export function BettingRail({
 
         {/* Main rail surface */}
         <div className="betting-rail">
-          <div className="container mx-auto px-4 py-2 h-[88px] flex items-center">
+          {/* Fixed-width column layout for perfect centering */}
+          <div className="container mx-auto px-4 py-2 h-[88px] grid grid-cols-[280px_1fr_280px] items-center">
 
             {/* Left: Chip Selector Buttons */}
-            <div className="flex gap-2 mr-8">
+            <div className="flex gap-2 justify-start">
                 {CHIP_DENOMINATIONS.map(chip => (
                   <button
                     key={chip.color}
@@ -210,12 +211,12 @@ export function BettingRail({
                 ))}
             </div>
 
-            {/* Center-Left: Large Chip Stack & Amount */}
-            <div className="flex items-center gap-6 flex-1">
+            {/* Center: Large Chip Stack & Amount */}
+            <div className="flex items-center justify-center gap-6 relative z-10 -mt-8"> {/* Negative top margin to pull up into the curve */}
                  {/* Big Stack */}
-                 <div className="transition-all duration-200 transform scale-105 origin-bottom mb-[-10px]">
+                 <div className="transition-all duration-200 transform scale-110 origin-bottom">
                   {displayChips.length === 0 ? (
-                    <div className="opacity-10 font-bold text-white text-xs tracking-widest border-2 border-dashed border-white/20 rounded-full w-16 h-16 flex items-center justify-center">
+                    <div className="opacity-10 font-bold text-white text-xs tracking-widest border-2 border-dashed border-white/20 rounded-full w-20 h-20 flex items-center justify-center mb-2">
                       BET
                     </div>
                   ) : (
@@ -229,7 +230,7 @@ export function BettingRail({
                  </div>
 
                  {/* Bet Amount Display */}
-                 <div className="flex flex-col">
+                 <div className="flex flex-col pt-4"> {/* Add padding to align with stack base */}
                     <div className="text-white font-mono font-black text-3xl leading-none drop-shadow-md">
                       ${betAmount.toFixed(2)}
                     </div>
@@ -249,7 +250,7 @@ export function BettingRail({
             </div>
 
             {/* Right: Account/Balances */}
-            <div className="flex flex-col items-end gap-2 text-xs">
+            <div className="flex flex-col items-end gap-2 text-xs justify-end">
                 {/* Chips Row */}
                 <div className="flex items-center gap-3">
                     <span className="text-gray-400">Chips: <span className="text-white font-mono font-bold text-sm">${formatUSDT(gameBalance)}</span></span>
@@ -276,12 +277,32 @@ export function BettingRail({
                 {/* Limit Warning (Absolute or integrated?) */}
                 {houseLimitStatus !== 'healthy' && (
                    <div className={`text-[10px] font-bold ${houseLimitStatus === 'danger' ? 'text-red-500' : 'text-yellow-500'}`}>
-                      House Limit {houseLimitStatus === 'danger' ? 'Exceeded' : 'Near'}
+                      Limit {houseLimitStatus === 'danger' ? 'Exceeded' : 'Near'}
                    </div>
                 )}
             </div>
 
           </div>
+        </div>
+
+        {/* Mobile Fallback (Stacked) */}
+        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 p-2 z-50">
+            <div className="flex items-center justify-between">
+                <div className="flex gap-1">
+                    {[CHIP_DENOMINATIONS[0], CHIP_DENOMINATIONS[1], CHIP_DENOMINATIONS[2]].map(chip => (
+                        <button key={chip.color} onClick={() => addChip(chip)} disabled={disabled || !canAddChip(chip.value)} className="chip-button">
+                            <img src={chip.topImg} alt={chip.label} className="w-10 h-10 object-contain" />
+                        </button>
+                    ))}
+                </div>
+                <div className="text-right">
+                    <div className="text-white font-mono font-bold">${betAmount.toFixed(2)}</div>
+                    <div className="flex gap-2">
+                        <button onClick={() => setShowDepositModal(true)} className="text-green-400 text-xs font-bold">+ Buy</button>
+                        <button onClick={clearBet} disabled={betAmount===0} className="text-red-400 text-xs">Clear</button>
+                    </div>
+                </div>
+            </div>
         </div>
       </div>
 
