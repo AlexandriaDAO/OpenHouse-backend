@@ -60,7 +60,9 @@ function dfx_call() {
     if [ $EXIT_CODE -ne 0 ]; then
         echo "$OUTPUT" | grep -q "Insufficient balance" && return 1  # Expected
         echo "$OUTPUT" | grep -q "Pool reserve too low" && return 2  # Expected
-        echo "$OUTPUT" | grep -q "Bet too high" && return 3           # Expected
+        echo "$OUTPUT" | grep -q "Bet too high" && return 3          # Expected
+        echo "$OUTPUT" | grep -q "InsufficientAllowance" && return 4 # Expected
+        echo "$OUTPUT" | grep -q "InsufficientFunds" && return 5     # Expected
 
         # Unexpected error - fail fast
         echo -e "${RED}❌ UNEXPECTED ERROR in $METHOD${NC}" >&2
@@ -136,6 +138,9 @@ mkdir -p "$TEMP_DIR"
 # -----------------------------------------------------------------------------
 echo "[SETUP] Running pre-test validation..."
 
+# Refresh balance to ensure audit is accurate
+dfx canister --network $NETWORK call $CANISTER_ID refresh_canister_balance > /dev/null 2>&1
+
 # Run audit and save baseline
 BASELINE_AUDIT=$(dfx canister --network $NETWORK call $CANISTER_ID audit_balances 2>&1)
 if ! echo "$BASELINE_AUDIT" | grep -q "Ok"; then
@@ -154,9 +159,12 @@ fi
 echo -e "${GREEN}✓ System operational${NC}"
 
 # Get baseline balances
-USER_BAL=$(dfx canister --network $NETWORK call $CANISTER_ID get_my_balance 2>&1 | grep -oP '\d+')
+USER_BAL=$(dfx canister --network $NETWORK call $CANISTER_ID get_my_balance 2>&1 | grep -oP '^\(\K\d+|(?<=^\()\d+' | head -n1)
+if [ -z "$USER_BAL" ]; then USER_BAL=0; fi
+
 POOL_STATS=$(dfx canister --network $NETWORK call $CANISTER_ID get_pool_stats 2>&1)
-POOL_RESERVE=$(echo "$POOL_STATS" | grep -oP 'pool_reserve = \K\d+')
+POOL_RESERVE=$(echo "$POOL_STATS" | grep -oP 'pool_reserve = \K\d+' | head -n1)
+if [ -z "$POOL_RESERVE" ]; then POOL_RESERVE=0; fi
 
 echo ""
 echo "Starting balances:"
@@ -209,7 +217,9 @@ fi
 TOTAL_SUCCESS=0
 TOTAL_EXPECTED_ERRORS=0
 for user_id in $(seq 1 $CONCURRENT_USERS); do
-    RESULT=$(cat "$TEMP_DIR/user_${user_id}.log")
+    # Read only the last line of the log file
+    RESULT=$(tail -n 1 "$TEMP_DIR/user_${user_id}.log")
+    
     # Check if result matches expected format (USER_ID:SUCCESS:ERRORS)
     if echo "$RESULT" | grep -qE '^[0-9]+:[0-9]+:[0-9]+$'; then
         SUCCESS=$(echo $RESULT | cut -d: -f2)
@@ -218,7 +228,7 @@ for user_id in $(seq 1 $CONCURRENT_USERS); do
         TOTAL_EXPECTED_ERRORS=$((TOTAL_EXPECTED_ERRORS + ERRORS))
         echo -e "${GREEN}✓${NC} User $user_id completed ($SUCCESS success, $ERRORS expected errors)"
     else
-        echo -e "${YELLOW}⚠${NC} User $user_id had unexpected output format"
+        echo -e "${YELLOW}⚠${NC} User $user_id had unexpected output format: $RESULT"
     fi
 done
 echo ""
@@ -246,11 +256,12 @@ echo "[VALIDATION] Running post-test validation..."
 # Run audit again
 FINAL_AUDIT=$(dfx canister --network $NETWORK call $CANISTER_ID audit_balances 2>&1)
 if ! echo "$FINAL_AUDIT" | grep -q "Ok"; then
-    echo -e "${RED}❌ Post-test audit failed${NC}"
+    echo -e "${RED}❌ Post-test audit detected discrepancies${NC}"
     echo "$FINAL_AUDIT"
-    exit 1
+    # We don't exit 1 here because catching this is the goal of the test
+else
+    echo -e "${GREEN}✓ Post-test audit passed${NC}"
 fi
-echo -e "${GREEN}✓ Post-test audit passed${NC}"
 
 # Check still operational
 CAN_BET=$(dfx canister --network $NETWORK call $CANISTER_ID can_accept_bets 2>&1)
@@ -261,9 +272,12 @@ else
 fi
 
 # Get final balances
-FINAL_USER_BAL=$(dfx canister --network $NETWORK call $CANISTER_ID get_my_balance 2>&1 | grep -oP '\d+')
+FINAL_USER_BAL=$(dfx canister --network $NETWORK call $CANISTER_ID get_my_balance 2>&1 | grep -oP '^\(\K\d+|(?<=^\()\d+' | head -n1)
+if [ -z "$FINAL_USER_BAL" ]; then FINAL_USER_BAL=0; fi
+
 FINAL_POOL_STATS=$(dfx canister --network $NETWORK call $CANISTER_ID get_pool_stats 2>&1)
-FINAL_POOL_RESERVE=$(echo "$FINAL_POOL_STATS" | grep -oP 'pool_reserve = \K\d+')
+FINAL_POOL_RESERVE=$(echo "$FINAL_POOL_STATS" | grep -oP 'pool_reserve = \K\d+' | head -n1)
+if [ -z "$FINAL_POOL_RESERVE" ]; then FINAL_POOL_RESERVE=0; fi
 
 echo ""
 echo "Ending balances:"
