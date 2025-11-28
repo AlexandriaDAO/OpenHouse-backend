@@ -2,7 +2,6 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Principal } from '@dfinity/principal';
 import { CHIP_DENOMINATIONS, ChipDenomination, decomposeIntoChips } from '../game-specific/dice/chipConfig';
-import { ChipStack } from '../game-specific/dice/ChipStack';
 import { DECIMALS_PER_CKUSDT, formatUSDT, TRANSFER_FEE } from '../../types/balance';
 import { ApproveArgs } from '../../types/ledger';
 import './BettingRail.css';
@@ -194,21 +193,61 @@ export function BettingRail({
   // Pulse animation trigger
   useEffect(() => {
      if (gameBalance === 0n && !disabled) {
-       // Only pulse if we can interact
-       // Logic from plan says "Show warning badge if approaching or at limit"
-       // And "Low balance deposit animation pulse"
-       // We'll assume if balance is 0, we pulse the deposit button
        setShowDepositAnimation(true);
      } else {
        setShowDepositAnimation(false);
      }
   }, [gameBalance, disabled]);
 
+  // === New Chip Arc Visualization ===
+  // We want to render chips in an arc. We need to map the `displayChips` array to positions.
+  // We'll limit to e.g. 15 chips for visual clarity.
+  const arcChips = useMemo(() => {
+    // Flatten displayChips to individual chips
+    let chips: ChipDenomination[] = [];
+    displayChips.forEach(({ chip, count }) => {
+      for(let i=0; i<count; i++) chips.push(chip);
+    });
+    
+    // Sort: Large value at bottom? Or just keep order?
+    // decomposeIntoChips returns High->Low. 
+    // If we stack them, we probably want larger ones at the back or bottom?
+    // Let's reverse so smaller chips are on top if we overlap.
+    // Actually, standard poker stacks have chips of same color together.
+    // Let's just take up to 20 chips.
+    const MAX_CHIPS = 20;
+    const visibleChips = chips.slice(0, MAX_CHIPS);
+    
+    const total = visibleChips.length;
+    const baseAngle = -40; // Start angle
+    const endAngle = 40;   // End angle
+    const angleStep = total > 1 ? (endAngle - baseAngle) / (total - 1) : 0;
+
+    return visibleChips.map((chip, index) => {
+      // Calculate position
+      // We fan them out in an arc.
+      // Center is index ~ total/2
+      const angle = total === 1 ? 0 : baseAngle + (index * angleStep);
+      // Offset Y slightly based on distance from center to create an arch effect?
+      // Or just rotate around a bottom point.
+      // transform-origin: bottom center is set in CSS.
+      
+      return {
+        chip,
+        style: {
+          transform: `translateX(-50%) rotate(${angle}deg) translateY(${Math.abs(angle) * 0.5}px)`,
+          zIndex: index,
+        }
+      };
+    });
+  }, [displayChips]);
+
+
   return (
     <>
       {/* Fixed bottom container */}
       <div className="fixed bottom-0 left-0 right-0 z-40">
-        {/* Curved top edge */}
+        {/* Curved top edge with Wood Border */}
         <div className="betting-rail-curve" />
 
         {/* Main rail surface */}
@@ -227,117 +266,127 @@ export function BettingRail({
                     disabled={disabled || !canAddChip(chip.value)}
                     className="chip-button"
                   >
-                    <img src={chip.topImg} alt={chip.label} className="w-12 h-12 object-contain" />
+                    <img src={chip.topImg} alt={chip.label} className="w-14 h-14 object-contain drop-shadow-lg" />
                   </button>
                 ))}
               </div>
 
-              {/* Column 2: Current Bet Display */}
-              <div className="flex items-center justify-center gap-4">
-                <button
+              {/* Column 2: Chip Pile (Semicircle) & Bet Amount */}
+              <div className="flex flex-col items-center justify-center relative -mt-4">
+                 
+                {/* The Chip Arc */}
+                <div 
+                  className="chip-arc-container cursor-pointer" 
                   onClick={undoLastChip}
-                  disabled={chipHistory.length === 0 || disabled}
-                  className="flex items-center gap-2 hover:opacity-80 transition"
-                  title="Undo last chip"
+                  title="Click to undo last chip"
                 >
-                  {displayChips.length > 0 ? (
-                    <ChipStack amount={betAmount} size="sm" maxChipsShown={5} showValue={false} />
+                  {displayChips.length === 0 ? (
+                    <div className="text-white/20 text-sm font-bold border-2 border-dashed border-white/10 rounded-full w-16 h-16 flex items-center justify-center">
+                      BET
+                    </div>
                   ) : (
-                     <div className="h-[30px] w-[30px] rounded-full border border-white/10 flex items-center justify-center text-xs text-gray-500">
-                        0
-                     </div>
+                    arcChips.map((item, i) => (
+                      <img 
+                        key={i}
+                        src={item.chip.topImg} // Top view for the arc looks better "stacked" flat or side view? 
+                                               // User said "semicircle where they're touching". 
+                                               // Usually this means top-down view of flat chips overlapping.
+                        alt={item.chip.label}
+                        className="chip-in-arc"
+                        style={item.style}
+                      />
+                    ))
                   )}
-                  <span className="font-mono text-xl font-bold text-white">
+                </div>
+
+                {/* Bet Amount Label */}
+                <div className="mt-1 flex flex-col items-center">
+                  <span className="font-mono text-2xl font-black text-white drop-shadow-md">
                     ${betAmount.toFixed(2)}
                   </span>
-                </button>
-                <span className="text-xs text-gray-400">max ${maxBet.toFixed(2)}</span>
-                <button
-                  onClick={clearBet}
-                  disabled={betAmount === 0 || disabled}
-                  className="text-xs text-gray-400 hover:text-white underline decoration-dotted"
-                >
-                  Clear
-                </button>
+                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                    <span>max ${maxBet.toFixed(2)}</span>
+                    {betAmount > 0 && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); clearBet(); }}
+                        disabled={disabled}
+                        className="text-red-400 hover:text-red-300 underline"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              {/* Column 3: Action Buttons */}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowDepositModal(true)}
-                  className={`px-4 py-2 rounded font-bold transition ${
-                    showDepositAnimation
-                      ? 'bg-yellow-500 text-black deposit-button-pulse'
-                      : 'bg-dfinity-turquoise text-black hover:bg-white'
-                  }`}
-                >
-                  + Chips
-                </button>
-                <button
-                  onClick={handleWithdrawAll}
-                  disabled={isWithdrawing || gameBalance === 0n}
-                  className="px-4 py-2 border border-gray-600 rounded text-gray-300 hover:text-white hover:border-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  Cash Out
-                </button>
+              {/* Column 3: Empty right side for symmetry or additional controls? 
+                  User wanted buttons in footer. 
+                  We can put a "Repeat Bet" or similar here later.
+                  For now, let's keep it balanced.
+              */}
+              <div className="w-[200px] flex justify-end">
+                 {/* Placeholder or move Undo button here explicitly? */}
+                 <button 
+                   onClick={undoLastChip}
+                   disabled={chipHistory.length === 0 || disabled}
+                   className="text-gray-400 hover:text-white flex items-center gap-2 transition disabled:opacity-0"
+                 >
+                   <span>Undo</span>
+                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                     <path fillRule="evenodd" d="M8 3a5 5 0 1 1-4.546 2.914.5.5 0 0 0-.908-.417A6 6 0 1 0 8 2v1z"/>
+                     <path d="M8 4.466V.534a.25.25 0 0 0-.41-.192L5.23 2.308a.25.25 0 0 0 0 .384l2.36 1.966A.25.25 0 0 0 8 4.466z"/>
+                   </svg>
+                 </button>
               </div>
 
             </div>
 
-            {/* Mobile Layout: Stacked */}
-            <div className="md:hidden space-y-3">
-              {/* Row 1: Chips (condensed) + Bet amount */}
-              <div className="flex items-center gap-3">
-                <div className="flex gap-1">
-                  {/* Show 3 main chips + expand/more indicator if needed, but let's just show 4 middle ones or so */}
-                  {[CHIP_DENOMINATIONS[0], CHIP_DENOMINATIONS[1], CHIP_DENOMINATIONS[2], CHIP_DENOMINATIONS[3]].map(chip => (
-                    <button
-                      key={chip.color}
-                      onClick={() => addChip(chip)}
-                      disabled={disabled || !canAddChip(chip.value)}
-                      className="chip-button p-1"
+            {/* Mobile Layout */}
+            <div className="md:hidden flex flex-col items-center space-y-4">
+               {/* Chips & Bet */}
+               <div className="flex items-end justify-between w-full px-2">
+                  <div className="flex gap-1">
+                    {[CHIP_DENOMINATIONS[0], CHIP_DENOMINATIONS[1], CHIP_DENOMINATIONS[2]].map(chip => (
+                        <button key={chip.color} onClick={() => addChip(chip)} disabled={disabled || !canAddChip(chip.value)} className="chip-button">
+                            <img src={chip.topImg} alt={chip.label} className="w-10 h-10 object-contain" />
+                        </button>
+                    ))}
+                  </div>
+                  <div className="text-right">
+                     <div className="font-mono text-xl font-bold text-white">${betAmount.toFixed(2)}</div>
+                     <button onClick={clearBet} disabled={betAmount===0} className="text-xs text-red-400">Clear</button>
+                  </div>
+               </div>
+            </div>
+
+            {/* Bottom Info Row - WITH BUTTONS NOW */}
+            <div className="flex items-center justify-between text-xs mt-2 pt-2 border-t border-gray-800/50 text-gray-400 relative">
+              
+              <div className="flex items-center gap-4 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span>Chips: <span className="text-white font-mono font-bold">${formatUSDT(gameBalance)}</span></span>
+                    <button 
+                        onClick={() => setShowDepositModal(true)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                            showDepositAnimation ? 'bg-yellow-500 text-black deposit-button-pulse' : 'bg-green-600 text-white hover:bg-green-500'
+                        }`}
                     >
-                      <img src={chip.topImg} alt={chip.label} className="w-10 h-10 object-contain" />
+                        + Buy
                     </button>
-                  ))}
-                </div>
-                <div className="flex-1 text-right">
-                  <span className="font-mono text-lg font-bold block leading-none text-white">${betAmount.toFixed(2)}</span>
-                  <span className="text-[10px] text-gray-500 block">max ${maxBet.toFixed(2)}</span>
-                </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <span>Wallet: <span className="text-white font-mono">${formatUSDT(walletBalance)}</span></span>
+                    <button 
+                        onClick={handleWithdrawAll}
+                        disabled={isWithdrawing || gameBalance === 0n}
+                        className="px-2 py-0.5 rounded text-[10px] border border-gray-600 text-gray-300 hover:text-white hover:border-gray-400 disabled:opacity-30"
+                    >
+                        Cash Out
+                    </button>
+                  </div>
               </div>
 
-              {/* Row 2: Action buttons */}
-              <div className="flex gap-2">
-                <button 
-                    onClick={() => setShowDepositModal(true)}
-                    className={`flex-1 py-2 text-sm font-bold rounded text-black ${showDepositAnimation ? 'bg-yellow-500 deposit-button-pulse' : 'bg-dfinity-turquoise'}`}
-                >
-                  + Chips
-                </button>
-                <button 
-                    onClick={clearBet}
-                    disabled={betAmount === 0 || disabled}
-                    className="flex-1 py-2 text-sm border border-gray-600 rounded text-gray-400 hover:text-white disabled:opacity-30"
-                >
-                  Clear
-                </button>
-                <button 
-                    onClick={handleWithdrawAll}
-                    disabled={isWithdrawing || gameBalance === 0n}
-                    className="flex-1 py-2 text-sm border border-gray-600 rounded text-gray-400 hover:text-white disabled:opacity-30"
-                >
-                  Cash Out
-                </button>
-              </div>
-            </div>
-
-            {/* Bottom Info Row */}
-            <div className="flex items-center justify-between text-xs mt-2 pt-2 border-t border-gray-800/50 text-gray-400">
-              <div className="flex gap-3">
-                  <span>Chips: <span className="text-white font-mono">${formatUSDT(gameBalance)}</span></span>
-                  <span>Wallet: <span className="text-white font-mono">${formatUSDT(walletBalance)}</span></span>
-              </div>
               {houseLimitStatus !== 'healthy' && (
                 <span className={houseLimitStatus === 'danger' ? 'text-red-400 font-bold' : 'text-yellow-400 font-bold'}>
                   House limit {houseLimitStatus === 'danger' ? 'exceeded' : 'near'}
@@ -349,7 +398,7 @@ export function BettingRail({
         </div>
       </div>
 
-      {/* Deposit Modal (portal to body) */}
+      {/* Deposit Modal (unchanged) */}
       {showDepositModal && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setShowDepositModal(false)}>
           <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-sm w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>

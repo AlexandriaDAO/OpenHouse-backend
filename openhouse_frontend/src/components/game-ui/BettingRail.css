@@ -1,48 +1,45 @@
 /* Poker table aesthetic */
 
-/* Curved top edge - elliptical curve */
+/* Wood border effect on the curve */
 .betting-rail-curve {
-  height: 16px;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    #1a472a 100%
-  );
+  height: 24px; /* Increased height for visibility */
+  background: 
+    /* Wood grain texture overlay */
+    repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 10px,
+      rgba(0, 0, 0, 0.05) 10px,
+      rgba(0, 0, 0, 0.05) 12px
+    ),
+    /* Main wood color gradient */
+    linear-gradient(
+      to bottom,
+      #3e2723 0%,   /* Dark wood top */
+      #5d4037 40%,  /* Lighter wood body */
+      #3e2723 100%  /* Dark wood bottom */
+    );
   border-top-left-radius: 50% 100%;
   border-top-right-radius: 50% 100%;
   position: relative;
-  pointer-events: none; /* Allow clicks through if needed, though it's just decoration */
-}
-
-/* Subtle accent line at curve peak */
-.betting-rail-curve::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 10%;
-  right: 10%;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.12),
-    transparent
-  );
-  border-top-left-radius: 50% 100%;
-  border-top-right-radius: 50% 100%;
+  box-shadow: 
+    inset 0 1px 0 rgba(255, 255, 255, 0.1), /* Highlight top edge */
+    0 4px 8px rgba(0, 0, 0, 0.5); /* Drop shadow onto felt */
+  z-index: 10;
 }
 
 /* Main felt surface - gradient for depth */
 .betting-rail {
-  background: linear-gradient(
-    180deg,
-    #1a472a 0%,
-    #153d24 50%,
-    #122f1c 100%
-  );
-  box-shadow:
-    0 -4px 20px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  background: 
+    /* Felt texture noise (optional/subtle) */
+    radial-gradient(circle at 50% -20%, rgba(255,255,255,0.05), transparent 70%),
+    linear-gradient(
+      180deg,
+      #1a472a 0%,
+      #153d24 100%
+    );
+  box-shadow: inset 0 10px 20px rgba(0,0,0,0.3); /* Shadow from the wood rail */
+  padding-top: 8px;
 }
 
 /* Chip button interactions */
@@ -78,4 +75,32 @@
 
 .deposit-button-pulse {
   animation: deposit-pulse 2s ease-in-out infinite;
+}
+
+/* Chip Arc Container */
+.chip-arc-container {
+  position: relative;
+  width: 200px;
+  height: 100px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  /* perspective: 500px; Optional 3D effect */
+}
+
+/* Chip within the arc */
+.chip-in-arc {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 64px; /* Fixed size */
+  height: auto;
+  transform-origin: bottom center;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+}
+
+/* Hover effect on the pile */
+.chip-arc-container:hover .chip-in-arc {
+  margin-bottom: 5px; /* Lift slightly */
 }
