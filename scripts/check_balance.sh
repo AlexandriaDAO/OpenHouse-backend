@@ -43,9 +43,9 @@ echo "$AUDIT"
 echo ""
 
 # 3. Parse audit for excess calculation
-POOL=$(echo "$AUDIT" | grep "pool_reserve" | awk -F'=' '{print $2}' | sed 's/[^0-9]//g' | head -n1)
-DEPOSITS=$(echo "$AUDIT" | grep "deposits" | awk -F'=' '{print $2}' | sed 's/[^0-9]//g' | head -n1)
-CANISTER=$(echo "$AUDIT" | grep "canister" | awk -F'=' '{print $2}' | sed 's/[^0-9]//g' | head -n1)
+POOL=$(echo "$AUDIT" | sed -n 's/.*pool_reserve (\([0-9]*\)).*/\1/p')
+DEPOSITS=$(echo "$AUDIT" | sed -n 's/.*deposits (\([0-9]*\)).*/\1/p')
+CANISTER=$(echo "$AUDIT" | sed -n 's/.*canister (\([0-9]*\)).*/\1/p')
 
 # Fallback if parsing failed
 if [ -z "$POOL" ]; then POOL=0; fi
