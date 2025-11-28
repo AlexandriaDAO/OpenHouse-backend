@@ -1,4 +1,5 @@
 use crate::types::{RandomnessSeed, MAX_NUMBER};
+use crate::defi_accounting::memory_ids::{SEED_STATE_MEMORY_ID, NONCE_COUNTER_MEMORY_ID};
 use ic_cdk::management_canister::raw_rand;
 use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::StableCell;
@@ -23,18 +24,17 @@ thread_local! {
     static SEED_STATE: RefCell<Option<RandomnessSeed>> = RefCell::new(None);
     static SEED_INIT_LOCK: RefCell<bool> = RefCell::new(false);
 
-    // Stable cells for persistence (Memory ID 1)
+    // Stable cells for persistence
     static SEED_CELL: RefCell<StableCell<RandomnessSeed, Memory>> = RefCell::new(
         StableCell::init(
-            crate::MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(1))),
+            crate::MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(SEED_STATE_MEMORY_ID))),
             RandomnessSeed::default()
         )
     );
 
-    // Memory ID 2
     static LAST_ROTATION_CELL: RefCell<StableCell<u64, Memory>> = RefCell::new(
         StableCell::init(
-            crate::MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(2))),
+            crate::MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(NONCE_COUNTER_MEMORY_ID))),
             0u64
         )
     );

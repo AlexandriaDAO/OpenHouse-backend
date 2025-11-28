@@ -1,12 +1,8 @@
 use ic_stable_structures::{StableVec, StableCell, memory_manager::MemoryId};
 use std::cell::RefCell;
 use crate::{MEMORY_MANAGER, Memory};
+use crate::defi_accounting::memory_ids::{SNAPSHOTS_MEMORY_ID, ACCUMULATOR_MEMORY_ID};
 use super::types::{DailySnapshot, DailyAccumulator};
-
-/// Memory IDs for statistics storage
-/// Using 22 and 23, after AUDIT_LOG_MEMORY_ID (21)
-const SNAPSHOTS_MEMORY_ID: u8 = 22;
-const ACCUMULATOR_MEMORY_ID: u8 = 23;
 
 thread_local! {
     /// Historical daily snapshots - append-only, never deleted

@@ -1,5 +1,5 @@
 use candid::{CandidType, Deserialize, Nat, Principal};
-use ic_stable_structures::{StableBTreeMap, StableCell, memory_manager::VirtualMemory, DefaultMemoryImpl, Storable};
+use ic_stable_structures::{StableBTreeMap, StableCell, memory_manager::{VirtualMemory, MemoryId}, DefaultMemoryImpl, Storable};
 use serde::Serialize;
 use std::cell::RefCell;
 use std::borrow::Cow;
@@ -7,6 +7,7 @@ use num_traits::ToPrimitive;
 
 use crate::types::{Account, TransferFromArgs, TransferFromError, CKUSDT_CANISTER_ID, CKUSDT_TRANSFER_FEE};
 use super::accounting;
+use super::memory_ids::{LP_SHARES_MEMORY_ID, POOL_STATE_MEMORY_ID};
 
 // Constants
 
@@ -87,14 +88,14 @@ thread_local! {
     // LP shares by user
     static LP_SHARES: RefCell<StableBTreeMap<Principal, StorableNat, VirtualMemory<DefaultMemoryImpl>>> = {
         RefCell::new(StableBTreeMap::init(
-            crate::MEMORY_MANAGER.with(|m| m.borrow().get(ic_stable_structures::memory_manager::MemoryId::new(11)))
+            crate::MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(LP_SHARES_MEMORY_ID)))
         ))
     };
 
     // Pool state (reserve + initialized flag)
     static POOL_STATE: RefCell<StableCell<PoolState, VirtualMemory<DefaultMemoryImpl>>> = {
         RefCell::new(StableCell::init(
-            crate::MEMORY_MANAGER.with(|m| m.borrow().get(ic_stable_structures::memory_manager::MemoryId::new(13))),
+            crate::MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(POOL_STATE_MEMORY_ID))),
             PoolState {
                 reserve: Nat::from(0u64),
                 initialized: false,

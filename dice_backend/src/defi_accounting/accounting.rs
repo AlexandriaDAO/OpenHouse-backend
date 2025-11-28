@@ -11,13 +11,16 @@ use crate::{MEMORY_MANAGER, Memory};
 use super::liquidity_pool;
 use super::types::{PendingWithdrawal, WithdrawalType, AuditEntry, AuditEvent};
 
+use super::memory_ids::{
+    USER_BALANCES_MEMORY_ID,
+    PENDING_WITHDRAWALS_MEMORY_ID,
+    AUDIT_LOG_MAP_MEMORY_ID,
+    AUDIT_LOG_COUNTER_MEMORY_ID,
+};
+
 // Constants
 const MIN_DEPOSIT: u64 = 1_000_000; // 1 USDT
 const MIN_WITHDRAW: u64 = 1_000_000; // 1 USDT
-const USER_BALANCES_MEMORY_ID: u8 = 10;
-const PENDING_WITHDRAWALS_MEMORY_ID: u8 = 20;
-const AUDIT_LOG_MAP_MEMORY_ID: u8 = 22;
-const AUDIT_LOG_COUNTER_MEMORY_ID: u8 = 23;
 const MAX_AUDIT_ENTRIES: u64 = 1000; // Retention limit
 /// Minimum balance before triggering automatic weekly withdrawal to parent canister.
 /// Set to 100 USDT to minimize gas costs while ensuring timely fee collection.
