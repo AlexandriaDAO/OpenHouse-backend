@@ -8,14 +8,14 @@ import {
   GameButton,
   GameStats,
   type GameStat,
+  BettingRail
 } from '../../components/game-ui';
-import { DiceAnimation, DiceControls, type DiceDirection, ChipBetting, ChipStack } from '../../components/game-specific/dice';
+import { DiceAnimation, DiceControls, type DiceDirection } from '../../components/game-specific/dice';
 import { useGameMode, useGameState } from '../../hooks/games';
 import { useGameBalance } from '../../providers/GameBalanceProvider';
 import { useBalance } from '../../providers/BalanceProvider';
 import { useAuth } from '../../providers/AuthProvider';
-import { ApproveArgs } from '../../types/ledger';
-import { DECIMALS_PER_CKUSDT, formatUSDT, TRANSFER_FEE } from '../../types/balance';
+import { DECIMALS_PER_CKUSDT, formatUSDT } from '../../types/balance';
 
 const DICE_BACKEND_CANISTER_ID = 'whchi-hyaaa-aaaao-a4ruq-cai';
 
@@ -36,7 +36,11 @@ export function DiceGame() {
   const { balance: walletBalance, refreshBalance: refreshWalletBalance } = useBalance();
   const gameBalanceContext = useGameBalance('dice');
   const balance = gameBalanceContext.balance;
-  const refreshGameBalance = gameBalanceContext.refresh;
+  
+  const handleBalanceRefresh = useCallback(() => {
+    refreshWalletBalance();
+    gameBalanceContext.refresh();
+  }, [refreshWalletBalance, gameBalanceContext]);
 
   // Game State - using minimal result type
   const [maxBet, setMaxBet] = useState(10);
@@ -44,7 +48,6 @@ export function DiceGame() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [gameError, setGameError] = useState<string | null>(null);
   const [betAmount, setBetAmount] = useState(0.01);
-  const [betError, setBetError] = useState<string | null>(null);
 
   // Dice-specific State
   const [targetNumber, setTargetNumber] = useState(50);
@@ -52,31 +55,7 @@ export function DiceGame() {
   const [winChance, setWinChance] = useState(0);
   const [multiplier, setMultiplier] = useState(0);
   const [animatingResult, setAnimatingResult] = useState<number | null>(null);
-  const [showDepositAnimation, setShowDepositAnimation] = useState(false);
   const [showOddsExplainer, setShowOddsExplainer] = useState(false);
-
-  // Accounting State
-  const [depositAmount, setDepositAmount] = useState('1');
-  const [showDepositModal, setShowDepositModal] = useState(false);
-  const [isDepositing, setIsDepositing] = useState(false);
-  const [depositStep, setDepositStep] = useState<'idle' | 'approving' | 'depositing'>('idle');
-  const [isWithdrawing, setIsWithdrawing] = useState(false);
-  const [accountingError, setAccountingError] = useState<string | null>(null);
-  const [accountingSuccess, setAccountingSuccess] = useState<string | null>(null);
-
-  // Bet validation
-  const validateBet = () => {
-    if (betAmount < 0.01) {
-      setBetError('Minimum bet is 0.01 USDT');
-      return false;
-    }
-    if (betAmount > maxBet) {
-      setBetError(`Maximum bet is ${maxBet.toFixed(2)} USDT`);
-      return false;
-    }
-    setBetError(null);
-    return true;
-  };
 
   // Helper to parse backend errors
   const parseBackendError = (errorMsg: string): string => {
@@ -84,12 +63,11 @@ export function DiceGame() {
       const parts = errorMsg.split('|');
       const userBalance = parts[1] || 'Unknown balance';
       const betAmountStr = parts[2] || 'Unknown bet';
-      setShowDepositAnimation(true);
       return `INSUFFICIENT CHIPS - BET NOT PLACED\n\n` +
         `${userBalance}\n` +
         `${betAmountStr}\n\n` +
         `${parts[3] || 'This bet was not placed and no funds were deducted.'}\n\n` +
-        `Click "Buy Chips" above to add more USDT.`;
+        `Click "Buy Chips" below to add more USDT.`;
     }
     if (errorMsg.includes('exceeds house limit') || errorMsg.includes('house balance')) {
       return `BET REJECTED - NO MONEY LOST\n\n` +
@@ -102,100 +80,6 @@ export function DiceGame() {
         `Please try again in a few seconds. No funds were deducted.`;
     }
     return errorMsg;
-  };
-
-  // Accounting Handlers
-  const handleDeposit = async () => {
-    if (!actor || !ledgerActor || !isAuthenticated) return;
-
-    setIsDepositing(true);
-    setAccountingError(null);
-    setAccountingSuccess(null);
-
-    try {
-      const amount = BigInt(Math.floor(parseFloat(depositAmount) * DECIMALS_PER_CKUSDT));
-
-      // Min deposit 1 USDT for game balance
-      if (amount < BigInt(1_000_000)) {
-        setAccountingError('Minimum deposit is 1 USDT');
-        setIsDepositing(false);
-        return;
-      }
-
-      if (walletBalance && amount > walletBalance) {
-        setAccountingError('Insufficient wallet balance');
-        setIsDepositing(false);
-        return;
-      }
-
-      setDepositStep('approving');
-      const approveArgs: ApproveArgs = {
-        spender: {
-          owner: Principal.fromText(DICE_BACKEND_CANISTER_ID),
-          subaccount: [],
-        },
-        amount: amount + BigInt(TRANSFER_FEE),
-        fee: [],
-        memo: [],
-        from_subaccount: [],
-        created_at_time: [],
-        expected_allowance: [],
-        expires_at: [],
-      };
-
-      const approveResult = await ledgerActor.icrc2_approve(approveArgs);
-
-      if ('Err' in approveResult) {
-        setAccountingError(`Approval failed: ${JSON.stringify(approveResult.Err)}`);
-        setIsDepositing(false);
-        setDepositStep('idle');
-        return;
-      }
-
-      setDepositStep('depositing');
-      const result = await actor.deposit(amount);
-
-      if ('Ok' in result) {
-        setAccountingSuccess(`Bought ${depositAmount} USDT in chips!`);
-        setDepositAmount('1');
-        setShowDepositModal(false);
-        await refreshWalletBalance();
-        gameBalanceContext.refresh();
-      } else {
-        setAccountingError(result.Err);
-      }
-    } catch (err) {
-      setAccountingError(err instanceof Error ? err.message : 'Deposit failed');
-    } finally {
-      setIsDepositing(false);
-      setDepositStep('idle');
-    }
-  };
-
-  const handleWithdrawAll = async () => {
-    if (!actor || !isAuthenticated) return;
-
-    setIsWithdrawing(true);
-    setAccountingError(null);
-    setAccountingSuccess(null);
-
-    try {
-      const result = await actor.withdraw_all();
-
-      if ('Ok' in result) {
-        const newBalance = result.Ok;
-        const withdrawnAmount = (Number(balance.game) - Number(newBalance)) / DECIMALS_PER_CKUSDT;
-        setAccountingSuccess(`Cashed out ${withdrawnAmount.toFixed(2)} USDT!`);
-        await refreshWalletBalance();
-        gameBalanceContext.refresh();
-      } else {
-        setAccountingError(result.Err);
-      }
-    } catch (err) {
-      setAccountingError(err instanceof Error ? err.message : 'Withdrawal failed');
-    } finally {
-      setIsWithdrawing(false);
-    }
   };
 
   // Calculate odds
@@ -232,7 +116,7 @@ export function DiceGame() {
       }
     };
     updateOdds();
-  }, [targetNumber, direction, actor]);
+  }, [targetNumber, direction, actor, betAmount]);
 
   // Balance management
   useEffect(() => {
@@ -252,22 +136,19 @@ export function DiceGame() {
     }
   }, [actor]);
 
-  useEffect(() => {
-    if (balance.game > 0n) {
-      setShowDepositAnimation(false);
-    }
-  }, [balance.game]);
-
   // Roll Dice
   const rollDice = async () => {
     if (!isAuthenticated) {
       setGameError('Please log in to play.');
       return;
     }
-    if (!actor || !validateBet()) return;
+    if (!actor) return;
     if (balance.game === 0n) {
       setGameError('Your dice game balance is empty.');
-      setShowDepositAnimation(true);
+      return;
+    }
+    if (betAmount < 0.01) {
+      setGameError('Minimum bet is 0.01 USDT');
       return;
     }
 
@@ -282,8 +163,6 @@ export function DiceGame() {
     setIsPlaying(true);
     setGameError(null);
     setAnimatingResult(null);
-    setAccountingError(null);
-    setAccountingSuccess(null);
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => reject(new Error('Game timed out.')), 15000);
@@ -329,315 +208,199 @@ export function DiceGame() {
   return (
     <GameLayout minBet={0.01} maxWin={10} houseEdge={0.99}>
 
-      {/* UNIFIED GAME CARD */}
-      <div className="card max-w-5xl mx-auto bg-black border border-gray-800">
+      {/* Main Game Area - Centered, single column */}
+      <div className="max-w-2xl mx-auto pb-48"> {/* pb-48 for rail clearance */}
 
-        {/* COMPACT TOP BAR */}
-        <div className="mb-4 flex items-center justify-between text-xs">
-          {!isAuthenticated ? (
-            <p className="text-gray-400">Please log in to play</p>
-          ) : (
-            <>
-              {/* Compact balance display */}
-              <div className="flex items-center gap-3 text-gray-400">
-                <span>
-                  Chips: <span className="font-mono text-white">{formatUSDT(balance.game)}</span>
-                </span>
-                <span className="text-gray-600">|</span>
-                <span>
-                  Wallet: <span className="font-mono text-gray-500">{formatUSDT(walletBalance)}</span>
-                </span>
-              </div>
-
-              {/* Compact actions */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowDepositModal(true)}
-                  className={`px-3 py-1 text-xs font-bold rounded transition ${
-                    showDepositAnimation
-                      ? 'bg-white text-black animate-pulse'
-                      : 'bg-white text-black hover:bg-gray-200'
-                  }`}
-                >
-                  + Chips
-                </button>
-                <button
-                  onClick={handleWithdrawAll}
-                  disabled={isWithdrawing || balance.game === 0n}
-                  className="px-3 py-1 text-xs text-gray-400 hover:text-white transition disabled:opacity-30"
-                >
-                  Cash Out
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Accounting Messages */}
-        {(accountingError || accountingSuccess) && (
-          <div className={`mb-4 text-center text-xs py-1.5 rounded ${accountingError ? 'text-red-400 bg-red-900/20' : 'text-green-400 bg-green-900/20'}`}>
-            {accountingError || accountingSuccess}
+        {/* Auth check */}
+        {!isAuthenticated && (
+          <div className="text-center text-gray-400 mb-6">
+            Please log in to play
           </div>
         )}
 
-        {/* MAIN GAME AREA: Side-by-Side */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
+        {/* Dice Animation - Larger, centered */}
+        <div className="flex flex-col items-center justify-center min-h-[350px] bg-black/20 rounded-xl border border-gray-800/50 p-6 relative overflow-hidden">
+          {/* Background gradient */}
+          <div className="absolute inset-0 bg-gradient-to-br from-dfinity-turquoise/5 to-purple-900/10 pointer-events-none" />
 
-          {/* LEFT COLUMN: CONTROLS */}
-          <div className="space-y-6">
-
-            <ChipBetting
-              betAmount={betAmount}
-              onBetChange={setBetAmount}
-              gameBalance={balance.game}
-              maxBet={maxBet}
-              disabled={isPlaying}
-              houseLimitStatus={
-                (() => {
-                  const houseBalanceUSDT = Number(balance.house) / DECIMALS_PER_CKUSDT;
-                  const maxAllowedPayout = houseBalanceUSDT * 0.1;
-                  const currentPotentialPayout = betAmount * multiplier;
-                  const utilizationPct = maxAllowedPayout > 0 ? (currentPotentialPayout / maxAllowedPayout) * 100 : 0;
-                  if (utilizationPct > 90) return 'danger';
-                  if (utilizationPct > 70) return 'warning';
-                  return 'healthy';
-                })()
-              }
+          {/* Dice component - scale up */}
+          <div className="scale-125 mb-8 relative z-10">
+            <DiceAnimation
+              targetNumber={animatingResult}
+              isRolling={isPlaying}
+              onAnimationComplete={handleAnimationComplete}
             />
+          </div>
 
-            <DiceControls
-              targetNumber={targetNumber}
-              onTargetChange={setTargetNumber}
-              direction={direction}
-              onDirectionChange={setDirection}
-              disabled={isPlaying}
-            />
-
-            {/* Compact payout summary - just potential win and multiplier inline */}
-            <div className="flex items-center justify-between text-xs px-1">
-              <div className="flex items-center gap-4 text-gray-400">
-                <span>
-                  <span className="text-gray-400 font-bold">{winChance.toFixed(0)}%</span> chance
-                </span>
-                <span>
-                  <span className="text-white font-bold">{multiplier.toFixed(2)}x</span> payout
-                </span>
+          {/* Result Display */}
+          <div className="h-24 flex items-center justify-center w-full relative z-10">
+            {lastResult && !isPlaying ? (
+              <div className={`text-center ${lastResult.is_win ? 'text-green-400' : 'text-red-400'} animate-in fade-in slide-in-from-bottom-4 duration-300`}>
+                <div className="text-4xl font-black">
+                  {lastResult.is_win ? 'YOU WON!' : 'YOU LOST'}
+                </div>
+                {lastResult.is_win && (
+                  <div className="text-2xl font-mono text-dfinity-turquoise">
+                    +{formatUSDT(lastResult.payout)}
+                  </div>
+                )}
+                <div className="text-xs text-gray-500 mt-2 font-mono">
+                   Rolled: {lastResult.rolled_number} | Target: {targetNumber} ({direction})
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-white font-mono font-bold">
-                  Win ${(betAmount * multiplier).toFixed(2)}
-                </span>
+            ) : !isPlaying && (
+              <div className="text-gray-600 text-sm italic">Ready to roll...</div>
+            )}
+          </div>
+        </div>
+
+        {/* Controls Section */}
+        <div className="mt-6 space-y-4">
+
+          {/* Over/Under + Target Slider */}
+          <DiceControls
+            targetNumber={targetNumber}
+            onTargetChange={setTargetNumber}
+            direction={direction}
+            onDirectionChange={setDirection}
+            disabled={isPlaying}
+          />
+
+          {/* Payout Preview Line */}
+          <div className="flex items-center justify-between text-xs px-1">
+            <div className="flex items-center gap-4 text-gray-400">
+              <span>
+                <span className="text-yellow-400 font-bold">{winChance.toFixed(0)}%</span> chance
+              </span>
+              <span>
+                <span className="text-green-400 font-bold">{multiplier.toFixed(2)}x</span> payout
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-dfinity-turquoise font-mono font-bold">
+                Win ${(betAmount * multiplier).toFixed(2)}
+              </span>
+              <button
+                onClick={() => setShowOddsExplainer(true)}
+                className="text-gray-500 hover:text-dfinity-turquoise"
+                title="Odds info"
+              >
+                ?
+              </button>
+            </div>
+          </div>
+
+          {/* Roll Button */}
+          <GameButton
+            onClick={rollDice}
+            disabled={!actor || betAmount === 0 || !isAuthenticated}
+            loading={isPlaying}
+            label="ROLL DICE"
+            loadingLabel="Rolling..."
+          />
+
+          {/* Error Display (game errors only) */}
+          {gameError && (
+            <div className="p-3 bg-red-900/20 border border-red-500/30 rounded text-red-400 text-sm whitespace-pre-wrap">
+              {gameError}
+            </div>
+          )}
+
+        </div>
+
+        {/* Odds Explainer Modal */}
+        {showOddsExplainer && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowOddsExplainer(false)}>
+            <div className="bg-gray-900 rounded-xl p-6 max-w-lg w-full border border-gray-700 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-white">How Odds Work</h3>
                 <button
-                  onClick={() => setShowOddsExplainer(true)}
-                  className="text-gray-600 hover:text-white transition"
-                  title="How odds work"
+                  onClick={() => setShowOddsExplainer(false)}
+                  className="text-gray-400 hover:text-white text-2xl leading-none"
                 >
-                  ?
+                  ×
                 </button>
               </div>
-            </div>
 
-            {/* Odds Explainer Modal/Overlay */}
-            {showOddsExplainer && (
-              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowOddsExplainer(false)}>
-                <div className="bg-gray-900 rounded-xl p-6 max-w-lg w-full border border-gray-700 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-bold text-white">How Odds Work</h3>
-                    <button
-                      onClick={() => setShowOddsExplainer(false)}
-                      className="text-gray-400 hover:text-white text-2xl leading-none"
-                    >
-                      ×
-                    </button>
-                  </div>
+              <div className="text-xs text-gray-300 space-y-3">
+                <div>
+                  <p className="font-semibold text-white mb-1">The Dice Roll (0-100)</p>
+                  <p>Every roll generates a random number from <span className="font-mono text-white">0</span> to <span className="font-mono text-white">100</span> — that's <span className="font-mono text-white">101</span> total possible outcomes.</p>
+                </div>
 
-                  <div className="text-xs text-gray-300 space-y-3">
-                    <div>
-                      <p className="font-semibold text-white mb-1">The Dice Roll (0-100)</p>
-                      <p>Every roll generates a random number from <span className="font-mono text-white">0</span> to <span className="font-mono text-white">100</span> — that's <span className="font-mono text-white">101</span> total possible outcomes.</p>
-                    </div>
+                <div>
+                  <p className="font-semibold text-white mb-1">Pick Your Side</p>
+                  <p>
+                    Choose a target number and bet <span className="font-bold">Over</span> or <span className="font-bold">Under</span>:
+                  </p>
+                  <ul className="mt-1 ml-4 space-y-1 list-disc list-inside">
+                    <li><span className="font-bold text-green-400">Over {targetNumber}:</span> Win if roll is {targetNumber + 1}-100</li>
+                    <li><span className="font-bold text-blue-400">Under {targetNumber}:</span> Win if roll is 0-{targetNumber - 1}</li>
+                  </ul>
+                </div>
 
-                    <div>
-                      <p className="font-semibold text-white mb-1">Pick Your Side</p>
-                      <p>
-                        Choose a target number and bet <span className="font-bold">Over</span> or <span className="font-bold">Under</span>:
-                      </p>
-                      <ul className="mt-1 ml-4 space-y-1 list-disc list-inside">
-                        <li><span className="font-bold text-green-400">Over {targetNumber}:</span> Win if roll is {targetNumber + 1}-100</li>
-                        <li><span className="font-bold text-blue-400">Under {targetNumber}:</span> Win if roll is 0-{targetNumber - 1}</li>
-                      </ul>
-                    </div>
-
-                    <div>
-                      <p className="font-semibold text-white mb-1">Exact Payouts</p>
-                      <p>
-                        You get <span className="font-bold text-yellow-400">exact fair odds</span> based on probability.
-                      </p>
-                      <div className="mt-2 bg-gray-900 border border-gray-800 rounded p-2 font-mono text-xs">
-                        <p className="text-gray-400">Example: <span className="text-white">Under 1</span></p>
-                        <p className="mt-1">• Only <span className="text-white">0</span> wins (1 out of 101 outcomes)</p>
-                        <p>• Win chance: <span className="text-yellow-400">~0.99%</span></p>
-                        <p>• Fair payout: <span className="text-green-400">~100x</span></p>
-                        <p className="mt-1">Bet $1 → Win $100 💰</p>
-                      </div>
-                    </div>
-
-                    <div>
-                      <p className="font-semibold text-red-400 mb-1">The House Edge (0.99%)</p>
-                      <p>
-                        If you land <span className="font-bold text-red-400">exactly on {targetNumber}</span>, the <span className="font-bold">house wins</span> and takes your bet.
-                        This single outcome creates the transparent <span className="font-mono text-white">0.99%</span> house edge.
-                      </p>
-                      <div className="mt-2 bg-red-900/10 rounded p-2 border border-red-500/20">
-                        <p className="text-xs text-gray-400">
-                          Example at target <span className="text-white">50</span>:
-                        </p>
-                        <ul className="mt-1 ml-4 space-y-0.5 text-xs">
-                          <li>• <span className="text-green-400">Over 50:</span> 51-100 = 50 winning outcomes</li>
-                          <li>• <span className="text-red-400">Exactly 50:</span> House wins (1 outcome)</li>
-                          <li>• <span className="text-blue-400">Under 50:</span> 0-49 = 50 winning outcomes</li>
-                        </ul>
-                        <p className="mt-1 text-xs text-gray-300">
-                          That middle slot is how the house maintains its edge!
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-gray-700/30">
-                      <p className="text-xs text-gray-400 italic">
-                        All rolls use the Internet Computer's verifiable random function (VRF) for provably fair results.
-                      </p>
-                    </div>
+                <div>
+                  <p className="font-semibold text-white mb-1">Exact Payouts</p>
+                  <p>
+                    You get <span className="font-bold text-yellow-400">exact fair odds</span> based on probability.
+                  </p>
+                  <div className="mt-2 bg-gray-900 border border-gray-800 rounded p-2 font-mono text-xs">
+                    <p className="text-gray-400">Example: <span className="text-white">Under 1</span></p>
+                    <p className="mt-1">• Only <span className="text-white">0</span> wins (1 out of 101 outcomes)</p>
+                    <p>• Win chance: <span className="text-yellow-400">~0.99%</span></p>
+                    <p>• Fair payout: <span className="text-green-400">~100x</span></p>
+                    <p className="mt-1">Bet $1 → Win $100 💰</p>
                   </div>
                 </div>
-              </div>
-            )}
 
-            <button
-              onClick={rollDice}
-              disabled={!actor || isPlaying}
-              className="w-full font-mono font-bold py-4 text-xl border-2
-                         border-white text-white bg-transparent
-                         hover:bg-white hover:text-black
-                         disabled:border-gray-700 disabled:text-gray-700
-                         transition"
-            >
-              {isPlaying ? 'Rolling...' : 'ROLL DICE'}
-            </button>
-
-            {gameError && (
-              <div className="p-3 bg-red-900/20 border border-red-500/30 rounded text-red-400 text-sm whitespace-pre-wrap">
-                {gameError}
-              </div>
-            )}
-          </div>
-
-          {/* RIGHT COLUMN: ANIMATION & RESULT */}
-          <div className="flex flex-col items-center justify-center min-h-[300px] bg-black rounded-xl border border-gray-800 p-6 relative overflow-hidden">
-
-            {/* Ambient Background Glow - REMOVED */}
-            
-            <div className="scale-125 mb-8 relative z-10">
-              <DiceAnimation
-                targetNumber={animatingResult}
-                isRolling={isPlaying}
-                onAnimationComplete={handleAnimationComplete}
-              />
-            </div>
-
-            {/* Result Display */}
-            <div className="h-24 flex items-center justify-center w-full relative z-10">
-              {lastResult && !isPlaying ? (
-                <div className={`text-center ${lastResult.is_win ? 'text-white' : 'text-gray-500'} animate-in fade-in slide-in-from-bottom-4 duration-500`}>
-                  <div className="text-4xl font-black tracking-tight mb-1">
-                    {lastResult.is_win ? 'YOU WON!' : 'YOU LOST'}
-                  </div>
-
-                  {lastResult.is_win && (
-                    <div className="text-2xl font-mono text-white">
-                      +{formatUSDT(lastResult.payout)}
-                    </div>
-                  )}
-
-                  <div className="text-xs text-gray-500 mt-2 font-mono">
-                     Rolled: {lastResult.rolled_number} | Target: {targetNumber} ({direction})
+                <div>
+                  <p className="font-semibold text-red-400 mb-1">The House Edge (0.99%)</p>
+                  <p>
+                    If you land <span className="font-bold text-red-400">exactly on {targetNumber}</span>, the <span className="font-bold">house wins</span> and takes your bet.
+                    This single outcome creates the transparent <span className="font-mono text-white">0.99%</span> house edge.
+                  </p>
+                  <div className="mt-2 bg-red-900/10 rounded p-2 border border-red-500/20">
+                    <p className="text-xs text-gray-400">
+                      Example at target <span className="text-white">50</span>:
+                    </p>
+                    <ul className="mt-1 ml-4 space-y-0.5 text-xs">
+                      <li>• <span className="text-green-400">Over 50:</span> 51-100 = 50 winning outcomes</li>
+                      <li>• <span className="text-red-400">Exactly 50:</span> House wins (1 outcome)</li>
+                      <li>• <span className="text-blue-400">Under 50:</span> 0-49 = 50 winning outcomes</li>
+                    </ul>
+                    <p className="mt-1 text-xs text-gray-300">
+                      That middle slot is how the house maintains its edge!
+                    </p>
                   </div>
                 </div>
-              ) : (
-                !isPlaying && (
-                  <div className="text-gray-600 text-sm text-center italic">
-                    Ready to roll...
-                  </div>
-                )
-              )}
+
+                <div className="pt-2 border-t border-gray-700/30">
+                  <p className="text-xs text-gray-400 italic">
+                    All rolls use the Internet Computer's verifiable random function (VRF) for provably fair results.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
+        )}
 
-        </div>
       </div>
 
-      {/* DEPOSIT MODAL */}
-      {showDepositModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowDepositModal(false)}>
-          <div className="bg-black rounded-xl p-6 max-w-md w-full mx-4 border border-gray-800 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-              <span>Buy Chips</span>
-            </h3>
-
-            <div className="mb-6">
-              <label className="block text-sm text-gray-400 mb-2">Amount (USDT)</label>
-              <div className="relative">
-                <input
-                  type="number"
-                  value={depositAmount}
-                  onChange={(e) => setDepositAmount(e.target.value)}
-                  className="w-full bg-black/50 border border-gray-600 rounded-lg px-4 py-3 text-white text-lg focus:border-white focus:outline-none transition"
-                  placeholder="1.0"
-                  min="1"
-                  step="1"
-                  disabled={isDepositing}
-                  autoFocus
-                />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 font-mono">USDT</span>
-              </div>
-              <div className="flex justify-between items-center mt-2">
-                <p className="text-xs text-gray-500">Wallet: {formatUSDT(walletBalance)}</p>
-                <p className="text-xs text-gray-500">Min: 1 USDT</p>
-              </div>
-            </div>
-
-            {accountingError && (
-              <div className="mb-4 p-3 bg-red-900/20 border border-red-500/20 rounded text-red-400 text-xs">
-                {accountingError}
-              </div>
-            )}
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowDepositModal(false)}
-                disabled={isDepositing}
-                className="flex-1 px-4 py-3 font-bold text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDeposit}
-                disabled={isDepositing}
-                className="flex-1 px-4 py-3 bg-white text-black font-bold rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition relative overflow-hidden"
-              >
-                {isDepositing ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <span className="animate-spin">...</span>
-                    {depositStep === 'approving' ? 'Approving...' : 'Depositing...'}
-                  </span>
-                ) : (
-                  'Confirm Deposit'
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Betting Rail - Fixed bottom */}
+      <BettingRail
+        betAmount={betAmount}
+        onBetChange={setBetAmount}
+        maxBet={maxBet}
+        gameBalance={balance.game}
+        walletBalance={walletBalance}
+        houseBalance={balance.house}
+        ledgerActor={ledgerActor}
+        gameActor={actor}
+        onBalanceRefresh={handleBalanceRefresh}
+        disabled={isPlaying}
+        multiplier={multiplier}
+        canisterId={DICE_BACKEND_CANISTER_ID}
+      />
 
     </GameLayout>
   );

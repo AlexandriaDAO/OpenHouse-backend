@@ -1,0 +1,81 @@
+/* Poker table aesthetic */
+
+/* Curved top edge - elliptical curve */
+.betting-rail-curve {
+  height: 16px;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #1a472a 100%
+  );
+  border-top-left-radius: 50% 100%;
+  border-top-right-radius: 50% 100%;
+  position: relative;
+  pointer-events: none; /* Allow clicks through if needed, though it's just decoration */
+}
+
+/* Subtle accent line at curve peak */
+.betting-rail-curve::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.12),
+    transparent
+  );
+  border-top-left-radius: 50% 100%;
+  border-top-right-radius: 50% 100%;
+}
+
+/* Main felt surface - gradient for depth */
+.betting-rail {
+  background: linear-gradient(
+    180deg,
+    #1a472a 0%,
+    #153d24 50%,
+    #122f1c 100%
+  );
+  box-shadow:
+    0 -4px 20px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+/* Chip button interactions */
+.chip-button {
+  transition: transform 0.15s ease, filter 0.15s ease;
+  border-radius: 50%;
+}
+
+.chip-button:hover:not(:disabled) {
+  transform: translateY(-4px);
+  filter: brightness(1.1);
+}
+
+.chip-button:active:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+.chip-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+}
+
+/* Pulsing animation for low balance */
+@keyframes deposit-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(234, 179, 8, 0);
+  }
+}
+
+.deposit-button-pulse {
+  animation: deposit-pulse 2s ease-in-out infinite;
+}
