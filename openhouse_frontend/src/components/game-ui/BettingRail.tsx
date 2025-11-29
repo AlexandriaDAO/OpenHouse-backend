@@ -7,8 +7,6 @@ import { DECIMALS_PER_CKUSDT, formatUSDT, TRANSFER_FEE } from '../../types/balan
 import { ApproveArgs } from '../../types/ledger';
 import './BettingRail.css';
 
-type HouseLimitStatus = 'healthy' | 'warning' | 'danger';
-
 interface BettingRailProps {
   betAmount: number;
   onBetChange: (amount: number) => void;
@@ -168,17 +166,6 @@ export function BettingRail({
     }
   };
 
-  // === House Limit Calculation ===
-  const houseLimitStatus: HouseLimitStatus = useMemo(() => {
-    const houseBalanceUSDT = Number(houseBalance) / DECIMALS_PER_CKUSDT;
-    const maxAllowedPayout = houseBalanceUSDT * 0.1;
-    const currentPotentialPayout = betAmount * multiplier;
-    const utilizationPct = maxAllowedPayout > 0 ? (currentPotentialPayout / maxAllowedPayout) * 100 : 0;
-    if (utilizationPct > 90) return 'danger';
-    if (utilizationPct > 70) return 'warning';
-    return 'healthy';
-  }, [houseBalance, betAmount, multiplier]);
-
   const displayChips = useMemo(() => decomposeIntoChips(betAmount), [betAmount]);
 
   useEffect(() => {
@@ -240,11 +227,19 @@ export function BettingRail({
                 <div className="text-gray-600">
                   Wallet: <span className="text-gray-400 font-mono">${formatUSDT(walletBalance)}</span>
                 </div>
-                {houseLimitStatus !== 'healthy' && (
-                  <div className={`text-[10px] ${houseLimitStatus === 'danger' ? 'text-red-500' : 'text-yellow-500'}`}>
-                    {houseLimitStatus === 'danger' ? 'limit exceeded' : 'near limit'}
-                  </div>
-                )}
+                <div className="text-gray-600 flex items-center gap-1">
+                  House: <span className="text-gray-400 font-mono">${formatUSDT(houseBalance)}</span>
+                  <button
+                    onClick={onBalanceRefresh}
+                    className="text-gray-600 hover:text-gray-400 p-0.5 transition"
+                    title="Refresh balances"
+                  >
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
+                      <path d="M20 4v4h-4M4 20v-4h4"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
 
               {/* CENTER: Chip Buttons */}
@@ -293,8 +288,19 @@ export function BettingRail({
           <div className="px-4 pt-3 pb-1">
             {/* Top row: balances + actions */}
             <div className="flex items-center justify-between w-full text-xs mb-2">
-              <div className="text-gray-500">
-                Chips: <span className="text-white font-mono">${formatUSDT(gameBalance)}</span>
+              <div className="flex flex-col">
+                <div className="text-gray-500 flex items-center gap-1">
+                  Chips: <span className="text-white font-mono">${formatUSDT(gameBalance)}</span>
+                  <button onClick={onBalanceRefresh} className="text-gray-600 hover:text-gray-400">
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
+                      <path d="M20 4v4h-4M4 20v-4h4"/>
+                    </svg>
+                  </button>
+                </div>
+                <div className="text-gray-600 text-[10px]">
+                  House: ${formatUSDT(houseBalance)}
+                </div>
               </div>
               <div className="flex gap-3">
                 <button
