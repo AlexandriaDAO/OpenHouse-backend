@@ -22,6 +22,17 @@ export interface DailySnapshot {
   'pool_reserve_end' : bigint,
   'daily_pool_profit' : bigint,
 }
+export interface HealthCheck {
+  'total_deposits' : bigint,
+  'is_healthy' : boolean,
+  'calculated_total' : bigint,
+  'health_status' : string,
+  'pool_reserve' : bigint,
+  'timestamp' : bigint,
+  'excess' : bigint,
+  'excess_usdt' : number,
+  'canister_balance' : bigint,
+}
 export interface LPPosition {
   'shares' : bigint,
   'redeemable_icp' : bigint,
@@ -54,6 +65,11 @@ export interface _SERVICE {
   'abandon_withdrawal' : ActorMethod<
     [],
     { 'Ok' : bigint } |
+      { 'Err' : string }
+  >,
+  'admin_health_check' : ActorMethod<
+    [],
+    { 'Ok' : HealthCheck } |
       { 'Err' : string }
   >,
   'audit_balances' : ActorMethod<[], { 'Ok' : string } | { 'Err' : string }>,

@@ -708,7 +708,8 @@ pub async fn admin_health_check() -> Result<HealthCheck, String> {
     // Get current values
     let pool_reserve = super::liquidity_pool::get_pool_reserve();
     let total_deposits = calculate_total_deposits();
-    let calculated_total = pool_reserve + total_deposits;
+    let calculated_total = pool_reserve.checked_add(total_deposits)
+        .ok_or("CRITICAL: Accounting overflow (pool_reserve + total_deposits > u64::MAX)")?;
 
     // Calculate excess (can be negative if deficit)
     let excess = canister_balance as i64 - calculated_total as i64;

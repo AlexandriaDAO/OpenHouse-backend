@@ -47,6 +47,16 @@ type ApyInfo = record {
   total_profit: int64;
 };
 
+type WithdrawalType = variant {
+  User: record { amount: nat64 };
+  LP: record { shares: nat; reserve: nat; amount: nat64 };
+};
+
+type PendingWithdrawal = record {
+  withdrawal_type: WithdrawalType;
+  created_at: nat64;
+};
+
 type HealthCheck = record {
   pool_reserve: nat64;
   total_deposits: nat64;

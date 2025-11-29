@@ -57,6 +57,18 @@ type PendingWithdrawal = record {
   created_at: nat64;
 };
 
+type HealthCheck = record {
+  pool_reserve: nat64;
+  total_deposits: nat64;
+  canister_balance: nat64;
+  calculated_total: nat64;
+  excess: int64;
+  excess_usdt: float64;
+  is_healthy: bool;
+  health_status: text;
+  timestamp: nat64;
+};
+
 service : {
   // Play a game of dice - returns minimal result (3 fields)
   play_dice: (nat64, nat8, RollDirection, text) -> (variant { Ok: MinimalGameResult; Err: text });
@@ -84,6 +96,9 @@ service : {
   get_accounting_stats: () -> (AccountingStats) query;
   audit_balances: () -> (variant { Ok: text; Err: text }) query;
   refresh_canister_balance: () -> (nat64);
+
+  // Admin endpoints
+  admin_health_check: () -> (variant { Ok: HealthCheck; Err: text });
 
   // Liquidity Pool Management
   // Deposit liquidity into the pool

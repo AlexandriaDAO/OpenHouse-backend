@@ -1,4 +1,15 @@
 export const idlFactory = ({ IDL }) => {
+  const HealthCheck = IDL.Record({
+    'total_deposits' : IDL.Nat64,
+    'is_healthy' : IDL.Bool,
+    'calculated_total' : IDL.Nat64,
+    'health_status' : IDL.Text,
+    'pool_reserve' : IDL.Nat64,
+    'timestamp' : IDL.Nat64,
+    'excess' : IDL.Int64,
+    'excess_usdt' : IDL.Float64,
+    'canister_balance' : IDL.Nat64,
+  });
   const RollDirection = IDL.Variant({ 'Over' : IDL.Null, 'Under' : IDL.Null });
   const AccountingStats = IDL.Record({
     'total_user_deposits' : IDL.Nat64,
@@ -54,6 +65,11 @@ export const idlFactory = ({ IDL }) => {
     'abandon_withdrawal' : IDL.Func(
         [],
         [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],
+        [],
+      ),
+    'admin_health_check' : IDL.Func(
+        [],
+        [IDL.Variant({ 'Ok' : HealthCheck, 'Err' : IDL.Text })],
         [],
       ),
     'audit_balances' : IDL.Func(

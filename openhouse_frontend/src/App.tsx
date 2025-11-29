@@ -9,6 +9,7 @@ import { Crash } from './pages/Crash';
 import { Plinko } from './pages/Plinko';
 import { Blackjack } from './pages/Blackjack';
 import { DiceLayout, DiceGame, DiceLiquidity } from './pages/dice';
+import { Admin } from './pages/Admin';
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
                     <Route index element={<DiceGame />} />
                     <Route path="liquidity" element={<DiceLiquidity />} />
                   </Route>
+                  <Route path="/admin" element={<Admin />} />
                 </Routes>
               </Layout>
             </GameBalanceProvider>
