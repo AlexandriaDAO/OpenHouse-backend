@@ -12,12 +12,14 @@ interface DiceAnimationProps {
   targetNumber: number | null;
   isRolling: boolean;
   onAnimationComplete?: () => void;
+  onClick?: () => void;
 }
 
 export const DiceAnimation: React.FC<DiceAnimationProps> = ({
   targetNumber,
   isRolling,
-  onAnimationComplete
+  onAnimationComplete,
+  onClick
 }) => {
   const [displayNumber, setDisplayNumber] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
@@ -90,7 +92,10 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
   const isAnimating = isRolling && !isComplete;
 
   return (
-    <div className="dice-container">
+    <div 
+      className={`dice-container ${onClick ? 'cursor-pointer' : ''}`} 
+      onClick={!isRolling && onClick ? onClick : undefined}
+    >
       <div className={`dice-box ${isComplete ? 'result-landed' : ''} ${isAnimating ? 'rolling' : ''}`}>
         <div className="number-display">
           {displayNumber}

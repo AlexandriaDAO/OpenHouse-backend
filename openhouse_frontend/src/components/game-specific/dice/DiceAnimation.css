@@ -4,28 +4,43 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 300px;
+  height: 240px; /* Increased from 180px */
   position: relative;
   background: transparent;
+  transition: transform 0.2s ease;
+}
+
+.dice-container:active {
+  transform: scale(0.98);
 }
 
 /* Dice-like container */
 .dice-box {
-  width: 200px;
-  height: 200px;
+  width: 200px; /* Increased from 150px */
+  height: 200px; /* Increased from 150px */
   background: #FFFFFF;
   border: 4px solid #000000;
-  border-radius: 20px;
+  border-radius: 24px; /* Proportional increase */
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
-  transition: transform 0.3s ease;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+/* Hover effect - restored "coolness" */
+.dice-container.cursor-pointer:hover .dice-box {
+  transform: scale(1.05);
+  box-shadow: 0 0 40px rgba(45, 212, 191, 0.5), 0 0 15px rgba(255, 255, 255, 0.8);
+  border-color: #2DD4BF; /* Dfinity Turquoise */
+  background: #F0FDFA; /* Very subtle turquoise tint */
 }
 
 /* Subtle shake during rolling */
 .dice-box.rolling {
   animation: dice-shake 0.1s infinite;
+  border-color: #2DD4BF; /* Active color during roll */
+  box-shadow: 0 0 30px rgba(45, 212, 191, 0.3);
 }
 
 @keyframes dice-shake {
@@ -38,6 +53,7 @@
 /* Landing animation - bounce and scale */
 .dice-box.result-landed {
   animation: dice-land 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  border-color: #2DD4BF;
 }
 
 @keyframes dice-land {
@@ -55,7 +71,7 @@
 /* Number display inside dice */
 .number-display {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 5rem;
+  font-size: 4.5rem; /* Increased from 3.5rem */
   font-weight: 900;
   color: #000000;
   user-select: none;
@@ -68,10 +84,10 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 300px;
-  height: 300px;
+  width: 260px; /* Increased */
+  height: 260px; /* Increased */
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(45, 212, 191, 0.4) 0%, transparent 70%); /* stronger color */
   animation: pulse-glow 1.5s ease-in-out infinite;
   pointer-events: none;
   z-index: -1;
@@ -85,6 +101,24 @@
   50% {
     opacity: 0.8;
     transform: translate(-50%, -50%) scale(1.15);
+  }
+}
+
+/* Mobile sizing */
+@media (max-width: 768px) {
+  .dice-container {
+    height: 180px;
+  }
+  .dice-box {
+    width: 140px;
+    height: 140px;
+  }
+  .number-display {
+    font-size: 3.5rem;
+  }
+  .result-glow-turquoise {
+    width: 180px;
+    height: 180px;
   }
 }
 
