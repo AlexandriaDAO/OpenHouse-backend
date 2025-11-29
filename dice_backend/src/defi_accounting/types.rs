@@ -34,7 +34,7 @@ impl PendingWithdrawal {
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub enum WithdrawalType {
     User { amount: u64 },
-    LP { shares: Nat, reserve: Nat, amount: u64 },
+    LP { shares: Nat, reserve: Nat, amount: u64, fee: u64 },
 }
 
 impl Storable for PendingWithdrawal {

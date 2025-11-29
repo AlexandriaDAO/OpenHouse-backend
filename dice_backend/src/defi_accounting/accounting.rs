@@ -266,14 +266,17 @@ pub(crate) async fn withdraw_internal(user: Principal) -> Result<u64, String> {
 
 /// Schedule an LP withdrawal and return the created_at timestamp for immediate transfer attempt.
 /// Returns the created_at timestamp needed for attempt_transfer().
-pub fn schedule_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount: u64) -> Result<u64, String> {
+///
+/// # Arguments
+/// * `fee` - Protocol fee to credit to parent on successful transfer (not on rollback)
+pub fn schedule_lp_withdrawal(user: Principal, shares: Nat, reserve: Nat, amount: u64, fee: u64) -> Result<u64, String> {
     if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
         return Err("Withdrawal already pending. Call retry_withdrawal() to retry or abandon_withdrawal() to cancel.".to_string());
     }
 
     let created_at = ic_cdk::api::time();
     let pending = PendingWithdrawal {
-        withdrawal_type: WithdrawalType::LP { shares, reserve, amount },
+        withdrawal_type: WithdrawalType::LP { shares, reserve, amount, fee },
         created_at,
     };
 
@@ -326,8 +329,8 @@ pub(crate) fn rollback_withdrawal(user: Principal) -> Result<(), String> {
             });
             log_audit(AuditEvent::BalanceRestored { user, amount });
         }
-        WithdrawalType::LP { shares, reserve, amount } => {
-            // Restore LP position
+        WithdrawalType::LP { shares, reserve, amount, .. } => {
+            // Restore LP position (fee is NOT credited on rollback - this is the fix)
             liquidity_pool::restore_lp_position(user, shares, reserve);
             log_audit(AuditEvent::LPRestored { user, amount });
         }
@@ -427,6 +430,21 @@ pub async fn retry_withdrawal() -> Result<u64, String> {
     // Retry with original created_at - ledger deduplication handles idempotency
     match attempt_transfer(caller, amount, pending.created_at).await {
         TransferResult::Success(_) => {
+            // For LP withdrawals, credit the protocol fee on success
+            // This is deferred from initial withdraw to prevent orphaned fees on rollback
+            if let WithdrawalType::LP { fee, .. } = &pending.withdrawal_type {
+                if *fee > 0 {
+                    let parent = liquidity_pool::get_parent_principal();
+                    if !credit_parent_fee(parent, *fee) {
+                        // Fallback: return fee to pool reserve (tokens are in canister)
+                        liquidity_pool::add_to_reserve(*fee);
+                        log_audit(AuditEvent::ParentFeeFallback {
+                            amount: *fee,
+                            reason: crate::defi_accounting::types::sanitize_error("Credit failed on retry")
+                        });
+                    }
+                }
+            }
             PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&caller));
             log_audit(AuditEvent::WithdrawalCompleted { user: caller, amount });
             Ok(amount)

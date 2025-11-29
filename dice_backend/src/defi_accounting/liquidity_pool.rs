@@ -358,7 +358,8 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     })?;
 
     // Schedule withdrawal and get created_at for transfer
-    let created_at = match accounting::schedule_lp_withdrawal(caller, shares_to_burn.clone(), payout_nat.clone(), lp_amount) {
+    // NOTE: fee_amount is stored in pending state for retry_withdrawal() to credit on success
+    let created_at = match accounting::schedule_lp_withdrawal(caller, shares_to_burn.clone(), payout_nat.clone(), lp_amount, fee_amount) {
         Ok(ts) => ts,
         Err(e) => {
             // If scheduling fails (e.g. duplicate), rollback state immediately
@@ -374,26 +375,25 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         }
     };
 
-    // Credit parent fee (best-effort, before transfer attempt)
-    if fee_amount > 0 {
-        let parent = get_parent_principal();
-        if !accounting::credit_parent_fee(parent, fee_amount) {
-            // Parent busy - return fee to pool reserve
-            POOL_STATE.with(|state| {
-                let mut pool_state = state.borrow().get().clone();
-                pool_state.reserve += Nat::from(fee_amount);
-                state.borrow_mut().set(pool_state);
-            });
-            accounting::log_audit(crate::defi_accounting::types::AuditEvent::ParentFeeFallback {
-                amount: fee_amount,
-                reason: crate::defi_accounting::types::sanitize_error("Credit failed")
-            });
-        }
-    }
-
     // Attempt transfer immediately (same pattern as user withdrawals)
+    // NOTE: Fee credit moved to Success branch to prevent orphaned fees on rollback
+    // (Gemini Audit V4, Finding 1 fix)
     match accounting::attempt_transfer(caller, lp_amount, created_at).await {
         accounting::TransferResult::Success(_) => {
+            // Credit parent fee AFTER successful transfer
+            // This prevents the fee being orphaned if rollback occurs
+            if fee_amount > 0 {
+                let parent = get_parent_principal();
+                if !accounting::credit_parent_fee(parent, fee_amount) {
+                    // Parent busy - return fee to pool reserve
+                    // This is safe: fee tokens are in canister, just not credited to anyone
+                    add_to_reserve(fee_amount);
+                    accounting::log_audit(crate::defi_accounting::types::AuditEvent::ParentFeeFallback {
+                        amount: fee_amount,
+                        reason: crate::defi_accounting::types::sanitize_error("Credit failed")
+                    });
+                }
+            }
             accounting::complete_withdrawal(caller, lp_amount);
             Ok(lp_amount)
         }
@@ -507,6 +507,15 @@ pub fn get_pool_reserve() -> u64 {
 
 pub fn get_pool_reserve_nat() -> Nat {
     POOL_STATE.with(|s| s.borrow().get().reserve.clone())
+}
+
+/// Add amount to pool reserve (used for fee fallback when parent credit fails)
+pub fn add_to_reserve(amount: u64) {
+    POOL_STATE.with(|state| {
+        let mut pool_state = state.borrow().get().clone();
+        pool_state.reserve += Nat::from(amount);
+        state.borrow_mut().set(pool_state);
+    });
 }
 
 /// Get current share price in decimals (for statistics tracking)
