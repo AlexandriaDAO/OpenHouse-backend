@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import useDiceActor from '../hooks/actors/useDiceActor';
 import { HealthCheck } from '../declarations/dice_backend/dice_backend.did';
 import { useAuth } from '../providers/AuthProvider';
@@ -15,13 +15,12 @@ export const Admin: React.FC = () => {
   // Check if current user is the admin
   const isAdmin = principal === ADMIN_PRINCIPAL;
 
-  const checkHealth = async () => {
+  const checkHealth = useCallback(async () => {
     if (!actor || !isAdmin) return;
     setLoading(true);
     setError(null);
     try {
-        // @ts-ignore - types might not be fully synced in IDE but valid in runtime if built
-        const result = await actor.admin_health_check();
+        const result = await actor.admin_health_check() as { Ok: HealthCheck } | { Err: string };
         if ('Ok' in result) {
             setHealth(result.Ok);
         } else {
@@ -32,13 +31,23 @@ export const Admin: React.FC = () => {
     } finally {
         setLoading(false);
     }
-  };
+  }, [actor, isAdmin]);
 
   useEffect(() => {
-      if(actor && isAdmin) {
-          checkHealth();
+      let mounted = true;
+
+      if (actor && isAdmin) {
+          checkHealth().catch((e) => {
+              if (mounted) {
+                  console.error('Health check failed:', e);
+              }
+          });
       }
-  }, [actor, isAdmin]);
+
+      return () => {
+          mounted = false;
+      };
+  }, [actor, isAdmin, checkHealth]);
 
   if (!actor) return <div className="p-8 text-white">Initializing actor...</div>;
 
