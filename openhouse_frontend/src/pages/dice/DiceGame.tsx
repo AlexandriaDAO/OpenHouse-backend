@@ -217,104 +217,85 @@ export function DiceGame() {
           </div>
         )}
 
-        {/* Dice Animation - Centerpiece, Clickable */}
-        <div className="flex-shrink-0 flex justify-center pt-2 pb-4 relative">
-          <div className="relative">
-            <DiceAnimation
-              targetNumber={animatingResult}
-              isRolling={isPlaying}
-              onAnimationComplete={handleAnimationComplete}
-              onClick={rollDice}
-            />
-            
-            {/* Click hint - visible only when idle and logged in */}
-            {!isPlaying && isAuthenticated && (
-              <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 text-[10px] text-gray-500 font-mono tracking-widest opacity-60 pointer-events-none">
-                TAP TO ROLL
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Direction buttons row - Underneath Dice as requested */}
-        <div className="flex gap-4 justify-center mb-2 flex-shrink-0">
-          <button
-            onClick={() => setDirection('Under')}
-            className={`flex-1 md:flex-none md:w-32 px-4 py-3 text-sm font-bold rounded-xl transition ${ 
-              direction === 'Under'
-                ? 'border-2 border-white text-white bg-white/5'
-                : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
-            }`}
-            disabled={isPlaying}
-          >
-            UNDER
-          </button>
-
-          <button
-            onClick={() => setDirection('Over')}
-            className={`flex-1 md:flex-none md:w-32 px-4 py-3 text-sm font-bold rounded-xl transition ${ 
-              direction === 'Over'
-                ? 'bg-white text-black shadow-lg shadow-white/10'
-                : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
-            }`}
-            disabled={isPlaying}
-          >
-            OVER
-          </button>
-        </div>
-
-        {/* Result display - Integrated into layout flow, minimizing shifts */}
-        <div className="h-12 flex items-center justify-center flex-shrink-0">
-          {lastResult && !isPlaying ? (
-            <div className={`text-center ${lastResult.is_win ? 'text-green-400' : 'text-red-400'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
-              <span className="font-black text-xl mr-2">
-                {lastResult.is_win ? 'WON' : 'LOST'}
-              </span>
-              {lastResult.is_win && (
-                <span className="text-dfinity-turquoise font-mono font-bold text-lg">
-                  +{formatUSDT(lastResult.payout)}
-                </span>
-              )}
-              <span className="text-gray-600 text-xs ml-3 border-l border-gray-700 pl-3">
-                 Rolled {lastResult.rolled_number}
-              </span>
-            </div>
-          ) : (
-            /* Placeholder to prevent layout jump */
-            <div className="h-full w-full"></div>
-          )}
-        </div>
-
-        {/* Controls Section - Pushed down slightly */}
-        <div className="flex-1 flex flex-col justify-start space-y-4 pt-2">
-
-          {/* Target slider */}
-          <DiceControls
-            targetNumber={targetNumber}
-            onTargetChange={setTargetNumber}
-            disabled={isPlaying}
-          />
-
-          {/* Quick presets - centered */}
-          <div className="flex justify-center gap-2">
-            {[10, 25, 50, 75, 90].map(val => (
-              <button
-                key={val}
-                onClick={() => setTargetNumber(val)}
-                disabled={isPlaying}
-                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition ${ 
-                  targetNumber === val
-                    ? 'bg-white text-black'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                }`}
-              >
-                {val}
-              </button>
-            ))}
-          </div>
-
-          {/* Stats row */}
-          <div className="flex justify-between items-center bg-black/20 rounded-lg p-3 border border-gray-800/50">
+                {/* Dice Animation - Centerpiece, Clickable */}
+                <div className="flex-shrink-0 flex justify-center pt-2 pb-4 relative">
+                  <div className="relative">
+                    <DiceAnimation
+                      targetNumber={animatingResult}
+                      isRolling={isPlaying}
+                      onAnimationComplete={handleAnimationComplete}
+                      onClick={rollDice}
+                    />
+                    
+                    {/* Click hint - visible only when idle and logged in */}
+                    {!isPlaying && isAuthenticated && (
+                      <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 text-[10px] text-gray-500 font-mono tracking-widest opacity-60 pointer-events-none">
+                        TAP TO ROLL
+                      </div>
+                    )}
+                  </div>
+                </div>
+        
+                {/* Result display - Integrated into layout flow, minimizing shifts */}
+                <div className="h-12 flex items-center justify-center flex-shrink-0">
+                  {lastResult && !isPlaying ? (
+                    <div className={`text-center ${lastResult.is_win ? 'text-green-400' : 'text-red-400'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+                      <span className="font-black text-xl mr-2">
+                        {lastResult.is_win ? 'WON' : 'LOST'}
+                      </span>
+                      {lastResult.is_win && (
+                        <span className="text-dfinity-turquoise font-mono font-bold text-lg">
+                          +{formatUSDT(lastResult.payout)}
+                        </span>
+                      )}
+                      <span className="text-gray-600 text-xs ml-3 border-l border-gray-700 pl-3">
+                         Rolled {lastResult.rolled_number}
+                      </span>
+                    </div>
+                  ) : (
+                    /* Placeholder to prevent layout jump */
+                    <div className="h-full w-full"></div>
+                  )}
+                </div>
+        
+                {/* Direction buttons row - Underneath Dice as requested */}
+                <div className="flex gap-4 justify-center mb-2 flex-shrink-0">
+                  <button
+                    onClick={() => setDirection('Under')}
+                    className={`flex-1 md:flex-none md:w-32 px-4 py-3 text-sm font-bold rounded-xl transition ${
+                      direction === 'Under'
+                        ? 'border-2 border-white text-white bg-white/5'
+                        : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
+                    }`}
+                    disabled={isPlaying}
+                  >
+                    UNDER
+                  </button>
+        
+                  <button
+                    onClick={() => setDirection('Over')}
+                    className={`flex-1 md:flex-none md:w-32 px-4 py-3 text-sm font-bold rounded-xl transition ${
+                      direction === 'Over'
+                        ? 'border-2 border-white text-white bg-white/5'
+                        : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
+                    }`}
+                    disabled={isPlaying}
+                  >
+                    OVER
+                  </button>
+                </div>
+        
+                {/* Controls Section - Pushed down slightly */}
+                <div className="flex-1 flex flex-col justify-start space-y-4 pt-2">
+        
+                  {/* Target slider */}
+                  <DiceControls
+                    targetNumber={targetNumber}
+                    onTargetChange={setTargetNumber}
+                    disabled={isPlaying}
+                  />
+        
+                  {/* Stats row */}          <div className="flex justify-between items-center bg-black/20 rounded-lg p-3 border border-gray-800/50">
             <div className="flex flex-col">
               <span className="text-[10px] text-gray-500 uppercase tracking-wider">Win Chance</span>
               <span className="text-yellow-400 font-mono font-bold">{winChance.toFixed(0)}%</span>
