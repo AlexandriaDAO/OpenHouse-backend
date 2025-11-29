@@ -23,8 +23,8 @@ const MIN_DEPOSIT: u64 = 1_000_000; // 1 USDT
 const MIN_WITHDRAW: u64 = 1_000_000; // 1 USDT
 const MAX_AUDIT_ENTRIES: u64 = 1000; // Retention limit
 /// Minimum balance before triggering automatic weekly withdrawal to parent canister.
-/// Set to 100 USDT to minimize gas costs while ensuring timely fee collection.
-const PARENT_AUTO_WITHDRAW_THRESHOLD: u64 = 100_000_000; // 100 USDT
+/// Set to 10 USDT to minimize gas costs while ensuring timely fee collection.
+const PARENT_AUTO_WITHDRAW_THRESHOLD: u64 = 10_000_000; // 10 USDT
 
 thread_local! {
     static USER_BALANCES_STABLE: RefCell<StableBTreeMap<Principal, u64, Memory>> = RefCell::new(
@@ -368,13 +368,13 @@ pub fn start_parent_withdrawal_timer() {
 
 async fn auto_withdraw_parent() {
      let parent = crate::defi_accounting::liquidity_pool::get_parent_principal();
-     
+
      // SAFETY: TOCTOU race is acceptable here because withdraw_internal()
      // performs its own balance checks atomically. Worst case is the timer
      // attempts a withdrawal that immediately fails with "Withdrawal already pending"
      // or "No balance to withdraw", which is harmless.
      let balance = get_balance_internal(parent);
-     
+
      if balance > PARENT_AUTO_WITHDRAW_THRESHOLD {
          // Use withdraw_internal directly
          match withdraw_internal(parent).await {
