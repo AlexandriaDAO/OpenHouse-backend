@@ -244,6 +244,16 @@ cd <game>_backend
 
 ## 🐛 Common Issues & Solutions
 
+### Handling Stuck Withdrawals
+
+If a withdrawal times out (rare ~1 in 30B), users will see a recovery panel:
+
+1. **Check On-Chain Balance First**: View ckUSDT balance in wallet
+2. **If Funds Arrived**: Click "Confirm Receipt" to clear pending state
+3. **If Funds Missing**: Click "Retry Transfer" to attempt again
+
+The system will never automatically rollback a timeout to prevent double-spend.
+
 ### Issue: Frontend can't call backend methods
 **Solution:** Sync declarations after backend changes
 ```bash
