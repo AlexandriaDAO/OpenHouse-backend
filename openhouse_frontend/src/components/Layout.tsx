@@ -16,8 +16,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       <header className="bg-pure-black border-b border-pure-white/20">
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center">
-            <Link to="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-              <span className="text-3xl">🎰</span>
+            <Link to="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+              <img
+                src="/logos/logo_whole.png"
+                alt="OpenHouse Casino Logo"
+                className="w-12 h-12 pixelated"
+                style={{ imageRendering: 'pixelated' }}
+              />
               <div>
                 <h1 className="text-2xl font-pixel">OpenHouse Games</h1>
                 <p className="text-xs text-dfinity-turquoise font-mono">
