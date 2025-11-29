@@ -7,8 +7,6 @@ import { Layout } from './components/Layout';
 import { Home } from './pages/Home';
 import { Crash } from './pages/Crash';
 import { Plinko } from './pages/Plinko';
-import { PlinkoMotoko } from './pages/PlinkoMotoko';
-import { Mines } from './pages/Mines';
 import { DiceLayout, DiceGame, DiceLiquidity } from './pages/dice';
 
 function App() {
@@ -23,8 +21,6 @@ function App() {
                   <Route path="/" element={<Home />} />
                   <Route path="/crash" element={<Crash />} />
                   <Route path="/plinko" element={<Plinko />} />
-                  <Route path="/plinko-motoko" element={<PlinkoMotoko />} />
-                  <Route path="/mines" element={<Mines />} />
                   <Route path="/dice" element={<DiceLayout />}>
                     <Route index element={<DiceGame />} />
                     <Route path="liquidity" element={<DiceLiquidity />} />

@@ -31,13 +31,7 @@ pub struct PlinkoResult {
     pub win: bool,              // true if multiplier >= 1.0
 }
 
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct MultiBallResult {
-    pub balls: Vec<PlinkoResult>,     // Individual results for each ball
-    pub total_multiplier: f64,        // Sum of all multipliers
-    pub average_multiplier: f64,      // Average multiplier across balls
-    pub ball_count: u8,               // Number of balls dropped
-}
+
 
 // Memory management for future upgrades
 #[init]
@@ -93,69 +87,7 @@ async fn drop_ball() -> Result<PlinkoResult, String> {
     })
 }
 
-/// Drop multiple balls down the 8-row Plinko board (1-10 balls)
-/// Uses single VRF call for efficiency
-/// Returns aggregate statistics along with individual results
-#[update]
-async fn drop_balls(num_balls: u8) -> Result<MultiBallResult, String> {
-    const ROWS: u8 = 8;
 
-    // Validate input
-    if num_balls == 0 || num_balls > 10 {
-        return Err("Number of balls must be between 1 and 10".to_string());
-    }
-
-    // Get random bytes for all balls (single VRF call)
-    let random_bytes = raw_rand().await
-        .map_err(|e| format!("Randomness unavailable: {:?}", e))?
-;
-
-    // Ensure we have enough bytes
-    if random_bytes.len() < num_balls as usize {
-        return Err("Insufficient randomness".to_string());
-    }
-
-    // Process each ball using sequential bytes
-    let mut balls = Vec::new();
-    let mut total_multiplier = 0.0;
-
-    for ball_index in 0..num_balls {
-        // Use byte at index for this ball (bytes 0-9 for balls 0-9)
-        let random_byte = random_bytes[ball_index as usize];
-
-        // Generate 8-step path from byte (8 bits for 8 rows)
-        let path: Vec<bool> = (0..ROWS)
-            .map(|bit| (random_byte >> bit) & 1 == 1)
-            .collect();
-
-        // Calculate final position (count rights)
-        let final_position = path.iter().filter(|&&direction| direction).count() as u8;
-
-        // Get multiplier using existing formula
-        let multiplier = calculate_multiplier(final_position);
-
-        // Create result for this ball
-        let ball_result = PlinkoResult {
-            path,
-            final_position,
-            multiplier,
-            win: multiplier >= 1.0,
-        };
-
-        balls.push(ball_result);
-        total_multiplier += multiplier;
-    }
-
-    // Calculate aggregate stats
-    let average_multiplier = total_multiplier / num_balls as f64;
-
-    Ok(MultiBallResult {
-        balls,
-        total_multiplier,
-        average_multiplier,
-        ball_count: num_balls,
-    })
-}
 
 /// Get all multipliers for display
 /// Returns exactly 9 values for positions 0-8
