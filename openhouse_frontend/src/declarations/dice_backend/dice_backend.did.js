@@ -18,6 +18,18 @@ export const idlFactory = ({ IDL }) => {
     'redeemable_icp' : IDL.Nat,
     'pool_ownership_percent' : IDL.Float64,
   });
+  const WithdrawalType = IDL.Variant({
+    'LP' : IDL.Record({
+      'shares' : IDL.Nat,
+      'reserve' : IDL.Nat,
+      'amount' : IDL.Nat64,
+    }),
+    'User' : IDL.Record({ 'amount' : IDL.Nat64 }),
+  });
+  const PendingWithdrawal = IDL.Record({
+    'created_at' : IDL.Nat64,
+    'withdrawal_type' : WithdrawalType,
+  });
   const ApyInfo = IDL.Record({
     'days_calculated' : IDL.Nat32,
     'total_volume' : IDL.Nat64,
@@ -90,6 +102,11 @@ export const idlFactory = ({ IDL }) => {
     'get_max_allowed_payout' : IDL.Func([], [IDL.Nat64], ['query']),
     'get_my_balance' : IDL.Func([], [IDL.Nat64], ['query']),
     'get_my_lp_position' : IDL.Func([], [LPPosition], ['query']),
+    'get_my_withdrawal_status' : IDL.Func(
+        [],
+        [IDL.Opt(PendingWithdrawal)],
+        ['query'],
+      ),
     'get_pool_apy' : IDL.Func([IDL.Opt(IDL.Nat32)], [ApyInfo], ['query']),
     'get_pool_stats' : IDL.Func([], [PoolStats], ['query']),
     'get_seed_info' : IDL.Func([], [IDL.Text, IDL.Nat64, IDL.Nat64], ['query']),

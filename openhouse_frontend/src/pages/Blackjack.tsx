@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import useBlackjackActor from '../../hooks/actors/useBlackjackActor';
-import useLedgerActor from '../../hooks/actors/useLedgerActor';
-import { GameLayout, BettingRail } from '../../components/game-ui';
-import { BlackjackTable, CardData } from '../../components/game-specific/blackjack';
-import { useGameBalance } from '../../providers/GameBalanceProvider';
-import { useBalance } from '../../providers/BalanceProvider';
-import { useAuth } from '../../providers/AuthProvider';
-import { DECIMALS_PER_CKUSDT, formatUSDT } from '../../types/balance';
+import useBlackjackActor from '@/hooks/actors/useBlackjackActor';
+import useLedgerActor from '@/hooks/actors/useLedgerActor';
+import { GameLayout, BettingRail } from '@/components/game-ui';
+import { BlackjackTable, CardData } from '@/components/game-specific/blackjack';
+import { useGameBalance } from '@/providers/GameBalanceProvider';
+import { useBalance } from '@/providers/BalanceProvider';
+import { useAuth } from '@/providers/AuthProvider';
+import { DECIMALS_PER_CKUSDT, formatUSDT } from '@/types/balance';
 
 const BLACKJACK_BACKEND_CANISTER_ID = 'wvrcw-3aaaa-aaaah-arm4a-cai';
 

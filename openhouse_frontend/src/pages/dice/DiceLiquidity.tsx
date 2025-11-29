@@ -5,6 +5,7 @@ import useDiceActor from '../../hooks/actors/useDiceActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import { DECIMALS_PER_CKUSDT, TRANSFER_FEE } from '../../types/balance';
 import { HealthDashboard, DiceStatistics } from '../../components/game-specific/dice';
+import { PendingWithdrawalRecovery } from '../../components/game-specific/dice/PendingWithdrawalRecovery';
 
 // Local interfaces matching what DiceLiquidityPanel used
 interface PoolStats {
@@ -176,6 +177,16 @@ export function DiceLiquidity() {
           Provide liquidity to the game bankroll. You take the House's risk and earn the House's 1% statistical edge.
         </p>
       </div>
+
+      {isAuthenticated && (
+        <PendingWithdrawalRecovery onResolved={async () => {
+          if (!diceActor) return;
+          const stats = await diceActor.get_pool_stats();
+          setPoolStats(stats);
+          const position = await diceActor.get_my_lp_position();
+          setMyPosition(position);
+        }} />
+      )}
 
       {/* MAIN CARD */}
       <div className="bg-gray-900/60 border border-gray-700/50 rounded-2xl overflow-hidden backdrop-blur-sm">

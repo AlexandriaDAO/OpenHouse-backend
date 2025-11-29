@@ -47,6 +47,16 @@ type ApyInfo = record {
   total_profit: int64;
 };
 
+type WithdrawalType = variant {
+  User: record { amount: nat64 };
+  LP: record { shares: nat; reserve: nat; amount: nat64 };
+};
+
+type PendingWithdrawal = record {
+  withdrawal_type: WithdrawalType;
+  created_at: nat64;
+};
+
 service : {
   // Play a game of dice - returns minimal result (3 fields)
   play_dice: (nat64, nat8, RollDirection, text) -> (variant { Ok: MinimalGameResult; Err: text });
@@ -64,9 +74,11 @@ service : {
   withdraw_all: () -> (variant { Ok: nat64; Err: text });
   retry_withdrawal: () -> (variant { Ok: nat64; Err: text });
   abandon_withdrawal: () -> (variant { Ok: nat64; Err: text });
+  get_my_withdrawal_status: () -> (opt PendingWithdrawal) query;
   get_balance: (principal) -> (nat64) query;
   get_my_balance: () -> (nat64) query;
   get_house_balance: () -> (nat64) query;
+
   get_max_allowed_payout: () -> (nat64) query;
   get_canister_balance: () -> (nat64);
   get_accounting_stats: () -> (AccountingStats) query;

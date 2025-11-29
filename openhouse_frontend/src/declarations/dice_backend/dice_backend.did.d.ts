@@ -32,6 +32,10 @@ export interface MinimalGameResult {
   'rolled_number' : number,
   'payout' : bigint,
 }
+export interface PendingWithdrawal {
+  'created_at' : bigint,
+  'withdrawal_type' : WithdrawalType,
+}
 export interface PoolStats {
   'total_shares' : bigint,
   'share_price' : bigint,
@@ -42,6 +46,10 @@ export interface PoolStats {
 }
 export type RollDirection = { 'Over' : null } |
   { 'Under' : null };
+export type WithdrawalType = {
+    'LP' : { 'shares' : bigint, 'reserve' : bigint, 'amount' : bigint }
+  } |
+  { 'User' : { 'amount' : bigint } };
 export interface _SERVICE {
   'abandon_withdrawal' : ActorMethod<
     [],
@@ -77,6 +85,7 @@ export interface _SERVICE {
   'get_max_allowed_payout' : ActorMethod<[], bigint>,
   'get_my_balance' : ActorMethod<[], bigint>,
   'get_my_lp_position' : ActorMethod<[], LPPosition>,
+  'get_my_withdrawal_status' : ActorMethod<[], [] | [PendingWithdrawal]>,
   'get_pool_apy' : ActorMethod<[[] | [number]], ApyInfo>,
   'get_pool_stats' : ActorMethod<[], PoolStats>,
   'get_seed_info' : ActorMethod<[], [string, bigint, bigint]>,

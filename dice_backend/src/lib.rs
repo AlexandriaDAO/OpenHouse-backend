@@ -124,6 +124,11 @@ fn abandon_withdrawal() -> Result<u64, String> {
 }
 
 #[query]
+fn get_my_withdrawal_status() -> Option<defi_accounting::types::PendingWithdrawal> {
+    defi_accounting::accounting::get_withdrawal_status()
+}
+
+#[query]
 fn get_balance(principal: candid::Principal) -> u64 {
     defi_accounting::query::get_balance(principal)
 }

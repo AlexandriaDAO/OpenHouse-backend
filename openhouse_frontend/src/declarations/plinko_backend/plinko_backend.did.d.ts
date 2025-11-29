@@ -2,12 +2,6 @@ import type { Principal } from '@dfinity/principal';
 import type { ActorMethod } from '@dfinity/agent';
 import type { IDL } from '@dfinity/candid';
 
-export interface MultiBallResult {
-  'total_multiplier' : number,
-  'ball_count' : number,
-  'balls' : Array<PlinkoResult>,
-  'average_multiplier' : number,
-}
 export interface PlinkoResult {
   'win' : boolean,
   'multiplier' : number,
@@ -16,11 +10,6 @@ export interface PlinkoResult {
 }
 export interface _SERVICE {
   'drop_ball' : ActorMethod<[], { 'Ok' : PlinkoResult } | { 'Err' : string }>,
-  'drop_balls' : ActorMethod<
-    [number],
-    { 'Ok' : MultiBallResult } |
-      { 'Err' : string }
-  >,
   'get_expected_value' : ActorMethod<[], number>,
   'get_formula' : ActorMethod<[], string>,
   'get_multipliers' : ActorMethod<[], Array<number>>,

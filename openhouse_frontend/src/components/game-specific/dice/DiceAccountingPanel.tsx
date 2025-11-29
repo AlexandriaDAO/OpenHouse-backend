@@ -8,6 +8,7 @@ import useDiceActor from '../../../hooks/actors/useDiceActor';
 import useLedgerActor from '../../../hooks/actors/useLedgerActor';
 import { ApproveArgs } from '../../../types/ledger';
 import { DECIMALS_PER_CKUSDT, formatUSDT, TRANSFER_FEE } from '../../../types/balance';
+import { PendingWithdrawalRecovery } from './PendingWithdrawalRecovery';
 
 interface DiceAccountingPanelProps {
   gameBalance: bigint;  // Now required, not nullable
@@ -152,6 +153,11 @@ export const DiceAccountingPanel: React.FC<DiceAccountingPanelProps> = ({
   return (
     <>
       <div className="card max-w-2xl mx-auto p-4">
+        <PendingWithdrawalRecovery onResolved={() => {
+          refreshBalance();
+          onBalanceChange();
+        }} />
+
         {/* Compact Balance Display */}
         <div className="grid grid-cols-2 gap-2 mb-3">
           <div className="bg-green-900/10 p-2 rounded border border-green-500/20">
