@@ -10,7 +10,7 @@ import {
 import { type DelegationIdentity, isDelegationValid } from '@dfinity/identity';
 import useCrashActor from '../hooks/actors/useCrashActor';
 import usePlinkoActor from '../hooks/actors/usePlinkoActor';
-import useMinesActor from '../hooks/actors/useMinesActor';
+import useBlackjackActor from '../hooks/actors/useBlackjackActor';
 import useDiceActor from '../hooks/actors/useDiceActor';
 import useLedgerActor from '../hooks/actors/useLedgerActor';
 
@@ -32,7 +32,7 @@ export const ActorProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Initialize all actor hooks
   const crash = useCrashActor();
   const plinko = usePlinkoActor();
-  const mines = useMinesActor();
+  const blackjack = useBlackjackActor();
   const dice = useDiceActor();
   const ledger = useLedgerActor();
 
@@ -118,7 +118,7 @@ export const ActorProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     ensureAllInitialized().then(() => {
       crash.setInterceptors(interceptors);
       plinko.setInterceptors(interceptors);
-      mines.setInterceptors(interceptors);
+      blackjack.setInterceptors(interceptors);
       dice.setInterceptors(interceptors);
       ledger.setInterceptors(interceptors);
     });

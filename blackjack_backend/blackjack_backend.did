@@ -1,0 +1,154 @@
+type Suit = variant { Hearts; Diamonds; Clubs; Spades };
+type Rank = variant { Ace; Two; Three; Four; Five; Six; Seven; Eight; Nine; Ten; Jack; Queen; King };
+
+type Card = record {
+  suit: Suit;
+  rank: Rank;
+};
+
+type Hand = record {
+  cards: vec Card;
+};
+
+type GameResult = variant {
+  PlayerWin;
+  DealerWin;
+  Push;
+  Blackjack;
+};
+
+type GameAction = variant {
+  Hit;
+  Stand;
+  Double;
+  Split;
+};
+
+type BlackjackGame = record {
+  game_id: nat64;
+  player: principal;
+  bet_amount: nat64;
+  player_hands: vec Hand;
+  dealer_hand: Hand;
+  dealer_hidden_card: opt Card;
+  current_hand_index: nat8;
+  is_active: bool;
+  is_doubled: vec bool;
+  results: vec opt GameResult;
+  payout: nat64;
+  timestamp: nat64;
+};
+
+type GameStartResult = record {
+  game_id: nat64;
+  player_hand: Hand;
+  dealer_showing: Card;
+  is_blackjack: bool;
+  can_double: bool;
+  can_split: bool;
+};
+
+type ActionResult = record {
+  player_hand: Hand;
+  dealer_hand: opt Hand;
+  result: opt GameResult;
+  payout: nat64;
+  can_hit: bool;
+  can_double: bool;
+  can_split: bool;
+  game_over: bool;
+};
+
+type GameStats = record {
+  total_games: nat64;
+  total_player_wins: nat64;
+  total_dealer_wins: nat64;
+  total_pushes: nat64;
+  total_blackjacks: nat64;
+};
+
+type AccountingStats = record {
+  total_user_deposits: nat64;
+  house_balance: nat64;
+  canister_balance: nat64;
+  unique_depositors: nat64;
+};
+
+type LPPosition = record {
+  "principal": principal;
+  shares: nat;
+  deposited_amount: nat64;
+  entry_timestamp: nat64;
+};
+
+type PoolStats = record {
+  total_shares: nat;
+  total_liquidity: nat64;
+  share_price: float64;
+  house_profit: int64;
+  reserve_ratio: float64;
+};
+
+type DailySnapshot = record {
+  timestamp: nat64;
+  game_count: nat64;
+  volume: nat64;
+  payouts: nat64;
+  house_profit: int64;
+  active_users: nat64;
+};
+
+type ApyInfo = record {
+  daily_apy: float64;
+  weekly_apy: float64;
+  monthly_apy: float64;
+  all_time_apy: float64;
+};
+
+service : {
+  // Game methods
+  start_game: (nat64, text) -> (variant { Ok: GameStartResult; Err: text });
+  hit: (nat64) -> (variant { Ok: ActionResult; Err: text });
+  stand: (nat64) -> (variant { Ok: ActionResult; Err: text });
+  double_down: (nat64) -> (variant { Ok: ActionResult; Err: text });
+  split: (nat64) -> (variant { Ok: ActionResult; Err: text });
+
+  // Query methods
+  get_game: (nat64) -> (opt BlackjackGame) query;
+  get_stats: () -> (GameStats) query;
+  greet: (text) -> (text) query;
+
+  // Provable fair
+  get_current_seed_hash: () -> (text) query;
+  get_seed_info: () -> (text, nat64, nat64) query;
+
+  // Accounting
+  deposit: (nat64) -> (variant { Ok: nat64; Err: text });
+  withdraw_all: () -> (variant { Ok: nat64; Err: text });
+  retry_withdrawal: () -> (variant { Ok: nat64; Err: text });
+  abandon_withdrawal: () -> (variant { Ok: nat64; Err: text });
+  get_balance: (principal) -> (nat64) query;
+  get_my_balance: () -> (nat64) query;
+  get_house_balance: () -> (nat64) query;
+  get_max_allowed_payout: () -> (nat64) query;
+  get_canister_balance: () -> (nat64);
+  get_accounting_stats: () -> (AccountingStats) query;
+  audit_balances: () -> (variant { Ok: text; Err: text }) query;
+  refresh_canister_balance: () -> (nat64);
+
+  // LP
+  deposit_liquidity: (nat64, opt nat) -> (variant { Ok: nat; Err: text });
+  withdraw_all_liquidity: () -> (variant { Ok: nat64; Err: text });
+  calculate_shares_preview: (nat64) -> (variant { Ok: nat; Err: text }) query;
+  get_lp_position: (principal) -> (LPPosition) query;
+  get_my_lp_position: () -> (LPPosition) query;
+  get_pool_stats: () -> (PoolStats) query;
+  get_house_mode: () -> (text) query;
+  can_accept_bets: () -> (bool) query;
+  
+  // Stats
+  get_daily_stats: (nat32) -> (vec DailySnapshot) query;
+  get_stats_range: (nat64, nat64) -> (vec DailySnapshot) query;
+  get_stats_count: () -> (nat64) query;
+  get_pool_apy: (opt nat32) -> (ApyInfo) query;
+}

@@ -3,6 +3,7 @@ members = [
     "crash_backend",
     "plinko_backend",
     "dice_backend",
+    "blackjack_backend",
 ]
 resolver = "2"
 

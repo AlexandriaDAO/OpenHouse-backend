@@ -1,5 +1,5 @@
 // Game types supported by the balance provider
-export type GameType = 'dice' | 'crash' | 'plinko' | 'mines';
+export type GameType = 'dice' | 'crash' | 'plinko' | 'blackjack';
 
 // Balance information for a single game
 export interface GameBalance {

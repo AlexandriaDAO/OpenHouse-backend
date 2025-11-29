@@ -1,6 +1,6 @@
 #!/bin/bash
 # OpenHouse Multi-Game Casino Deployment Script - Mainnet Only
-# Usage: ./deploy.sh [--crash-only|--plinko-only|--mines-only|--frontend-only] [--test]
+# Usage: ./deploy.sh [--crash-only|--plinko-only|--blackjack-only|--dice-only|--frontend-only] [--test]
 
 set -e
 
@@ -21,8 +21,8 @@ while [[ $# -gt 0 ]]; do
             DEPLOY_TARGET="plinko"
             shift
             ;;
-        --mines-only)
-            DEPLOY_TARGET="mines"
+        --blackjack-only)
+            DEPLOY_TARGET="blackjack"
             shift
             ;;
         --dice-only)
@@ -45,18 +45,16 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --crash-only       Deploy only crash backend"
             echo "  --plinko-only      Deploy only plinko backend"
-            echo "  --mines-only       Deploy only Plinko V2 (Motoko) backend"
+            echo "  --blackjack-only   Deploy only blackjack backend (Rust)"
             echo "  --dice-only        Deploy only dice backend"
             echo "  --frontend-only    Deploy only the frontend"
-            echo "  --test            Run post-deployment tests"
-            echo "  --help            Show this help message"
+            echo "  --test             Run post-deployment tests"
+            echo "  --help             Show this help message"
             echo ""
             echo "Examples:"
             echo "  ./deploy.sh                    # Deploy everything to mainnet"
             echo "  ./deploy.sh --crash-only       # Deploy only crash backend"
-            echo "  ./deploy.sh --plinko-only      # Deploy only plinko backend"
-            echo "  ./deploy.sh --mines-only       # Deploy only Plinko V2 (Motoko) backend"
-            echo "  ./deploy.sh --dice-only        # Deploy only dice backend"
+            echo "  ./deploy.sh --blackjack-only   # Deploy only blackjack backend"
             echo "  ./deploy.sh --test             # Deploy and run tests"
             echo ""
             echo "IMPORTANT: This script ALWAYS deploys to MAINNET"
@@ -80,11 +78,11 @@ echo "Target: $DEPLOY_TARGET"
 echo "Working from: $SCRIPT_DIR"
 echo ""
 echo "Mainnet Canister IDs:"
-echo "  Crash Backend:  fws6k-tyaaa-aaaap-qqc7q-cai"
-echo "  Plinko Backend: weupr-2qaaa-aaaap-abl3q-cai"
-echo "  Mines Backend:  wvrcw-3aaaa-aaaah-arm4a-cai"
-echo "  Dice Backend:   whchi-hyaaa-aaaao-a4ruq-cai"
-echo "  Frontend:       pezw3-laaaa-aaaal-qssoa-cai"
+echo "  Crash Backend:     fws6k-tyaaa-aaaap-qqc7q-cai"
+echo "  Plinko Backend:    weupr-2qaaa-aaaap-abl3q-cai"
+echo "  Blackjack Backend: wvrcw-3aaaa-aaaah-arm4a-cai"
+echo "  Dice Backend:      whchi-hyaaa-aaaao-a4ruq-cai"
+echo "  Frontend:          pezw3-laaaa-aaaal-qssoa-cai"
 echo "================================================"
 echo ""
 
@@ -151,29 +149,34 @@ deploy_plinko() {
     echo ""
 }
 
-# Function to deploy mines backend (now Plinko V2 - Motoko)
-deploy_mines() {
+# Function to deploy blackjack backend
+deploy_blackjack() {
     echo "================================================"
-    echo "Deploying Plinko V2 (Motoko) Backend Canister"
-    echo "================================================"
+    echo "Deploying Blackjack Backend Canister"
+    echo "=================================================="
+    echo "Deploying Blackjack Backend Canister"
+    echo "=================================================="
 
-    # Build Motoko canister (dfx handles this automatically)
-    echo "Building Plinko V2 (Motoko) backend canister..."
-    dfx build mines_backend --network ic
+    # Build the backend canister
+    echo "Building blackjack backend canister..."
+    cargo build --release --target wasm32-unknown-unknown --package blackjack_backend
+
+    # Skip candid extraction - using manually created .did file
+    echo "Using pre-defined candid interface..."
 
     # Deploy to mainnet
-    echo "Deploying Plinko V2 (Motoko) to mainnet..."
-    dfx deploy mines_backend --network ic
+    echo "Deploying blackjack backend to mainnet..."
+    dfx deploy blackjack_backend --network ic
 
-    echo "Plinko V2 (Motoko) deployment completed!"
+    echo "Blackjack backend deployment completed!"
     echo ""
 }
 
 # Function to deploy dice backend
 deploy_dice() {
-    echo "================================================"
+    echo "=================================================="
     echo "Deploying Dice Backend Canister"
-    echo "================================================"
+    echo "=================================================="
 
     # Build the backend canister
     echo "Building dice backend canister..."
@@ -192,19 +195,18 @@ deploy_dice() {
 
 # Function to deploy frontend
 deploy_frontend() {
-    echo "================================================"
+    echo "=================================================="
     echo "Deploying OpenHouse Frontend Canister"
-    echo "================================================"
+    echo "=================================================="
 
     # CRITICAL: Regenerate declarations from Candid interfaces
-    # This ensures TypeScript types are always in sync with backend methods
     echo "Regenerating backend declarations from Candid interfaces..."
     dfx generate crash_backend 2>/dev/null || echo "Warning: Could not generate crash_backend declarations"
     dfx generate plinko_backend 2>/dev/null || echo "Warning: Could not generate plinko_backend declarations"
-    dfx generate mines_backend 2>/dev/null || echo "Warning: Could not generate mines_backend declarations"
+    dfx generate blackjack_backend 2>/dev/null || echo "Warning: Could not generate blackjack_backend declarations"
     dfx generate dice_backend 2>/dev/null || echo "Warning: Could not generate dice_backend declarations"
 
-    # Sync declarations (critical for frontend to work)
+    # Sync declarations
     echo "Copying fresh declarations to frontend..."
     if [ -d "src/declarations" ]; then
         mkdir -p openhouse_frontend/src/declarations
@@ -219,7 +221,6 @@ deploy_frontend() {
     if [ -d "openhouse_frontend" ]; then
         cd openhouse_frontend
 
-        # Install dependencies if package.json exists
         if [ -f "package.json" ]; then
             echo "Installing frontend dependencies..."
             npm install
@@ -244,9 +245,9 @@ deploy_frontend() {
 
 # Function to run tests
 run_tests() {
-    echo "================================================"
+    echo "=================================================="
     echo "Running Post-Deployment Tests"
-    echo "================================================"
+    echo "=================================================="
 
     # Test crash backend
     echo "Testing crash backend canister..."
@@ -256,9 +257,9 @@ run_tests() {
     echo "Testing plinko backend canister..."
     dfx canister --network ic call plinko_backend greet '("Tester")' 2>/dev/null || echo "Plinko backend test method not yet implemented"
 
-    # Test mines backend
-    echo "Testing mines backend canister..."
-    dfx canister --network ic call mines_backend greet '("Tester")' 2>/dev/null || echo "Mines backend test method not yet implemented"
+    # Test blackjack backend
+    echo "Testing blackjack backend canister..."
+    dfx canister --network ic call blackjack_backend greet '("Tester")' 2>/dev/null || echo "Blackjack backend test method not yet implemented"
 
     # Test dice backend
     echo "Testing dice backend canister..."
@@ -284,8 +285,8 @@ main() {
         plinko)
             deploy_plinko
             ;;
-        mines)
-            deploy_mines
+        blackjack)
+            deploy_blackjack
             ;;
         dice)
             deploy_dice
@@ -296,7 +297,7 @@ main() {
         all)
             deploy_crash
             deploy_plinko
-            deploy_mines
+            deploy_blackjack
             deploy_dice
             deploy_frontend
             ;;
@@ -306,14 +307,14 @@ main() {
         run_tests
     fi
 
-    echo "================================================"
+    echo "=================================================="
     echo "Deployment Complete!"
-    echo "================================================"
-    echo "Crash Backend:  https://dashboard.internetcomputer.org/canister/fws6k-tyaaa-aaaap-qqc7q-cai"
-    echo "Plinko Backend: https://dashboard.internetcomputer.org/canister/weupr-2qaaa-aaaap-abl3q-cai"
-    echo "Mines Backend:  https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai"
-    echo "Dice Backend:   https://dashboard.internetcomputer.org/canister/whchi-hyaaa-aaaao-a4ruq-cai"
-    echo "Frontend:       https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io"
+    echo "=================================================="
+    echo "Crash Backend:     https://dashboard.internetcomputer.org/canister/fws6k-tyaaa-aaaap-qqc7q-cai"
+    echo "Plinko Backend:    https://dashboard.internetcomputer.org/canister/weupr-2qaaa-aaaap-abl3q-cai"
+    echo "Blackjack Backend: https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai"
+    echo "Dice Backend:      https://dashboard.internetcomputer.org/canister/whchi-hyaaa-aaaao-a4ruq-cai"
+    echo "Frontend:          https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io"
     echo ""
     echo "Remember: All changes are live on mainnet immediately!"
 }

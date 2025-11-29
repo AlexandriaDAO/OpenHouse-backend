@@ -15,7 +15,7 @@ import useLedgerActor from '../hooks/actors/useLedgerActor';
 import useDiceActor from '../hooks/actors/useDiceActor';
 import useCrashActor from '../hooks/actors/useCrashActor';
 import usePlinkoActor from '../hooks/actors/usePlinkoActor';
-import useMinesActor from '../hooks/actors/useMinesActor';
+import useBlackjackActor from '../hooks/actors/useBlackjackActor';
 
 // Initial state for a game
 const createInitialGameBalance = (): GameBalance => ({
@@ -33,7 +33,7 @@ const createInitialGameStatus = (): GameStatus => ({
 
 // Initial state for the provider
 const createInitialState = (): BalanceProviderState => {
-  const games: GameType[] = ['dice', 'crash', 'plinko', 'mines'];
+  const games: GameType[] = ['dice', 'crash', 'plinko', 'blackjack'];
 
   return {
     balances: games.reduce((acc, game) => ({
@@ -71,14 +71,14 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
   const { actor: diceActor } = useDiceActor();
   const { actor: crashActor } = useCrashActor();
   const { actor: plinkoActor } = usePlinkoActor();
-  const { actor: minesActor } = useMinesActor();
+  const { actor: blackjackActor } = useBlackjackActor();
 
   const [state, setState] = useState<BalanceProviderState>(createInitialState());
   const verificationTimers = useRef<Record<GameType, ReturnType<typeof setTimeout> | null>>({
     dice: null,
     crash: null,
     plinko: null,
-    mines: null,
+    blackjack: null,
   });
 
 
@@ -116,11 +116,12 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
               (plinkoActor as any).get_house_balance(),
             ]);
             break;
-          case 'mines':
-            // Plinko V2 (Motoko) doesn't have balance management - use dummy values
-            // This is a demo implementation without real balance tracking
-            gameBalance = BigInt(0);
-            houseBalance = BigInt(1_000_000_000); // 1000 USDT in ckUSDT decimals for display
+          case 'blackjack':
+            if (!blackjackActor) throw new Error('Blackjack actor not available');
+            [gameBalance, houseBalance] = await Promise.all([
+              (blackjackActor as any).get_my_balance(),
+              (blackjackActor as any).get_house_balance(),
+            ]);
             break;
           default:
             throw new Error(`Unknown game type: ${game}`);
@@ -161,7 +162,7 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
 
     // This should never be reached due to the return in the loop, but TypeScript needs it
     throw new Error('Max retries exceeded');
-  }, [ledgerActor, principal, diceActor, crashActor, plinkoActor, minesActor]);
+  }, [ledgerActor, principal, diceActor, crashActor, plinkoActor, blackjackActor]);
 
   // Refresh balances for a game
   const refreshBalances = useCallback(async (game: GameType) => {
@@ -274,7 +275,7 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
       (game === 'dice' && diceActor) ||
       (game === 'crash' && crashActor) ||
       (game === 'plinko' && plinkoActor) ||
-      (game === 'mines' && minesActor);
+      (game === 'blackjack' && blackjackActor);
 
     if (!actorAvailable) {
       console.warn(`Actor not available for ${game}, skipping verification`);
@@ -367,7 +368,7 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
       }));
       return false; // Sync failed
     }
-  }, [fetchBalances, diceActor, crashActor, plinkoActor, minesActor]);
+  }, [fetchBalances, diceActor, crashActor, plinkoActor, blackjackActor]);
 
   // Retry last operation
   const retryLastOperation = useCallback(async (game: GameType) => {

@@ -22,7 +22,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 # Deploy specific game backend
 ./deploy.sh --crash-only
 ./deploy.sh --plinko-only
-./deploy.sh --mines-only
+./deploy.sh --blackjack-only
 ./deploy.sh --dice-only
 
 # Deploy frontend only
@@ -38,7 +38,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 |-----------|-------------|---------|-----|
 | **Crash Backend** | `fws6k-tyaaa-aaaap-qqc7q-cai` | Crash game logic | - |
 | **Plinko Backend** | `weupr-2qaaa-aaaap-abl3q-cai` | Plinko game logic | - |
-| **Mines Backend** | `wvrcw-3aaaa-aaaah-arm4a-cai` | Mines game logic | - |
+| **Blackjack Backend** | `wvrcw-3aaaa-aaaah-arm4a-cai` | Blackjack game logic | - |
 | **Dice Backend** | `whchi-hyaaa-aaaao-a4ruq-cai` | Dice game logic | - |
 | **OpenHouse Frontend** | `pezw3-laaaa-aaaal-qssoa-cai` | Multi-game router UI | https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io |
 
@@ -46,7 +46,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 - `/` - Game selection homepage
 - `/crash` - Crash game interface
 - `/plinko` - Plinko game interface
-- `/mines` - Mines game interface
+- `/blackjack` - Blackjack game interface
 - `/dice` - Dice game interface
 
 ## 🎮 Games Overview
@@ -67,13 +67,14 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 - **House Edge**: 1%
 - **Canister**: `plinko_backend`
 
-### 3. Mines
-- **Mechanics**: Navigate a 5x5 grid minefield
-- **Objective**: Reveal safe tiles to increase multiplier, avoid mines
-- **Min Bet**: 1 USDT
-- **Max Win**: 5000x
-- **House Edge**: 1%
-- **Canister**: `mines_backend`
+### 3. Blackjack
+- **Mechanics**: Classic blackjack against the dealer
+- **Objective**: Get closer to 21 than dealer without busting
+- **Actions**: Hit, Stand, Double Down, Split
+- **Min Bet**: 0.01 USDT
+- **Max Win**: 10 USDT
+- **House Edge**: ~1%
+- **Canister**: `blackjack_backend`
 
 ### 4. Dice
 - **Mechanics**: Roll a number from 0-100, predict over or under target
@@ -187,15 +188,18 @@ get_round(round_id: u64) -> Option<GameRound>
 get_recent_rounds(limit: u32) -> Vec<GameRound>
 ```
 
-### Plinko Backend
+### Blackjack Backend
 ```rust
-// Play a game
-play_plinko(bet: u64, rows: u8, risk: RiskLevel) -> Result<PlinkoResult, String>
+// Game methods
+start_game(bet: u64, seed: String) -> Result<GameStartResult, String>
+hit(game_id: u64) -> Result<ActionResult, String>
+stand(game_id: u64) -> Result<ActionResult, String>
+double_down(game_id: u64) -> Result<ActionResult, String>
+split(game_id: u64) -> Result<ActionResult, String>
 
 // Query functions
+get_game(game_id: u64) -> Option<BlackjackGame>
 get_stats() -> GameStats
-get_recent_games(limit: u32) -> Vec<PlinkoResult>
-get_multipliers(rows: u8, risk: RiskLevel) -> Vec<f64>
 ```
 
 ### Dice Backend
