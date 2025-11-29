@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 import useDiceActor from '../../../hooks/actors/useDiceActor';
 import { AccountingStats, PoolStats, GameStats } from '../../../types/dice-backend';
 
-export const HealthDashboard: React.FC = () => {
+interface HealthDashboardProps {
+  inline?: boolean;
+}
+
+export const HealthDashboard: React.FC<HealthDashboardProps> = ({ inline = false }) => {
   const { actor: diceActor } = useDiceActor();
 
   const [showHealthCheck, setShowHealthCheck] = useState(false);
@@ -18,6 +22,11 @@ export const HealthDashboard: React.FC = () => {
 
   // Auto-refresh effect
   useEffect(() => {
+    // If inline, force show
+    if (inline) {
+      setShowHealthCheck(true);
+    }
+
     if (showHealthCheck && !accounting) {
       fetchHealthMetrics();
     }
@@ -26,7 +35,7 @@ export const HealthDashboard: React.FC = () => {
       const interval = setInterval(fetchHealthMetrics, 30000); // Auto-refresh every 30 seconds
       return () => clearInterval(interval);
     }
-  }, [showHealthCheck, diceActor]);
+  }, [showHealthCheck, diceActor, inline, accounting]);
 
   const fetchHealthMetrics = async () => {
     if (!diceActor) {
@@ -101,17 +110,19 @@ export const HealthDashboard: React.FC = () => {
   };
 
   return (
-    <div className="card p-4 mt-6 bg-gray-900/30 border border-gray-700">
-      {/* Toggle Button */}
-      <button
-        onClick={() => {
-          setShowHealthCheck(!showHealthCheck);
-        }}
-        className="w-full px-4 py-2 bg-purple-600/80 hover:bg-purple-600 rounded text-sm font-bold flex items-center justify-center gap-2 transition-colors"
-      >
-        <span>📊</span>
-        <span>{showHealthCheck ? 'Hide' : 'Show'} System Health Check</span>
-      </button>
+    <div className={inline ? "mt-4" : "card p-4 mt-6 bg-gray-900/30 border border-gray-700"}>
+      {/* Toggle Button - Hide if inline */}
+      {!inline && (
+        <button
+          onClick={() => {
+            setShowHealthCheck(!showHealthCheck);
+          }}
+          className="w-full px-4 py-2 bg-purple-600/80 hover:bg-purple-600 rounded text-sm font-bold flex items-center justify-center gap-2 transition-colors"
+        >
+          <span>📊</span>
+          <span>{showHealthCheck ? 'Hide' : 'Show'} System Health Check</span>
+        </button>
+      )}
 
       {/* Health Dashboard */}
       {showHealthCheck && (
