@@ -523,7 +523,8 @@ pub(crate) fn get_balance_internal(user: Principal) -> u64 {
 
 pub(crate) fn get_max_allowed_payout_internal() -> u64 {
     let house_balance = liquidity_pool::get_pool_reserve();
-    (house_balance * 10) / 100
+    // Backend allows 15%, frontend shows 10% - creates 50% safety buffer for max bet race conditions
+    (house_balance * 15) / 100
 }
 
 pub(crate) fn get_accounting_stats_internal() -> AccountingStats {

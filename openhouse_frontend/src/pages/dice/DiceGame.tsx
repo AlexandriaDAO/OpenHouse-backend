@@ -90,9 +90,11 @@ export function DiceGame() {
           setGameError(result.Err);
         }
 
+        // Calculate max bet using 10% of house balance (backend allows 15% for safety margin)
         try {
-          const maxPayoutE8s = await actor.get_max_allowed_payout();
-          const maxPayoutUSDT = Number(maxPayoutE8s) / DECIMALS_PER_CKUSDT;
+          const balances = await actor.get_balances();
+          const houseBalanceUSDT = Number(balances.house) / DECIMALS_PER_CKUSDT;
+          const maxPayoutUSDT = houseBalanceUSDT * 0.10; // UI shows 10%, backend allows 15%
           const maxBetUSDT = mult > 0 ? maxPayoutUSDT / mult : 0;
           setMaxBet(maxBetUSDT);
           if (betAmount > maxBetUSDT) {
