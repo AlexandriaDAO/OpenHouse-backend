@@ -8,7 +8,7 @@ Self-contained, auditable accounting module for ckUSDT-based games using a Liqui
 - **User Deposits/Withdrawals**: Player fund management with ckUSDT ledger (ICRC-2)
 - **LP Deposits/Withdrawals**: Liquidity providers can stake ckUSDT for shares
 - **Balance Tracking**: Stable storage persistence across upgrades
-- **Bet Limits**: 10% of pool balance max payout per bet
+- **Bet Limits**: 15% of pool balance max payout per bet (frontend shows 10% for safety margin)
 
 ## Architecture Overview
 
@@ -57,7 +57,7 @@ defi_accounting::update_balance(player, new_balance)?;
 - Min user deposit: 10 ckUSDT (prevents dust)
 - Min withdraw: 1 ckUSDT
 - Transfer fee: 0.01 ckUSDT (10,000 decimals)
-- Max payout: 10% of pool balance
+- Max payout: 15% of pool balance (frontend shows 10%)
 - Minimum liquidity burned: 1000 shares (first depositor)
 
 ## When Modifying

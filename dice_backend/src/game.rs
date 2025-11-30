@@ -100,7 +100,7 @@ pub async fn play_dice(
     }
     if max_payout > max_allowed {
         return Err(format!(
-            "Max payout of {} USDT exceeds house limit of {} USDT (10% of house balance)",
+            "Max payout of {} USDT exceeds house limit of {} USDT (15% of house balance)",
             max_payout as f64 / DECIMALS_PER_CKUSDT as f64,
             max_allowed as f64 / DECIMALS_PER_CKUSDT as f64
         ));
