@@ -144,9 +144,9 @@ export function DiceGame() {
       return;
     }
 
-    // Frontend limit check
+    // Frontend limit check - use 15% to match backend (UI shows 10% for safety margin)
     const maxPayout = BigInt(Math.floor(betAmount * multiplier * DECIMALS_PER_CKUSDT));
-    const maxAllowedPayout = (balance.house * BigInt(10)) / BigInt(100);
+    const maxAllowedPayout = (balance.house * BigInt(15)) / BigInt(100);
     if (maxPayout > maxAllowedPayout) {
       setGameError('Potential payout exceeds house limit.');
       return;
