@@ -53,7 +53,7 @@ export const useStatsData = (isExpanded: boolean) => {
 
   const chartData = useMemo(() => {
     if (!snapshots) return [];
-    return [...snapshots].reverse().map(s => {
+    return snapshots.map(s => {
       // Safe BigInt to Number conversion
       // Timestamp is nanoseconds. Convert to milliseconds first using BigInt division to avoid precision loss.
       const dateMs = Number(s.day_timestamp / 1_000_000n);

@@ -44,6 +44,8 @@ export function DiceLiquidity() {
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
+  const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw'>('deposit');
+  const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
 
   // Load pool stats
   useEffect(() => {
@@ -141,6 +143,7 @@ export function DiceLiquidity() {
   const handleWithdrawAll = async () => {
     if (!diceActor) return;
 
+    setShowWithdrawConfirm(false);
     setIsWithdrawing(true);
     setError(null);
     setSuccess(null);
@@ -248,7 +251,7 @@ With the 1% house edge, share price trends upward over time as the house profits
             <div className="bg-black/30 p-3 rounded-lg border border-gray-700/30">
               <div className="text-yellow-400 font-bold mb-1 text-sm">1% Withdrawal Fee</div>
               <div className="text-xs text-gray-400">
-                Goes to $ALEX stakers. No other fees.
+                When you withdraw LP, 1% goes to $ALEX stakers. No other fees, site-wide.
               </div>
             </div>
           </div>
@@ -272,45 +275,82 @@ With the 1% house edge, share price trends upward over time as the house profits
 
           {/* ACTIONS */}
           {isAuthenticated ? (
-            <div className="space-y-4">
-              {/* Deposit */}
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type="number"
-                    value={depositAmount}
-                    onChange={(e) => setDepositAmount(e.target.value)}
-                    className="w-full bg-gray-950/50 border border-gray-700 rounded-lg px-4 py-3 pr-16 text-white font-mono focus:ring-2 focus:ring-dfinity-turquoise/50 outline-none"
-                    placeholder="10"
-                    min="10"
-                    disabled={isDepositing}
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-bold pointer-events-none select-none bg-transparent">
-                    USDT
-                  </span>
-                </div>
+            <div>
+              {/* Tabs */}
+              <div className="flex gap-4 mb-4 border-b border-gray-700/50 pb-1">
                 <button
-                  onClick={handleDeposit}
-                  disabled={isDepositing}
-                  className="px-8 py-3 bg-dfinity-turquoise hover:bg-dfinity-turquoise/90 text-black font-black rounded-lg transition disabled:opacity-50 whitespace-nowrap"
+                  onClick={() => setActiveTab('deposit')}
+                  className={`pb-2 px-2 text-sm font-bold transition-colors border-b-2 ${
+                    activeTab === 'deposit'
+                      ? 'border-dfinity-turquoise text-white'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}
                 >
-                  {isDepositing ? '...' : 'DEPOSIT'}
+                  DEPOSIT
+                </button>
+                <button
+                  onClick={() => setActiveTab('withdraw')}
+                  className={`pb-2 px-2 text-sm font-bold transition-colors border-b-2 ${
+                    activeTab === 'withdraw'
+                      ? 'border-dfinity-turquoise text-white'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  WITHDRAW
                 </button>
               </div>
 
-              {/* Withdraw */}
-              <div className="pt-4 border-t border-gray-700/50">
-                <button
-                  onClick={handleWithdrawAll}
-                  disabled={isWithdrawing || !myPosition || Number(myPosition.shares) === 0}
-                  className="w-full py-3 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 hover:bg-gray-800/50 rounded-lg font-medium disabled:opacity-30 transition text-sm"
-                >
-                  {isWithdrawing ? 'Withdrawing...' : 'Withdraw All Liquidity (1% Fee applies)'}
-                </button>
-                <p className="text-center text-[10px] text-gray-600 mt-2">
-                  The 1% withdrawal fee is distributed to $ALEX stakers as per the Alexandria model.
-                </p>
-              </div>
+              {/* Deposit View */}
+              {activeTab === 'deposit' && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="number"
+                        value={depositAmount}
+                        onChange={(e) => setDepositAmount(e.target.value)}
+                        className="w-full bg-gray-950/50 border border-gray-700 rounded-lg px-4 py-3 pr-16 text-white font-mono focus:ring-2 focus:ring-dfinity-turquoise/50 outline-none"
+                        placeholder="10"
+                        min="10"
+                        disabled={isDepositing}
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-bold pointer-events-none select-none bg-transparent">
+                        USDT
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleDeposit}
+                      disabled={isDepositing}
+                      className="px-8 py-3 bg-dfinity-turquoise hover:bg-dfinity-turquoise/90 text-black font-black rounded-lg transition disabled:opacity-50 whitespace-nowrap"
+                    >
+                      {isDepositing ? '...' : 'DEPOSIT'}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Deposits are instantly added to the pool. You will receive LP shares representing your ownership.
+                  </p>
+                </div>
+              )}
+
+              {/* Withdraw View */}
+              {activeTab === 'withdraw' && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="p-4 bg-red-900/10 border border-red-900/30 rounded-xl text-center">
+                    <p className="text-sm text-red-300 font-bold mb-2">Warning: 1% Withdrawal Fee</p>
+                    <p className="text-xs text-gray-400 mb-4">
+                      This fee is deducted from your total withdrawal and distributed to $ALEX stakers.
+                    </p>
+                    
+                    <button
+                      onClick={() => setShowWithdrawConfirm(true)}
+                      disabled={isWithdrawing || !myPosition || Number(myPosition.shares) === 0}
+                      className="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      {isWithdrawing ? 'Processing...' : 'WITHDRAW ALL LIQUIDITY'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center py-8 bg-black/20 rounded-lg border border-dashed border-gray-700">
@@ -406,6 +446,45 @@ With the 1% house edge, share price trends upward over time as the house profits
           </div>
         </div>
       )}
+
+      {/* WITHDRAW CONFIRMATION MODAL */}
+      {showWithdrawConfirm && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+             onClick={() => setShowWithdrawConfirm(false)}>
+          <div className="bg-gray-900 rounded-2xl p-6 max-w-sm w-full border border-red-500/30 shadow-2xl"
+               onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-black text-white mb-4">Confirm Withdrawal</h3>
+            
+            <div className="space-y-4 text-sm text-gray-300 mb-6">
+              <p>
+                You are about to withdraw <strong>ALL</strong> your liquidity from the pool.
+              </p>
+              <div className="p-3 bg-red-900/20 border border-red-500/30 rounded-lg">
+                <p className="text-red-400 font-bold mb-1">⚠️ 1% Fee Applies</p>
+                <p className="text-xs">
+                  A 1% fee will be deducted from your withdrawal amount and distributed to $ALEX stakers.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowWithdrawConfirm(false)}
+                className="flex-1 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-lg font-bold transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleWithdrawAll}
+                className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold transition"
+              >
+                Confirm Withdraw
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

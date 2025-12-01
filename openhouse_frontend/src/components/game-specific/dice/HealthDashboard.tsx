@@ -47,7 +47,12 @@ export const HealthDashboard: React.FC<HealthDashboardProps> = ({ inline = false
 
     try {
       // CRITICAL: Refresh canister balance FIRST to ensure accurate data
-      await diceActor.refresh_canister_balance();
+      // Try to refresh, but don't fail everything if this update call fails (e.g. insufficient cycles, network issues)
+      try {
+        await diceActor.refresh_canister_balance();
+      } catch (balanceErr) {
+        console.warn('Failed to refresh canister balance, proceeding with cached value:', balanceErr);
+      }
 
       // Then fetch all stats in parallel
       const [accountingResult, poolResult, auditResult, betsResult] = await Promise.all([

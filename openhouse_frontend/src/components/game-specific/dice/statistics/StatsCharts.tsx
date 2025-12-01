@@ -5,7 +5,7 @@ import { InfoTooltip } from '../../../InfoTooltip';
 
 // DFINITY brand colors
 const COLORS = {
-  primary: '#29ABE2',    // dfinity-turquoise
+  primary: '#39FF14',    // Lime green hacker terminal theme
   positive: '#00E19B',   // dfinity-green
   negative: '#ED0047',   // dfinity-red
   text: '#9CA3AF',       // gray-400
@@ -44,18 +44,27 @@ const CustomTooltip = ({ active, payload, label, valuePrefix = '', valueSuffix =
 
 export const SharePriceChart: React.FC<ChartProps> = ({ data, height = 220 }) => (
   <div className="bg-black/20 rounded-lg p-4 border border-white/5 hover:border-white/10 transition-all duration-300">
-    <div className="flex items-center justify-between mb-4">
-      <div className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+      <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">
         Share Price
-        <InfoTooltip content="Your share value changes with the pool's performance.
-
-↗ Rises when players lose (house profits)
-↘ Falls when players win big
-
-The 1% house edge means shares trend upward over time." />
       </div>
-      <div className="text-[10px] text-dfinity-turquoise bg-dfinity-turquoise/10 px-2 py-0.5 rounded-full">
-        Current: {data[data.length - 1]?.sharePrice.toFixed(6)} USDT
+      <div className="flex items-center gap-2">
+        <InfoTooltip
+          variant="badge"
+          content="Share Price = Pool Reserve ÷ Total Shares
+
+When you deposit liquidity, you receive shares representing your ownership percentage of the pool.
+
+↗ Share price RISES when players lose bets (pool grows)
+↘ Share price FALLS when players win bets (pool shrinks)
+
+With the 1% house edge, share price trends upward over time as the house profits from thousands of bets.
+
+Your total value = your shares × current share price"
+        />
+        <div className="text-[10px] text-dfinity-turquoise bg-dfinity-turquoise/10 px-2 py-0.5 rounded-full">
+          Current: {data[data.length - 1]?.sharePrice.toFixed(6)} USDT
+        </div>
       </div>
     </div>
     <ResponsiveContainer width="100%" height={height}>
@@ -74,7 +83,8 @@ The 1% house edge means shares trend upward over time." />
           axisLine={false}
           tickLine={false}
           width={40}
-          tickFormatter={(val) => val.toFixed(6)}
+          tickFormatter={(val) => `${(val * 1_000_000).toFixed(1)}`}
+          label={{ value: '×10⁻⁶', position: 'top', fill: COLORS.text, fontSize: 10, offset: 10 }}
         />
         <Tooltip content={<CustomTooltip valueSuffix=" USDT" decimals={6} />} cursor={{ stroke: 'rgba(255,255,255,0.1)' }} />
         <Line

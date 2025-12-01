@@ -12,40 +12,40 @@ export const CHIP_DENOMINATIONS: ChipDenomination[] = [
     value: 0.01,
     label: '0.01',
     color: 'white',
-    topImg: '/chips/white_top.png',
-    sideImg: '/chips/white_side.png',
+    topImg: '/chips/optimized/white_top.png',
+    sideImg: '/chips/optimized/white_side.png',
     consolidateAt: 10  // 10 white = 1 red
   },
   {
     value: 0.10,
     label: '0.10',
     color: 'red',
-    topImg: '/chips/red_top.png',
-    sideImg: '/chips/red_side.png',
+    topImg: '/chips/optimized/red_top.png',
+    sideImg: '/chips/optimized/red_side.png',
     consolidateAt: 10  // 10 red = 1 green
   },
   {
     value: 1.00,
     label: '1',
     color: 'green',
-    topImg: '/chips/green_top.png',
-    sideImg: '/chips/green_side.png',
+    topImg: '/chips/optimized/green_top.png',
+    sideImg: '/chips/optimized/green_side.png',
     consolidateAt: 5   // 5 green = 1 blue
   },
   {
     value: 5.00,
     label: '5',
     color: 'blue',
-    topImg: '/chips/blue_top.png',
-    sideImg: '/chips/blue_side.png',
+    topImg: '/chips/optimized/blue_top.png',
+    sideImg: '/chips/optimized/blue_side.png',
     consolidateAt: 2   // 2 blue = 1 black
   },
   {
     value: 10.00,
     label: '10',
     color: 'black',
-    topImg: '/chips/black_top.png',
-    sideImg: '/chips/black_side.png',
+    topImg: '/chips/optimized/black_top.png',
+    sideImg: '/chips/optimized/black_side.png',
     consolidateAt: Infinity  // Never consolidates (highest)
   },
 ];

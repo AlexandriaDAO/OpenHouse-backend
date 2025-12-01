@@ -9,7 +9,7 @@ export default {
       colors: {
         // DFINITY brand colors
         dfinity: {
-          turquoise: '#29ABE2',  // Main brand color
+          turquoise: '#39FF14',  // Main brand color - Lime green hacker terminal theme
           purple: '#3B00B9',      // Secondary/links
           green: '#00E19B',       // Success/positive
           red: '#ED0047',         // Error/negative

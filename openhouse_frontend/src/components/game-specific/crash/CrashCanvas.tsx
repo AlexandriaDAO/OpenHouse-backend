@@ -46,7 +46,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
             const maxX = Math.max(history.length - 1, 100); // Minimum 100 ticks width to start
 
             ctx.beginPath();
-            ctx.strokeStyle = '#29ABE2'; // DFINITY turquoise
+            ctx.strokeStyle = '#39FF14'; // Lime green hacker terminal theme
             ctx.lineWidth = 4;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
@@ -158,7 +158,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
 const RocketSVG = () => (
     <svg width="40" height="40" viewBox="0 0 60 80" className="drop-shadow-glow">
         {/* Rocket body */}
-        <path d="M30,0 L45,60 L15,60 Z" fill="#29ABE2" />
+        <path d="M30,0 L45,60 L15,60 Z" fill="#39FF14" />
         {/* Fins */}
         <path d="M15,60 L5,80 L15,70 Z" fill="#3B00B9" />
         <path d="M45,60 L55,80 L45,70 Z" fill="#3B00B9" />

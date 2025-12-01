@@ -65,7 +65,7 @@
     appearance: none;
     width: 20px;
     height: 20px;
-    background: #29ABE2; /* DFINITY turquoise */
+    background: #39FF14; /* Lime green hacker terminal theme */
     border: 2px solid #FFFFFF;
     cursor: pointer;
     border-radius: 50%;
@@ -80,7 +80,7 @@
   .slider-turquoise::-moz-range-thumb {
     width: 20px;
     height: 20px;
-    background: #29ABE2;
+    background: #39FF14;
     border: 2px solid #FFFFFF;
     cursor: pointer;
     border-radius: 50%;
