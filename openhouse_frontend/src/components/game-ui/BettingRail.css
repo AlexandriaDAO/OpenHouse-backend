@@ -11,6 +11,7 @@
   border-top-right-radius: 50% 80px;
   position: relative;
   overflow: visible;
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 /* Subtle inner glow on the curve */
@@ -27,6 +28,94 @@
     transparent 100%
   );
   border-radius: 50%;
+  transition: background 0.3s ease;
+}
+
+/* ========================================
+   RAIL STYLE VARIANTS
+   ======================================== */
+
+/* Classic (default) - already styled above */
+.betting-rail--classic {
+  background: linear-gradient(180deg, #1e2328 0%, #1a1d21 100%);
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Green Felt - Casino table feel */
+.betting-rail--felt {
+  background:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.08'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, #1a4d2e 0%, #143d24 50%, #0d2a19 100%);
+  border-top: 2px solid rgba(255, 215, 0, 0.3);
+  box-shadow:
+    0 -4px 30px rgba(0, 0, 0, 0.6),
+    inset 0 2px 20px rgba(0, 0, 0, 0.3);
+}
+
+.betting-rail--felt::before {
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 215, 0, 0.2) 50%,
+    transparent 100%
+  );
+}
+
+/* Royal Purple - Elegant velvet */
+.betting-rail--royal {
+  background:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.6' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.06'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, #3d1f5c 0%, #2d1745 50%, #1a0f2e 100%);
+  border-top: 2px solid rgba(199, 125, 255, 0.4);
+  box-shadow:
+    0 -4px 30px rgba(139, 69, 255, 0.2),
+    inset 0 2px 20px rgba(0, 0, 0, 0.4);
+}
+
+.betting-rail--royal::before {
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(199, 125, 255, 0.3) 50%,
+    transparent 100%
+  );
+}
+
+/* Neon Blue - Sleek cyberpunk */
+.betting-rail--neon {
+  background: linear-gradient(180deg, #0a1628 0%, #0d1f3c 50%, #061224 100%);
+  border-top: 2px solid rgba(0, 210, 255, 0.5);
+  box-shadow:
+    0 -4px 30px rgba(0, 210, 255, 0.15),
+    0 -1px 0 rgba(0, 210, 255, 0.3),
+    inset 0 2px 20px rgba(0, 0, 0, 0.5);
+}
+
+.betting-rail--neon::before {
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(0, 210, 255, 0.4) 50%,
+    transparent 100%
+  );
+  height: 2px;
+  box-shadow: 0 0 10px rgba(0, 210, 255, 0.5);
+}
+
+/* Vegas Gold - Warm luxury */
+.betting-rail--gold {
+  background:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.5' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, #3d2b0f 0%, #2a1d08 50%, #1a1205 100%);
+  border-top: 2px solid rgba(255, 200, 87, 0.5);
+  box-shadow:
+    0 -4px 30px rgba(255, 180, 0, 0.15),
+    inset 0 2px 20px rgba(0, 0, 0, 0.4);
+}
+
+.betting-rail--gold::before {
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 200, 87, 0.4) 50%,
+    transparent 100%
+  );
 }
 
 /* ========================================
@@ -176,9 +265,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 5px;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.2);
   color: #9ca3af;
@@ -232,6 +321,170 @@
 
 .rail-button:disabled {
   opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* ========================================
+   MOBILE RAIL BUTTONS
+   ======================================== */
+
+.mobile-rail-btn {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 1;
+  text-align: center;
+}
+
+.mobile-rail-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.mobile-rail-btn-primary {
+  background: #22c55e;
+  color: white;
+  border: none;
+}
+
+.mobile-rail-btn-primary:active:not(:disabled) {
+  background: #16a34a;
+}
+
+.mobile-rail-btn-secondary {
+  background: transparent;
+  color: #9ca3af;
+  border: 1px solid #4b5563;
+}
+
+.mobile-rail-btn-secondary:active:not(:disabled) {
+  color: white;
+  border-color: #6b7280;
+}
+
+.mobile-rail-btn-accent {
+  background: transparent;
+  color: #00D2FF;
+  border: 1px solid #00D2FF40;
+}
+
+.mobile-rail-btn-accent:active:not(:disabled) {
+  background: #00D2FF15;
+  border-color: #00D2FF60;
+}
+
+/* Uniform mobile action buttons */
+.mobile-action-btn {
+  font-size: 12px;
+  font-weight: 500;
+  color: #e5e7eb;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 4px 10px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mobile-action-btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.mobile-action-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.mobile-action-btn--danger {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.3);
+}
+
+.mobile-action-btn--danger:active:not(:disabled) {
+  background: rgba(248, 113, 113, 0.15);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+/* Fixed height mobile rail - chips overflow above */
+.mobile-rail-fixed {
+  overflow: visible !important;
+  position: relative;
+  height: 95px !important;
+  min-height: 95px !important;
+  max-height: 95px !important;
+}
+
+/* Chip stack floats above rail - absolutely positioned from bottom of rail */
+.mobile-chip-stack-float {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 65px; /* Fixed distance from bottom of rail */
+  z-index: 10;
+  pointer-events: auto;
+}
+
+/* CSS Grid for 3 independent columns - fixed height */
+.mobile-rail-grid {
+  display: grid;
+  grid-template-columns: 85px 1fr 85px;
+  height: 95px;
+  max-height: 95px;
+  align-items: end;
+  padding: 0 6px 6px 6px;
+}
+
+.mobile-rail-col-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  justify-content: flex-end;
+}
+
+.mobile-rail-col-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.mobile-rail-col-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+/* Desktop action buttons - uniform styling */
+.desktop-action-btn {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e5e7eb;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 6px 14px;
+  border-radius: 5px;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.desktop-action-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.desktop-action-btn:disabled {
+  opacity: 0.35;
   cursor: not-allowed;
 }
 

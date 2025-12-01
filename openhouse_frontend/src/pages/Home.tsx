@@ -47,14 +47,10 @@ const games: GameInfo[] = [
 
 export const Home: React.FC = () => {
   return (
-    <div>
-      {/* Games Grid */}
-      <h2 className="text-3xl font-pixel text-center mb-6">Choose Your Game</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {games.map((game) => (
-          <GameCard key={game.id} game={game} />
-        ))}
-      </div>
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {games.map((game) => (
+        <GameCard key={game.id} game={game} />
+      ))}
     </div>
   );
 };

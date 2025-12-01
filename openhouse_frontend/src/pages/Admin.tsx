@@ -11,10 +11,10 @@ import { useAuth } from '../providers/AuthProvider';
 
 const ADMIN_PRINCIPAL = 'p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae';
 
-// Helper to format e8s to readable string
-const formatE8s = (amount: bigint | number): string => {
+// Helper to format ckUSDT (6 decimals) to readable string
+const formatUSDT = (amount: bigint | number): string => {
   const val = typeof amount === 'bigint' ? Number(amount) : amount;
-  return (val / 100_000_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 });
+  return (val / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
 };
 
 const formatDate = (ns: bigint): string => {
@@ -160,28 +160,28 @@ export const Admin: React.FC = () => {
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-gray-400">Pool Reserve:</span>
-                <span className="font-mono">{formatE8s(health.pool_reserve)} USDT</span>
+                <span className="font-mono">{formatUSDT(health.pool_reserve)} USDT</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">User Deposits:</span>
-                <span className="font-mono">{formatE8s(health.total_deposits)} USDT</span>
+                <span className="font-mono">{formatUSDT(health.total_deposits)} USDT</span>
               </div>
               <div className="flex justify-between text-blue-300">
                 <span className="text-gray-400">Pending Withdrawals:</span>
-                <span className="font-mono">{formatE8s(health.pending_withdrawals_total_amount)} USDT</span>
+                <span className="font-mono">{formatUSDT(health.pending_withdrawals_total_amount)} USDT</span>
               </div>
               <div className="flex justify-between border-t border-gray-700 pt-2">
                 <span className="text-gray-400">Required Total:</span>
-                <span className="font-mono">{formatE8s(health.calculated_total)} USDT</span>
+                <span className="font-mono">{formatUSDT(health.calculated_total)} USDT</span>
               </div>
               <div className="flex justify-between text-yellow-400">
                 <span>Canister Balance:</span>
-                <span className="font-mono">{formatE8s(health.canister_balance)} USDT</span>
+                <span className="font-mono">{formatUSDT(health.canister_balance)} USDT</span>
               </div>
               <div className="flex justify-between pt-2 border-t border-gray-700">
                 <span className="text-gray-400">Excess:</span>
                 <span className={`font-mono ${Number(health.excess) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {formatE8s(health.excess)} USDT
+                  {formatUSDT(health.excess)} USDT
                 </span>
               </div>
             </div>
@@ -239,7 +239,7 @@ export const Admin: React.FC = () => {
                     <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
                       <td className="px-6 py-4 font-mono text-xs">{w.user.toString()}</td>
                       <td className="px-6 py-4">{w.withdrawal_type}</td>
-                      <td className="px-6 py-4 text-right font-mono text-white">{formatE8s(w.amount)} USDT</td>
+                      <td className="px-6 py-4 text-right font-mono text-white">{formatUSDT(w.amount)} USDT</td>
                       <td className="px-6 py-4 text-right">{formatDate(w.created_at)}</td>
                     </tr>
                   ))}
@@ -257,7 +257,7 @@ export const Admin: React.FC = () => {
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                <div className="bg-gray-900/50 p-4 rounded">
                  <div className="text-gray-400 text-sm mb-1">Total Abandoned Amount</div>
-                 <div className="text-2xl font-mono text-yellow-500">{formatE8s(orphanedReport.total_abandoned_amount)} USDT</div>
+                 <div className="text-2xl font-mono text-yellow-500">{formatUSDT(orphanedReport.total_abandoned_amount)} USDT</div>
                </div>
                <div className="bg-gray-900/50 p-4 rounded">
                  <div className="text-gray-400 text-sm mb-1">Abandoned Count</div>
@@ -286,7 +286,7 @@ export const Admin: React.FC = () => {
                     {orphanedReport.recent_abandonments.map((entry, i) => (
                       <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
                         <td className="px-6 py-4 font-mono text-xs">{entry.user.toString()}</td>
-                        <td className="px-6 py-4 text-right font-mono text-yellow-500">{formatE8s(entry.amount)} USDT</td>
+                        <td className="px-6 py-4 text-right font-mono text-yellow-500">{formatUSDT(entry.amount)} USDT</td>
                         <td className="px-6 py-4 text-right">{formatDate(entry.timestamp)}</td>
                       </tr>
                     ))}
@@ -319,7 +319,7 @@ export const Admin: React.FC = () => {
                   ) : userBalances.map((u, i) => (
                     <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
                       <td className="px-6 py-4 font-mono text-xs truncate max-w-[150px]" title={u.user.toString()}>{u.user.toString()}</td>
-                      <td className="px-6 py-4 text-right font-mono text-white">{formatE8s(u.balance)}</td>
+                      <td className="px-6 py-4 text-right font-mono text-white">{formatUSDT(u.balance)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -346,7 +346,7 @@ export const Admin: React.FC = () => {
                   ) : lpPositions.map((p, i) => (
                     <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
                       <td className="px-6 py-4 font-mono text-xs truncate max-w-[150px]" title={p.user.toString()}>{p.user.toString()}</td>
-                      <td className="px-6 py-4 text-right font-mono text-white">{p.shares.toString()}</td>
+                      <td className="px-6 py-4 text-right font-mono text-white">{formatUSDT(p.shares)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -358,4 +358,3 @@ export const Admin: React.FC = () => {
     </div>
   );
 };
-

@@ -8,6 +8,17 @@ import { DECIMALS_PER_CKUSDT, formatUSDT, TRANSFER_FEE } from '../../types/balan
 import { ApproveArgs } from '../../types/ledger';
 import './BettingRail.css';
 
+// Rail style options
+export type RailStyle = 'classic' | 'felt' | 'royal' | 'neon' | 'gold';
+
+export const RAIL_STYLES: { id: RailStyle; name: string; icon: string }[] = [
+  { id: 'classic', name: 'Classic', icon: '⬛' },
+  { id: 'felt', name: 'Green Felt', icon: '🟩' },
+  { id: 'royal', name: 'Royal Purple', icon: '🟪' },
+  { id: 'neon', name: 'Neon Blue', icon: '🟦' },
+  { id: 'gold', name: 'Vegas Gold', icon: '🟨' },
+];
+
 interface BettingRailProps {
   betAmount: number;
   onBetChange: (amount: number) => void;
@@ -51,6 +62,16 @@ export function BettingRail({
   const [accountingError, setAccountingError] = useState<string | null>(null);
   const [accountingSuccess, setAccountingSuccess] = useState<string | null>(null);
   const [showDepositAnimation, setShowDepositAnimation] = useState(false);
+  const [railStyle, setRailStyle] = useState<RailStyle>(() => {
+    const saved = localStorage.getItem('openhouse-rail-style');
+    return (saved as RailStyle) || 'classic';
+  });
+  const [showStylePicker, setShowStylePicker] = useState(false);
+
+  // Persist rail style
+  useEffect(() => {
+    localStorage.setItem('openhouse-rail-style', railStyle);
+  }, [railStyle]);
 
   // Convert game balance to USDT for comparison
   const gameBalanceUSDT = Number(gameBalance) / DECIMALS_PER_CKUSDT;
@@ -187,7 +208,7 @@ export function BettingRail({
       {/* Fixed bottom container - DESKTOP */}
       <div className="hidden md:block fixed bottom-0 left-0 right-0 z-40">
         {/* Main rail surface - semicircle */}
-        <div className="betting-rail">
+        <div className={`betting-rail betting-rail--${railStyle}`}>
           <div className="container mx-auto px-6 pt-4 pb-3">
             {/* CENTER: Chip Stack + Amount */}
             <div className="flex flex-col items-center gap-1">
@@ -270,122 +291,175 @@ export function BettingRail({
               </div>
 
               {/* RIGHT: Actions */}
-              <div className="flex flex-col items-end gap-1 text-xs w-40">
+              <div className="flex flex-col items-end gap-1.5 w-40">
                 <button
                   onClick={() => setShowDepositModal(true)}
-                  className={`text-green-500 hover:text-green-400 font-medium transition ${showDepositAnimation ? 'deposit-button-pulse' : ''}`}
+                  className={`desktop-action-btn ${showDepositAnimation ? 'deposit-button-pulse' : ''}`}
                 >
-                  + Buy Chips
+                  Buy chips
                 </button>
                 <button
                   onClick={handleWithdrawAll}
                   disabled={isWithdrawing || gameBalance === 0n}
-                  className="text-gray-500 hover:text-white disabled:opacity-30 transition"
+                  className="desktop-action-btn"
                 >
-                  Cash Out
+                  Cash out
                 </button>
                 <button
                   onClick={() => navigate(isLiquidityRoute ? '/dice' : '/dice/liquidity')}
-                  className="text-dfinity-turquoise hover:text-dfinity-turquoise/80 font-medium transition"
+                  className="desktop-action-btn"
                 >
-                  {isLiquidityRoute ? '🎲 Play Game' : '💰 Be The House'}
+                  {isLiquidityRoute ? 'Play game' : 'Be the house'}
                 </button>
+                {/* Style Picker */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowStylePicker(!showStylePicker)}
+                    className="text-gray-500 hover:text-gray-300 transition flex items-center gap-1 text-xs"
+                    title="Change rail style"
+                  >
+                    <span>{RAIL_STYLES.find(s => s.id === railStyle)?.icon}</span>
+                    <span>Theme</span>
+                  </button>
+                  {showStylePicker && (
+                    <div className="absolute bottom-full right-0 mb-2 bg-gray-900 border border-gray-700 rounded-lg shadow-xl overflow-hidden">
+                      {RAIL_STYLES.map(style => (
+                        <button
+                          key={style.id}
+                          onClick={() => {
+                            setRailStyle(style.id);
+                            setShowStylePicker(false);
+                          }}
+                          className={`flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-gray-800 transition ${
+                            railStyle === style.id ? 'bg-gray-800 text-white' : 'text-gray-400'
+                          }`}
+                        >
+                          <span>{style.icon}</span>
+                          <span className="text-xs whitespace-nowrap">{style.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* MOBILE: Semicircle bottom bar */}
+      {/* MOBILE: Fixed height rail with CSS Grid */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50">
-        <div className="betting-rail">
-          <div className="px-4 pt-5 pb-3">
-            {/* Top row: balances + actions */}
-            <div className="flex items-start justify-between w-full text-xs mb-3">
-              <div className="flex items-start gap-2">
-                <div className="flex flex-col gap-0.5">
-                  <div className="text-gray-500">
-                    Chips: <span className="text-white font-mono">{formatUSDT(gameBalance)}</span>
-                  </div>
-                  <div className="text-gray-600 text-[10px]">
-                    Wallet: {formatUSDT(walletBalance)}
-                  </div>
-                  <div className="text-gray-600 text-[10px]">
-                    House: {formatUSDT(houseBalance)}
-                  </div>
-                </div>
+        <div className={`betting-rail betting-rail--${railStyle} mobile-rail-fixed`}>
+          {/* Chip stack - absolutely positioned, floats above rail */}
+          <div className="mobile-chip-stack-float">
+            <InteractiveChipStack
+              amount={betAmount}
+              onRemoveChip={removeChip}
+              disabled={disabled}
+              maxChipsPerPile={6}
+            />
+          </div>
+
+          {/* Fixed height grid - 3 independent columns */}
+          <div className="mobile-rail-grid">
+            {/* LEFT COLUMN - Balances + Utilities */}
+            <div className="mobile-rail-col-left">
+              <div className="flex items-center gap-1.5 text-white font-mono text-xs">
+                <span className="text-green-400">◉</span>
+                <span>{formatUSDT(gameBalance)}</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-gray-400 font-mono text-[11px]">
+                <span className="text-gray-500">⌂</span>
+                <span>{formatUSDT(houseBalance)}</span>
+              </div>
+              <div className="flex gap-1 mt-1">
                 <button onClick={onBalanceRefresh} className="refresh-all-button-mobile">
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
                     <path d="M20 4v4h-4M4 20v-4h4"/>
                   </svg>
                 </button>
-              </div>
-              <div className="flex flex-col items-end gap-1.5">
-                <button
-                  onClick={() => setShowDepositModal(true)}
-                  className={`text-green-500 font-medium ${showDepositAnimation ? 'deposit-button-pulse' : ''}`}
-                >
-                  + Buy Chips
-                </button>
-                <button
-                  onClick={handleWithdrawAll}
-                  disabled={isWithdrawing || gameBalance === 0n}
-                  className="text-gray-500 disabled:opacity-30"
-                >
-                  Cash Out
-                </button>
-                <button
-                  onClick={() => navigate(isLiquidityRoute ? '/dice' : '/dice/liquidity')}
-                  className="text-dfinity-turquoise text-[10px]"
-                >
-                  {isLiquidityRoute ? '🎲 Play Game' : '💰 Be The House'}
-                </button>
+                <div className="relative">
+                  <button
+                    onClick={() => setShowStylePicker(!showStylePicker)}
+                    className="refresh-all-button-mobile"
+                    title="Theme"
+                  >
+                    <span className="text-[10px]">{RAIL_STYLES.find(s => s.id === railStyle)?.icon}</span>
+                  </button>
+                  {showStylePicker && (
+                    <div className="absolute bottom-full left-0 mb-2 bg-gray-900 border border-gray-700 rounded-lg shadow-xl overflow-hidden z-50">
+                      {RAIL_STYLES.map(style => (
+                        <button
+                          key={style.id}
+                          onClick={() => {
+                            setRailStyle(style.id);
+                            setShowStylePicker(false);
+                          }}
+                          className={`flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-gray-800 transition ${
+                            railStyle === style.id ? 'bg-gray-800 text-white' : 'text-gray-400'
+                          }`}
+                        >
+                          <span>{style.icon}</span>
+                          <span className="text-xs whitespace-nowrap">{style.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Center: Stack + Amount */}
-            <div className="flex flex-col items-center gap-1 mb-2">
-              <InteractiveChipStack
-                amount={betAmount}
-                onRemoveChip={removeChip}
-                disabled={disabled}
-                maxChipsPerPile={6}
-              />
-
-              {/* Bet amount + max + clear */}
+            {/* CENTER COLUMN - amount directly above chip buttons */}
+            <div className="mobile-rail-col-center">
               <div className="flex items-center gap-2">
                 <div className="text-white font-mono font-bold text-lg">${betAmount.toFixed(2)}</div>
                 <button
                   onClick={() => onBetChange(Math.min(maxBet, gameBalanceUSDT))}
                   disabled={disabled || betAmount >= maxBet || betAmount >= gameBalanceUSDT}
-                  className="text-gray-500 hover:text-green-400 text-[10px] disabled:opacity-30"
+                  className="text-gray-500 text-[9px] disabled:opacity-30"
                 >
                   max
                 </button>
                 {betAmount > 0 && (
-                  <button
-                    onClick={clearBet}
-                    className="text-gray-500 hover:text-red-400 text-[10px]"
-                  >
-                    clear
-                  </button>
+                  <button onClick={clearBet} className="text-gray-500 text-[9px]">clear</button>
                 )}
+              </div>
+              <div className="flex gap-1">
+                {CHIP_DENOMINATIONS.map(chip => (
+                  <button
+                    key={chip.color}
+                    onClick={() => addChip(chip)}
+                    disabled={disabled || !canAddChip(chip.value)}
+                    className="chip-button"
+                  >
+                    <img src={chip.topImg} alt={chip.label} className="w-10 h-10 object-contain" />
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Chip buttons */}
-            <div className="flex justify-center gap-1">
-              {CHIP_DENOMINATIONS.map(chip => (
-                <button
-                  key={chip.color}
-                  onClick={() => addChip(chip)}
-                  disabled={disabled || !canAddChip(chip.value)}
-                  className="chip-button"
-                >
-                  <img src={chip.topImg} alt={chip.label} className="w-10 h-10 object-contain" />
-                </button>
-              ))}
+            {/* RIGHT COLUMN */}
+            <div className="mobile-rail-col-right">
+              <button
+                onClick={() => setShowDepositModal(true)}
+                className={`mobile-action-btn ${showDepositAnimation ? 'deposit-button-pulse' : ''}`}
+              >
+                Buy chips
+              </button>
+              <button
+                onClick={handleWithdrawAll}
+                disabled={isWithdrawing || gameBalance === 0n}
+                className="mobile-action-btn"
+              >
+                Cash out
+              </button>
+              <button
+                onClick={() => navigate(isLiquidityRoute ? '/dice' : '/dice/liquidity')}
+                className="mobile-action-btn"
+              >
+                {isLiquidityRoute ? 'Play game' : 'Be the house'}
+              </button>
             </div>
           </div>
         </div>
