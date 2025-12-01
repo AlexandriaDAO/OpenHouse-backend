@@ -169,12 +169,32 @@ async fn refresh_canister_balance() -> u64 {
 }
 
 // =============================================================================
-// ADMIN ENDPOINTS
+// ADMIN DIAGNOSTIC ENDPOINTS
 // =============================================================================
 
 #[update]
 async fn admin_health_check() -> Result<defi_accounting::types::HealthCheck, String> {
-    defi_accounting::accounting::admin_health_check().await
+    defi_accounting::admin_query::admin_health_check().await
+}
+
+#[query]
+fn admin_get_all_pending_withdrawals() -> Result<Vec<defi_accounting::types::PendingWithdrawalInfo>, String> {
+    defi_accounting::admin_query::get_all_pending_withdrawals()
+}
+
+#[query]
+fn admin_get_orphaned_funds_report() -> Result<defi_accounting::types::OrphanedFundsReport, String> {
+    defi_accounting::admin_query::get_orphaned_funds_report()
+}
+
+#[query]
+fn admin_get_all_balances(offset: u64, limit: u64) -> Result<Vec<defi_accounting::types::UserBalance>, String> {
+    defi_accounting::admin_query::get_all_balances(offset, limit)
+}
+
+#[query]
+fn admin_get_all_lp_positions(offset: u64, limit: u64) -> Result<Vec<defi_accounting::types::LPPositionInfo>, String> {
+    defi_accounting::admin_query::get_all_lp_positions(offset, limit)
 }
 
 // =============================================================================

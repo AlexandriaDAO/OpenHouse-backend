@@ -9,7 +9,7 @@ use crate::types::{Account, TransferFromArgs, TransferFromError, TransferArg, Tr
 
 use crate::{MEMORY_MANAGER, Memory};
 use super::liquidity_pool;
-use super::types::{PendingWithdrawal, WithdrawalType, AuditEntry, AuditEvent, HealthCheck};
+use super::types::{PendingWithdrawal, WithdrawalType, AuditEntry, AuditEvent};
 
 use super::memory_ids::{
     USER_BALANCES_MEMORY_ID,
@@ -690,52 +690,105 @@ pub async fn get_canister_balance() -> u64 {
     }
 }
 
-const ADMIN_PRINCIPAL: &str = "p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae";
+// =============================================================================
+// ADMIN QUERY HELPERS (called by admin_query.rs)
+// =============================================================================
 
-/// Admin-only health check that mirrors scripts/check_balance.sh
-/// Returns comprehensive accounting health status.
-pub async fn admin_health_check() -> Result<HealthCheck, String> {
-    let admin = Principal::from_text(ADMIN_PRINCIPAL)
-        .map_err(|_| "Invalid admin principal constant")?;
+/// Expose total deposits calculation for admin queries
+pub(crate) fn calculate_total_deposits_internal() -> u64 {
+    calculate_total_deposits()
+}
 
-    let caller = ic_cdk::api::msg_caller();
-    if caller != admin {
-        return Err("Unauthorized: admin only".to_string());
-    }
+/// Count unique users with balances
+pub(crate) fn count_user_balances_internal() -> u64 {
+    USER_BALANCES_STABLE.with(|b| b.borrow().len())
+}
 
-    // Refresh canister balance from ledger
-    let canister_balance = refresh_canister_balance().await;
+/// Get pending withdrawal stats (count, total amount)
+pub(crate) fn get_pending_stats_internal() -> (u64, u64) {
+    PENDING_WITHDRAWALS.with(|p| {
+        let pending = p.borrow();
+        let count = pending.len();
+        let total: u64 = pending.iter()
+            .map(|entry| entry.value().get_amount())
+            .sum();
+        (count, total)
+    })
+}
 
-    // Get current values
-    let pool_reserve = super::liquidity_pool::get_pool_reserve();
-    let total_deposits = calculate_total_deposits();
-    let calculated_total = pool_reserve.checked_add(total_deposits)
-        .ok_or("CRITICAL: Accounting overflow (pool_reserve + total_deposits > u64::MAX)")?;
+/// Iterate all pending withdrawals
+pub(crate) fn iter_pending_withdrawals_internal() -> Vec<super::types::PendingWithdrawalInfo> {
+    PENDING_WITHDRAWALS.with(|p| {
+        p.borrow().iter().map(|entry| {
+            let (user, pending) = (entry.key(), entry.value());
+            super::types::PendingWithdrawalInfo {
+                user: user.clone(),
+                withdrawal_type: match &pending.withdrawal_type {
+                    WithdrawalType::User { .. } => "User".to_string(),
+                    WithdrawalType::LP { .. } => "LP".to_string(),
+                },
+                amount: pending.get_amount(),
+                created_at: pending.created_at,
+            }
+        }).collect()
+    })
+}
 
-    // Calculate excess (can be negative if deficit)
-    let excess = canister_balance as i64 - calculated_total as i64;
-    let excess_usdt = excess as f64 / 1_000_000.0;
+/// Paginated user balances
+pub(crate) fn iter_user_balances_internal(offset: usize, limit: usize) -> Vec<super::types::UserBalance> {
+    USER_BALANCES_STABLE.with(|b| {
+        b.borrow().iter()
+            .skip(offset)
+            .take(limit)
+            .map(|entry| super::types::UserBalance {
+                user: entry.key().clone(),
+                balance: entry.value().clone(),
+            })
+            .collect()
+    })
+}
 
-    // Determine health status
-    let (is_healthy, health_status) = if excess < 0 {
-        (false, "CRITICAL: DEFICIT - Liabilities exceed assets".to_string())
-    } else if excess < 1_000_000 {
-        (true, "HEALTHY".to_string())
-    } else if excess < 5_000_000 {
-        (true, "WARNING: Excess accumulating (1-5 USDT)".to_string())
-    } else {
-        (false, "ACTION REQUIRED: High excess (>5 USDT)".to_string())
-    };
+/// Sum all abandoned amounts from audit log
+pub(crate) fn sum_abandoned_from_audit_internal() -> u64 {
+    AUDIT_LOG_MAP.with(|log| {
+        log.borrow().iter()
+            .filter_map(|entry| {
+                if let AuditEvent::WithdrawalAbandoned { amount, .. } = &entry.value().event {
+                    Some(*amount)
+                } else {
+                    None
+                }
+            })
+            .sum()
+    })
+}
 
-    Ok(HealthCheck {
-        pool_reserve,
-        total_deposits,
-        canister_balance,
-        calculated_total,
-        excess,
-        excess_usdt,
-        is_healthy,
-        health_status,
-        timestamp: ic_cdk::api::time(),
+/// Build orphaned funds report from audit log
+pub(crate) fn build_orphaned_funds_report_internal() -> super::types::OrphanedFundsReport {
+    AUDIT_LOG_MAP.with(|log| {
+        let mut total = 0u64;
+        let mut count = 0u64;
+        let mut recent: Vec<super::types::AbandonedEntry> = Vec::new();
+
+        for entry in log.borrow().iter() {
+            if let AuditEvent::WithdrawalAbandoned { user, amount } = &entry.value().event {
+                total += amount;
+                count += 1;
+                // Keep last 50 abandonments
+                if recent.len() < 50 {
+                    recent.push(super::types::AbandonedEntry {
+                        user: user.clone(),
+                        amount: *amount,
+                        timestamp: entry.value().timestamp,
+                    });
+                }
+            }
+        }
+
+        super::types::OrphanedFundsReport {
+            total_abandoned_amount: total,
+            abandoned_count: count,
+            recent_abandonments: recent,
+        }
     })
 }
