@@ -67,6 +67,42 @@ type HealthCheck = record {
   is_healthy: bool;
   health_status: text;
   timestamp: nat64;
+  pending_withdrawals_count: nat64;
+  pending_withdrawals_total_amount: nat64;
+  heap_memory_bytes: nat64;
+  stable_memory_pages: nat64;
+  total_abandoned_amount: nat64;
+  unique_users: nat64;
+  unique_lps: nat64;
+};
+
+type PendingWithdrawalInfo = record {
+  user: principal;
+  withdrawal_type: text;
+  amount: nat64;
+  created_at: nat64;
+};
+
+type OrphanedFundsReport = record {
+  total_abandoned_amount: nat64;
+  abandoned_count: nat64;
+  recent_abandonments: vec AbandonedEntry;
+};
+
+type AbandonedEntry = record {
+  user: principal;
+  amount: nat64;
+  timestamp: nat64;
+};
+
+type UserBalance = record {
+  user: principal;
+  balance: nat64;
+};
+
+type LPPositionInfo = record {
+  user: principal;
+  shares: nat;
 };
 
 service : {
@@ -99,6 +135,10 @@ service : {
 
   // Admin endpoints
   admin_health_check: () -> (variant { Ok: HealthCheck; Err: text });
+  admin_get_all_pending_withdrawals: () -> (variant { Ok: vec PendingWithdrawalInfo; Err: text }) query;
+  admin_get_orphaned_funds_report: () -> (variant { Ok: OrphanedFundsReport; Err: text }) query;
+  admin_get_all_balances: (nat64, nat64) -> (variant { Ok: vec UserBalance; Err: text }) query;
+  admin_get_all_lp_positions: (nat64, nat64) -> (variant { Ok: vec LPPositionInfo; Err: text }) query;
 
   // Liquidity Pool Management
   // Deposit liquidity into the pool

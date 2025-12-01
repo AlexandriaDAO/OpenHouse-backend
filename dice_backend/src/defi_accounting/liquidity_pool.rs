@@ -682,3 +682,31 @@ async fn transfer_from_user(user: Principal, amount: u64) -> Result<(), String> 
 pub fn calculate_shares_preview(amount: u64) -> Result<Nat, String> {
     calculate_shares_for_deposit(&Nat::from(amount))
 }
+
+// =============================================================================
+// ADMIN QUERY HELPERS
+// =============================================================================
+
+/// Count LP positions (excluding burned shares)
+pub(crate) fn count_lp_positions_internal() -> u64 {
+    LP_SHARES.with(|shares| {
+        shares.borrow().iter()
+            .filter(|entry| entry.key() != &Principal::anonymous())
+            .count() as u64
+    })
+}
+
+/// Paginated LP positions
+pub(crate) fn iter_lp_positions_internal(offset: usize, limit: usize) -> Vec<super::types::LPPositionInfo> {
+    LP_SHARES.with(|shares| {
+        shares.borrow().iter()
+            .filter(|entry| entry.key() != &Principal::anonymous())
+            .skip(offset)
+            .take(limit)
+            .map(|entry| super::types::LPPositionInfo {
+                user: entry.key().clone(),
+                shares: entry.value().0.clone(),
+            })
+            .collect()
+    })
+}

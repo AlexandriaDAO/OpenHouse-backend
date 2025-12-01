@@ -102,6 +102,7 @@ pub enum AuditEvent {
 /// Mirrors the logic of scripts/check_balance.sh
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct HealthCheck {
+    // Financial health (existing)
     pub pool_reserve: u64,
     pub total_deposits: u64,
     pub canister_balance: u64,
@@ -111,6 +112,48 @@ pub struct HealthCheck {
     pub is_healthy: bool,
     pub health_status: String,
     pub timestamp: u64,
+    
+    pub pending_withdrawals_count: u64,
+    pub pending_withdrawals_total_amount: u64,
+    pub heap_memory_bytes: u64,
+    pub stable_memory_pages: u64,
+    pub total_abandoned_amount: u64,
+    pub unique_users: u64,
+    pub unique_lps: u64,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct PendingWithdrawalInfo {
+    pub user: Principal,
+    pub withdrawal_type: String,
+    pub amount: u64,
+    pub created_at: u64,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct OrphanedFundsReport {
+    pub total_abandoned_amount: u64,
+    pub abandoned_count: u64,
+    pub recent_abandonments: Vec<AbandonedEntry>,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct AbandonedEntry {
+    pub user: Principal,
+    pub amount: u64,
+    pub timestamp: u64,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct UserBalance {
+    pub user: Principal,
+    pub balance: u64,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct LPPositionInfo {
+    pub user: Principal,
+    pub shares: Nat,
 }
 
 impl Storable for AuditEntry {

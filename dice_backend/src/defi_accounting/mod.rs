@@ -1,11 +1,10 @@
 pub mod accounting;
+pub mod admin_query;
 pub mod liquidity_pool;
 pub mod memory_ids;
 pub mod query;
 pub mod statistics;
 pub mod types;
-
-pub use types::HealthCheck;
 
 // Re-export types and update functions from original modules
 pub use accounting::update_balance;
