@@ -16,6 +16,10 @@ fn require_admin() -> Result<(), String> {
 }
 
 /// Expanded health check - consolidates financial + operational metrics
+///
+/// # Returns
+/// - `Ok(HealthCheck)`: Snapshot of system health including balances, pending withdrawals, and memory usage.
+/// - `Err(String)`: "Unauthorized: admin only" if caller is not the admin.
 pub async fn admin_health_check() -> Result<HealthCheck, String> {
     require_admin()?;
 
@@ -50,7 +54,9 @@ pub async fn admin_health_check() -> Result<HealthCheck, String> {
     let total_abandoned = accounting::sum_abandoned_from_audit_internal();
 
     // Memory metrics (NEW)
-    let heap_memory_bytes = (core::arch::wasm32::memory_size(0) * 65536) as u64;
+    let heap_memory_bytes = (core::arch::wasm32::memory_size(0) as u64)
+        .checked_mul(65536)
+        .unwrap_or(u64::MAX);
     let stable_memory_pages = ic_cdk::api::stable::stable_size();
 
     Ok(HealthCheck {

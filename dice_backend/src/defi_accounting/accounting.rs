@@ -765,22 +765,26 @@ pub(crate) fn sum_abandoned_from_audit_internal() -> u64 {
 
 /// Build orphaned funds report from audit log
 pub(crate) fn build_orphaned_funds_report_internal() -> super::types::OrphanedFundsReport {
+    use std::collections::VecDeque;
     AUDIT_LOG_MAP.with(|log| {
         let mut total = 0u64;
         let mut count = 0u64;
-        let mut recent: Vec<super::types::AbandonedEntry> = Vec::new();
+        let mut recent: VecDeque<super::types::AbandonedEntry> = VecDeque::new();
 
         for entry in log.borrow().iter() {
             if let AuditEvent::WithdrawalAbandoned { user, amount } = &entry.value().event {
                 total += amount;
                 count += 1;
-                // Keep last 50 abandonments
-                if recent.len() < 50 {
-                    recent.push(super::types::AbandonedEntry {
-                        user: user.clone(),
-                        amount: *amount,
-                        timestamp: entry.value().timestamp,
-                    });
+                
+                recent.push_back(super::types::AbandonedEntry {
+                    user: user.clone(),
+                    amount: *amount,
+                    timestamp: entry.value().timestamp,
+                });
+                
+                // Keep only last 50
+                if recent.len() > 50 {
+                    recent.pop_front();
                 }
             }
         }
@@ -788,7 +792,7 @@ pub(crate) fn build_orphaned_funds_report_internal() -> super::types::OrphanedFu
         super::types::OrphanedFundsReport {
             total_abandoned_amount: total,
             abandoned_count: count,
-            recent_abandonments: recent,
+            recent_abandonments: recent.into_iter().collect(),
         }
     })
 }

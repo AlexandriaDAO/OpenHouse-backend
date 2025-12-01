@@ -112,7 +112,7 @@ pub struct HealthCheck {
     pub is_healthy: bool,
     pub health_status: String,
     pub timestamp: u64,
-    // Operational health (NEW)
+    
     pub pending_withdrawals_count: u64,
     pub pending_withdrawals_total_amount: u64,
     pub heap_memory_bytes: u64,
