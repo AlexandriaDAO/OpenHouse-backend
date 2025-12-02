@@ -56,8 +56,8 @@ thread_local! {
         )
     );
 
-    static CACHED_CANISTER_BALANCE: RefCell<u64> = RefCell::new(0);
-    static PARENT_TIMER: RefCell<Option<ic_cdk_timers::TimerId>> = RefCell::new(None);
+    static CACHED_CANISTER_BALANCE: RefCell<u64> = const { RefCell::new(0) };
+    static PARENT_TIMER: RefCell<Option<ic_cdk_timers::TimerId>> = const { RefCell::new(None) };
 }
 
 pub(crate) enum TransferResult {
@@ -102,7 +102,7 @@ fn prune_oldest_audit_entries(count: u64) {
         // BTreeMap iterates in key order (oldest first since keys are sequential)
         let keys_to_remove: Vec<u64> = log.iter()
             .take(count as usize)
-            .map(|entry| entry.key().clone())
+            .map(|entry| *entry.key())
             .collect();
         for key in keys_to_remove {
             log.remove(&key);
@@ -114,7 +114,7 @@ fn calculate_total_deposits() -> u64 {
     USER_BALANCES_STABLE.with(|balances| {
         balances.borrow()
             .iter()
-            .map(|entry| entry.value().clone())
+            .map(|entry| entry.value())
             .sum()
     })
 }
@@ -662,7 +662,7 @@ pub(crate) fn iter_pending_withdrawals_internal() -> Vec<super::types::PendingWi
         p.borrow().iter().map(|entry| {
             let (user, pending) = (entry.key(), entry.value());
             super::types::PendingWithdrawalInfo {
-                user: user.clone(),
+                user: *user,
                 withdrawal_type: match &pending.withdrawal_type {
                     WithdrawalType::User { .. } => "User".to_string(),
                     WithdrawalType::LP { .. } => "LP".to_string(),
@@ -681,8 +681,8 @@ pub(crate) fn iter_user_balances_internal(offset: usize, limit: usize) -> Vec<su
             .skip(offset)
             .take(limit)
             .map(|entry| super::types::UserBalance {
-                user: entry.key().clone(),
-                balance: entry.value().clone(),
+                user: *entry.key(),
+                balance: entry.value(),
             })
             .collect()
     })
@@ -717,7 +717,7 @@ pub(crate) fn build_orphaned_funds_report_internal() -> super::types::OrphanedFu
                 count += 1;
                 
                 recent.push_back(super::types::AbandonedEntry {
-                    user: user.clone(),
+                    user: *user,
                     amount: *amount,
                     timestamp: entry.value().timestamp,
                 });

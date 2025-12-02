@@ -57,8 +57,7 @@ pub async fn admin_health_check() -> Result<HealthCheck, String> {
 
     // Memory metrics (NEW)
     let heap_memory_bytes = (core::arch::wasm32::memory_size(0) as u64)
-        .checked_mul(WASM_PAGE_SIZE_BYTES)
-        .unwrap_or(u64::MAX);
+        .saturating_mul(WASM_PAGE_SIZE_BYTES);
     let stable_memory_pages = ic_cdk::stable::stable_size();
 
     Ok(HealthCheck {

@@ -129,11 +129,11 @@ fn calculate_shares_for_deposit(amount_nat: &Nat) -> Result<Nat, String> {
         let current_reserve = pool_state.reserve.clone();
         let total_shares = calculate_total_supply();
 
-        if total_shares == Nat::from(0u64) {
+        if total_shares == 0u64 {
             // Initial deposit logic (simulation)
             let initial_shares = amount_nat.clone();
             let burned_shares = Nat::from(MINIMUM_LIQUIDITY);
-            
+
             if initial_shares < burned_shares {
                 return Ok::<Nat, String>(Nat::from(0u64));
             }
@@ -141,7 +141,7 @@ fn calculate_shares_for_deposit(amount_nat: &Nat) -> Result<Nat, String> {
         } else {
             // Standard logic (simulation)
             let numerator = amount_nat.clone() * total_shares;
-            if current_reserve == Nat::from(0u64) {
+            if current_reserve == 0u64 {
                  return Ok::<Nat, String>(Nat::from(0u64));
             }
             Ok::<Nat, String>(numerator / current_reserve)
@@ -185,21 +185,20 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
     // This prevents "dust loss" where users send funds but get 0 shares.
     let projected_shares = calculate_shares_for_deposit(&amount_nat)?;
 
-    if projected_shares == Nat::from(0u64) {
+    if projected_shares == 0u64 {
         return Err("Deposit too small: results in 0 shares".to_string());
     }
 
     // Validation: Check min_shares parameters (P2 fix)
     if let Some(min_shares) = &min_shares_expected {
-        if min_shares == &Nat::from(0u64) {
+        if *min_shares == 0u64 {
              return Err("min_shares_expected must be > 0".to_string());
         }
     }
 
     // Transfer from user (requires prior ICRC-2 approval)
-    match transfer_from_user(caller, amount).await {
-        Err(e) => return Err(format!("Transfer failed: {}", e)),
-        Ok(_) => {}
+    if let Err(e) = transfer_from_user(caller, amount).await {
+        return Err(format!("Transfer failed: {}", e));
     }
 
     // Calculate shares to mint (reuse shared logic)
@@ -237,7 +236,7 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
     }
 
     // SAFETY: This should never trigger after pre-flight check, but kept as defensive check
-    if shares_to_mint == Nat::from(0u64) {
+    if shares_to_mint == 0u64 {
         ic_cdk::trap("CRITICAL: Share calculation inconsistency");
     }
 
@@ -253,7 +252,7 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
             .map(|entry| entry.value().0.clone())
             .fold(Nat::from(0u64), |acc, amt| acc + amt);
 
-        if total_shares == Nat::from(0u64) {
+        if total_shares == 0u64 {
             let burned_shares = Nat::from(MINIMUM_LIQUIDITY);
             shares.borrow_mut().insert(Principal::anonymous(), StorableNat(burned_shares));
         }
@@ -292,7 +291,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     }
 
     // Validate shares
-    if shares_to_burn == Nat::from(0u64) {
+    if shares_to_burn == 0u64 {
         return Err("Cannot withdraw zero shares".to_string());
     }
 
@@ -307,7 +306,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         let current_reserve = pool_state.reserve.clone();
         let total_shares = calculate_total_supply();
 
-        if total_shares == Nat::from(0u64) {
+        if total_shares == 0u64 {
             return Err("No shares in circulation".to_string());
         }
 
@@ -339,7 +338,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     LP_SHARES.with(|shares| {
         let mut shares_map = shares.borrow_mut();
         let new_shares = user_shares.clone() - shares_to_burn.clone();
-        if new_shares == Nat::from(0u64) {
+        if new_shares == 0u64 {
             shares_map.remove(&caller);
         } else {
             shares_map.insert(caller, StorableNat(new_shares));
@@ -416,7 +415,7 @@ pub async fn withdraw_all_liquidity() -> Result<u64, String> {
     let caller = ic_cdk::api::msg_caller();
     let shares = LP_SHARES.with(|s| s.borrow().get(&caller).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64)));
 
-    if shares == Nat::from(0u64) {
+    if shares == 0u64 {
         return Err("No liquidity to withdraw".to_string());
     }
 
@@ -430,9 +429,9 @@ pub(crate) fn get_lp_position_internal(user: Principal) -> LPPosition {
     let total_shares = calculate_total_supply();
     let pool_reserve = get_pool_reserve_nat();
 
-    let (ownership_percent, redeemable_icp) = if total_shares == Nat::from(0u64) {
+    let (ownership_percent, redeemable_icp) = if total_shares == 0u64 {
         (0.0, Nat::from(0u64))
-    } else if pool_reserve == Nat::from(0u64) {
+    } else if pool_reserve == 0u64 {
         // Edge case: shares exist but no reserve
         let ownership = (user_shares.0.to_f64().unwrap_or(0.0) /
                         total_shares.0.to_f64().unwrap_or(1.0)) * 100.0;
@@ -460,9 +459,9 @@ pub(crate) fn get_pool_stats_internal() -> PoolStats {
     let pool_reserve = pool_state.reserve;
 
     // Calculate share price
-    let share_price = if total_shares == Nat::from(0u64) {
+    let share_price = if total_shares == 0u64 {
         Nat::from(100_000_000u64) // 1 USDT initial price (100M decimals = 1.00 USDT)
-    } else if pool_reserve == Nat::from(0u64) {
+    } else if pool_reserve == 0u64 {
         Nat::from(1u64) // Minimum price if drained
     } else {
         // SAFETY: total_shares checked for zero above (line 336)
@@ -473,7 +472,7 @@ pub(crate) fn get_pool_stats_internal() -> PoolStats {
     // Count LPs (excluding burned shares)
     let total_lps = LP_SHARES.with(|shares| {
         shares.borrow().iter()
-            .filter(|entry| entry.key() != &Principal::anonymous() && entry.value().0 != Nat::from(0u64))
+            .filter(|entry| entry.key() != &Principal::anonymous() && entry.value().0 != 0u64)
             .count() as u64
     });
 
@@ -542,7 +541,7 @@ pub(crate) fn update_pool_on_win(payout: u64) {
         // Safe subtraction with trap on underflow
         if pool_state.reserve < payout_nat {
              // CRITICAL: Halt operations to protect LP funds
-             ic_cdk::trap(&format!(
+             ic_cdk::trap(format!(
                 "CRITICAL: Pool insolvent. Attempted payout {} e8s exceeds reserve {} e8s. Halting to protect LPs.",
                 payout,
                 pool_state.reserve.0.to_u64().unwrap_or(u64::MAX) // Use MAX to indicate overflow if it happens
@@ -704,7 +703,7 @@ pub(crate) fn iter_lp_positions_internal(offset: usize, limit: usize) -> Vec<sup
             .skip(offset)
             .take(limit)
             .map(|entry| super::types::LPPositionInfo {
-                user: entry.key().clone(),
+                user: *entry.key(),
                 shares: entry.value().0.clone(),
             })
             .collect()

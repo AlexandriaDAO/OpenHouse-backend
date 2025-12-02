@@ -80,7 +80,7 @@ pub async fn play_dice(
             }
         }
         RollDirection::Under => {
-            if target_number <= 0 {
+            if target_number == 0 {
                 return Err("Target must be greater than 0 for Under rolls".to_string());
             }
             if target_number > MAX_NUMBER {
@@ -186,12 +186,12 @@ pub async fn play_dice(
 pub fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<(f64, f64), String> {
     match direction {
         RollDirection::Over => {
-            if target_number >= MAX_NUMBER || target_number < 1 {
+            if !(1..MAX_NUMBER).contains(&target_number) {
                 return Err("Invalid target number for Over direction".to_string());
             }
         }
         RollDirection::Under => {
-            if target_number <= 0 || target_number > MAX_NUMBER {
+            if target_number == 0 || target_number > MAX_NUMBER {
                 return Err("Invalid target number for Under direction".to_string());
             }
         }

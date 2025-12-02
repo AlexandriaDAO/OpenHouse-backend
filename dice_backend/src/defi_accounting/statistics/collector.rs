@@ -30,7 +30,7 @@ pub fn record_bet_volume(amount: u64) {
         let mut new_acc = if current.day_start != current_day_start {
             // CONSISTENCY FIX: Use the snapshot's ending reserve as the new day's starting reserve
             // This ensures continuity even if concurrent transactions occur
-            let starting_reserve = ending_reserve.unwrap_or_else(|| liquidity_pool::get_pool_reserve());
+            let starting_reserve = ending_reserve.unwrap_or_else(liquidity_pool::get_pool_reserve);
             DailyAccumulator {
                 day_start: current_day_start,
                 volume_accumulated: 0,
@@ -112,7 +112,7 @@ pub fn take_daily_snapshot() {
             let ending_reserve = take_snapshot_internal(&current);
 
             // Reset for new day using snapshot's ending reserve
-            let starting_reserve = ending_reserve.unwrap_or_else(|| liquidity_pool::get_pool_reserve());
+            let starting_reserve = ending_reserve.unwrap_or_else(liquidity_pool::get_pool_reserve);
             let new_acc = DailyAccumulator {
                 day_start: get_day_start(now),
                 volume_accumulated: 0,

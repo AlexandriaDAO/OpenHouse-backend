@@ -21,8 +21,8 @@ pub const MAX_GAMES_PER_SEED: u64 = 10_000; // Rotate after 10k games
 // =============================================================================
 
 thread_local! {
-    static SEED_STATE: RefCell<Option<RandomnessSeed>> = RefCell::new(None);
-    static SEED_INIT_LOCK: RefCell<bool> = RefCell::new(false);
+    static SEED_STATE: RefCell<Option<RandomnessSeed>> = const { RefCell::new(None) };
+    static SEED_INIT_LOCK: RefCell<bool> = const { RefCell::new(false) };
 
     // Stable cells for persistence
     static SEED_CELL: RefCell<StableCell<RandomnessSeed, Memory>> = RefCell::new(
@@ -142,7 +142,7 @@ pub fn generate_dice_roll_instant(client_seed: &str) -> Result<(u8, u64, String)
 
         // Compute server seed hash for verification
         let mut seed_hasher = Sha256::new();
-        seed_hasher.update(&seed_state.current_seed);
+        seed_hasher.update(seed_state.current_seed);
         let seed_hash = format!("{:x}", seed_hasher.finalize());
 
         // Update stable cell with new state
@@ -155,7 +155,7 @@ pub fn generate_dice_roll_instant(client_seed: &str) -> Result<(u8, u64, String)
 
     // Combine server seed + client seed + nonce for unique result
     let mut hasher = Sha256::new();
-    hasher.update(&server_seed);
+    hasher.update(server_seed);
     hasher.update(client_seed.as_bytes());
     hasher.update(nonce.to_be_bytes());
     let hash = hasher.finalize();
@@ -203,7 +203,7 @@ pub fn maybe_schedule_seed_rotation() {
 // Rotate the seed asynchronously
 pub async fn rotate_seed_async() {
     // Check if we already rotated recently (prevent double rotation)
-    let last_rotation = LAST_ROTATION_CELL.with(|cell| cell.borrow().get().clone());
+    let last_rotation = LAST_ROTATION_CELL.with(|cell| *cell.borrow().get());
     let now = ic_cdk::api::time();
 
     if now - last_rotation < 10_000_000_000 { // 10 seconds minimum between rotations
@@ -247,7 +247,7 @@ pub fn get_current_seed_hash() -> String {
     SEED_STATE.with(|s| {
         s.borrow().as_ref().map(|seed_state| {
             let mut hasher = Sha256::new();
-            hasher.update(&seed_state.current_seed);
+            hasher.update(seed_state.current_seed);
             format!("{:x}", hasher.finalize())
         }).unwrap_or_else(|| "No seed initialized".to_string())
     })
@@ -262,7 +262,7 @@ pub fn verify_game_result(
 ) -> Result<bool, String> {
     // Reconstruct the hash
     let mut hasher = Sha256::new();
-    hasher.update(&server_seed);
+    hasher.update(server_seed);
     hasher.update(client_seed.as_bytes());
     hasher.update(nonce.to_be_bytes());
     let hash = hasher.finalize();
@@ -280,7 +280,7 @@ pub fn get_seed_info() -> (String, u64, u64) {
         s.borrow().as_ref().map(|seed_state| {
             let hash = {
                 let mut hasher = Sha256::new();
-                hasher.update(&seed_state.current_seed);
+                hasher.update(seed_state.current_seed);
                 format!("{:x}", hasher.finalize())
             };
             (hash, seed_state.games_used, seed_state.creation_time)
