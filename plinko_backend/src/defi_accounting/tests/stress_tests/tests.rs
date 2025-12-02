@@ -436,7 +436,7 @@ fn test_settle_bet_partial_loss_plinko_style() {
     let balance_before = *model.user_balances.get(&1).unwrap();
 
     // Bet 1 USDT, get 0.2 USDT back (Plinko 0.2x center multiplier)
-    // THIS IS THE KEY TEST - old API would incorrectly take full 1 USDT
+    // Verifies partial payout handling (0.2x returns 0.2 USDT, pool gains 0.8 USDT)
     let result = model.execute(Operation::SettleBet {
         user: 1,
         bet_amount: 1_000_000,  // 1 USDT

@@ -3,7 +3,6 @@ use ic_stable_structures::memory_manager::MemoryId;
 use ic_stable_structures::{StableBTreeMap, StableCell};
 use std::cell::RefCell;
 use std::time::Duration;
-// Note: This module now uses ckUSDT (ICRC-2), not ICP ledger
 // ckUSDT types defined in types.rs
 use crate::types::{Account, TransferFromArgs, TransferFromError, TransferArg, TransferError, CKUSDT_CANISTER_ID, CKUSDT_TRANSFER_FEE};
 
@@ -375,9 +374,9 @@ async fn auto_withdraw_parent() {
          // Use withdraw_internal directly
          match withdraw_internal(parent).await {
              Ok(amount) => {
-                 ic_cdk::println!("Auto-withdraw success: {} e8s to parent", amount);
+                 ic_cdk::println!("Auto-withdraw success: {} to parent", amount);
                  log_audit(AuditEvent::SystemInfo {
-                     message: crate::defi_accounting::types::sanitize_error(&format!("Auto-withdrawal success: {} e8s", amount))
+                     message: crate::defi_accounting::types::sanitize_error(&format!("Auto-withdrawal success: {}", amount))
                  });
              },
              Err(e) => {

@@ -27,8 +27,6 @@ pub const AUDIT_LOG_COUNTER_MEMORY_ID: u8 = 25;
 pub const SNAPSHOTS_MEMORY_ID: u8 = 30;
 pub const ACCUMULATOR_MEMORY_ID: u8 = 31;
 
-// ABANDONED (corrupted, do not reuse): 22, 23
-
 #[cfg(test)]
 mod tests {
     use super::*;

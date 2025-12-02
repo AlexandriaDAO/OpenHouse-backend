@@ -1,20 +1,9 @@
-// P0 AUDIT DISPROOF TEST: Slippage Protection Accounting
+// Test: Slippage Protection Accounting Correctness
 //
-// PURPOSE:
-// This test mathematically proves that the "Critical P0" issue raised in the code review is invalid.
-//
-// THE CLAIM (P0):
-// The reviewer claims that when a slippage refund occurs:
-// "User gets their funds back BUT the pool reserve increased... Pool accounting is broken"
-//
-// THE PROOF:
-// This test simulates the EXACT order of operations in `deposit_liquidity` to prove:
-// 1. When refund triggers, the function returns EARLY.
-// 2. The `pool_reserve` update code is unreachable.
-// 3. The system remains solvent: Assets = Liabilities.
-//
-// METHODOLOGY:
-// We verify the state transitions step-by-step.
+// Verifies that when slippage refund occurs:
+// 1. Function returns early (no shares minted)
+// 2. Pool reserve is NOT increased
+// 3. System remains solvent (Assets == Liabilities)
 
 use std::cell::RefCell;
 use candid::Nat;

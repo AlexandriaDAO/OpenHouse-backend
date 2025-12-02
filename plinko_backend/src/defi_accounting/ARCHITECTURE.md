@@ -793,4 +793,4 @@ safety_philosophy:
 **End of Architecture Guide**
 
 > This pseudocode represents the complete DeFi accounting module as of the current codebase state.
-> For implementation details, refer to the source files in `dice_backend/src/defi_accounting/`.
+> For implementation details, refer to the source files in `plinko_backend/src/defi_accounting/`.

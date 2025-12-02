@@ -9,12 +9,10 @@ pub fn sanitize_error(msg: &str) -> String {
 
 /// Pending withdrawal awaiting confirmation or user action.
 ///
-/// # Design Note (FOR AUDITORS)
-/// We removed `retries` and `last_error` fields because the system no longer
-/// makes autonomous decisions about transaction outcomes. Users retry manually
-/// via `retry_withdrawal()` and can verify on-chain status themselves.
-/// This eliminates the double-spend vulnerability where auto-rollback after
-/// `TooOld` error could restore balance even though the transfer succeeded.
+/// # Design Note
+/// The system does not auto-retry or auto-rollback transactions.
+/// Users must manually call `retry_withdrawal()` or `abandon_withdrawal()`.
+/// This prevents double-spend vulnerabilities from uncertain transfer outcomes.
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct PendingWithdrawal {
     pub withdrawal_type: WithdrawalType,
