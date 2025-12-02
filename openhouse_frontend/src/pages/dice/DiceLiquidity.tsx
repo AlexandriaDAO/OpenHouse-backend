@@ -8,7 +8,7 @@ import { DECIMALS_PER_CKUSDT, TRANSFER_FEE } from '../../types/balance';
 import { DiceStatistics } from '../../components/game-specific/dice';
 import { PendingWithdrawalRecovery } from '../../components/game-specific/dice/PendingWithdrawalRecovery';
 import { InfoTooltip } from '../../components/InfoTooltip';
-import { useStatsData } from '../../components/game-specific/dice/statistics/useStatsData';
+import { useApyData } from '../../components/game-specific/dice/statistics/useApyData';
 
 // Local interfaces matching what DiceLiquidityPanel used
 interface PoolStats {
@@ -47,8 +47,8 @@ export function DiceLiquidity() {
   const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw'>('deposit');
   const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
 
-  // Fetch APY data for stats bar
-  const { apy7, isLoading: apyLoading } = useStatsData(false); // Only fetch if needed
+  // Fetch APY data for stats bar using lightweight hook
+  const { apy7, isLoading: apyLoading, error: apyError } = useApyData();
 
   // Load pool stats
   useEffect(() => {
@@ -212,19 +212,19 @@ export function DiceLiquidity() {
       <div className="bg-gray-900/60 border border-gray-700/50 rounded-2xl overflow-hidden backdrop-blur-sm">
         
         {/* Stats Bar - 3 Columns with APY */}
-        <div className="grid grid-cols-3 border-b border-gray-700/50 bg-black/20">
-          <div className="p-4 text-center border-r border-gray-700/50">
+        <div className="grid grid-cols-1 md:grid-cols-3 border-b border-gray-700/50 bg-black/20">
+          <div className="p-4 text-center border-b md:border-b-0 md:border-r border-gray-700/50">
              <div className="text-gray-500 text-xs uppercase tracking-wider mb-1">Total House Funds</div>
              <div className="text-xl md:text-2xl font-bold text-white">
                ${poolStats ? formatValue(poolStats.pool_reserve) : '---'}
              </div>
           </div>
-          <div className="p-4 text-center border-r border-gray-700/50">
+          <div className="p-4 text-center border-b md:border-b-0 md:border-r border-gray-700/50">
              <div className="text-gray-500 text-xs uppercase tracking-wider mb-1 flex items-center justify-center gap-1">
                Share Price
                <InfoTooltip content="Share price = Pool Value ÷ Total Shares. Trends upward over time as the house profits." />
              </div>
-             <div className="text-lg md:text-xl font-mono font-bold text-purple-400">
+             <div className="text-xl md:text-2xl font-mono font-bold text-purple-400">
                ${poolStats ? (Number(poolStats.share_price) / 100_000_000).toFixed(6) : '---'}
              </div>
           </div>
@@ -234,11 +234,13 @@ export function DiceLiquidity() {
               7-Day APY
               <InfoTooltip content="Annual Percentage Yield based on last 7 days of pool performance. Reflects actual returns vs theoretical 1% house edge." />
             </div>
-            <div className={`text-lg md:text-xl font-mono font-bold ${
+            <div className={`text-xl md:text-2xl font-mono font-bold ${
               apyLoading ? 'text-gray-600' :
+              apyError ? 'text-red-500' :
               apy7 && apy7.actual_apy_percent >= 0 ? 'text-green-400' : 'text-red-400'
             }`}>
               {apyLoading ? '...' :
+               apyError ? '⚠️' :
                apy7 ? `${apy7.actual_apy_percent >= 0 ? '+' : ''}${apy7.actual_apy_percent.toFixed(2)}%` :
                'N/A'}
             </div>
@@ -255,6 +257,8 @@ export function DiceLiquidity() {
           {/* Header - Always visible, clickable to toggle */}
           <button
             onClick={() => setShowRiskReturns(!showRiskReturns)}
+            aria-expanded={showRiskReturns}
+            aria-controls="risk-returns-content"
             className="w-full p-4 flex items-center justify-between bg-gradient-to-r from-purple-900/10 to-transparent hover:from-purple-900/20 transition-all"
           >
             <div className="flex items-center gap-2">
@@ -265,7 +269,7 @@ export function DiceLiquidity() {
 
           {/* Content - Collapsible */}
           {showRiskReturns && (
-            <div className="p-6 space-y-5 text-sm animate-in fade-in slide-in-from-top-2 duration-200 bg-black/10">
+            <div id="risk-returns-content" className="p-6 space-y-5 text-sm animate-in fade-in slide-in-from-top-2 duration-200 bg-black/10">
               {/* YOU ARE THE BANK */}
               <div className="bg-black/30 p-4 rounded-xl border border-gray-800">
                 <h4 className="font-bold text-white mb-2 flex items-center gap-2">
@@ -459,6 +463,8 @@ export function DiceLiquidity() {
         {/* Header */}
         <button
           onClick={() => setShowAdvancedStats(!showAdvancedStats)}
+          aria-expanded={showAdvancedStats}
+          aria-controls="advanced-stats-content"
           className="w-full p-4 flex items-center justify-between hover:bg-white/5 transition-all"
         >
           <div className="flex items-center gap-2">
@@ -469,7 +475,7 @@ export function DiceLiquidity() {
 
         {/* Full Stats Component */}
         {showAdvancedStats && (
-          <div className="animate-in fade-in slide-in-from-top-2 duration-200 border-t border-gray-700/50">
+          <div id="advanced-stats-content" className="animate-in fade-in slide-in-from-top-2 duration-200 border-t border-gray-700/50">
             <DiceStatistics />
           </div>
         )}
