@@ -2,11 +2,14 @@ import React, { useState } from 'react';
 import { useAuth } from '../providers/AuthProvider';
 import { useBalance } from '../providers/BalanceProvider';
 import { formatUSDT } from '../types/ledger';
+import { AuthMethodSelector } from './AuthMethodSelector';
+import { type IdentityProviderConfig, getPreferredProvider } from '../lib/ic-use-identity/config/identityProviders';
 
 export const AuthButton: React.FC = () => {
   const { isAuthenticated, principal, login, logout, isInitializing } = useAuth();
   const { balance, isLoading: balanceLoading, refreshBalance } = useBalance();
   const [copied, setCopied] = useState(false);
+  const [showProviderSelector, setShowProviderSelector] = useState(false);
 
   const handleCopyPrincipal = async () => {
     if (!principal) return;
@@ -22,6 +25,20 @@ export const AuthButton: React.FC = () => {
 
   const handleRefreshBalance = async () => {
     await refreshBalance();
+  };
+
+  const handleLoginClick = () => {
+    const preferredProvider = getPreferredProvider();
+    if (preferredProvider) {
+      login(undefined, preferredProvider);
+    } else {
+      setShowProviderSelector(true);
+    }
+  };
+
+  const handleProviderSelect = (provider: IdentityProviderConfig) => {
+    setShowProviderSelector(false);
+    login(undefined, provider);
   };
 
   if (isInitializing) {
@@ -115,14 +132,23 @@ export const AuthButton: React.FC = () => {
   }
 
   return (
-    <button
-      onClick={login}
-      className="p-2 hover:bg-gray-800 rounded transition-colors"
-      title="Login"
-    >
-      <svg className="w-6 h-6 text-gray-400 hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
-      </svg>
-    </button>
+    <>
+      <button
+        onClick={handleLoginClick}
+        className="p-2 hover:bg-gray-800 rounded transition-colors"
+        title="Login"
+      >
+        <svg className="w-6 h-6 text-gray-400 hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+        </svg>
+      </button>
+
+      {showProviderSelector && (
+        <AuthMethodSelector
+          onSelect={handleProviderSelect}
+          onCancel={() => setShowProviderSelector(false)}
+        />
+      )}
+    </>
   );
 };

@@ -85,6 +85,14 @@
     cursor: pointer;
     border-radius: 50%;
   }
+
+  .modal-overlay {
+    @apply fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4;
+  }
+
+  .modal-content {
+    @apply bg-pure-black border border-pure-white/20 rounded-xl w-full max-w-2xl p-6 shadow-2xl relative;
+  }
 }
 
 .pixelated {

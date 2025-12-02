@@ -1,4 +1,5 @@
 import type { Identity } from "@dfinity/agent";
+import type { IdentityProviderConfig } from "./config/identityProviders";
 
 export type Status = "initializing" | "idle" | "authenticating" | "success" | "error";
 
@@ -10,7 +11,7 @@ export interface IdentityContext {
 }
 
 export interface InternetIdentityContext {
-  login: (loginOptions?: LoginOptions) => void;
+  login: (loginOptions?: LoginOptions, providerConfig?: IdentityProviderConfig) => void;
 }
 
 export interface LoginOptions {
