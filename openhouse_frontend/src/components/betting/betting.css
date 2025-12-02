@@ -415,6 +415,10 @@
   padding-bottom: max(10px, env(safe-area-inset-bottom));
   position: relative;
   overflow: visible;
+  /* Curved top like desktop */
+  border-top-left-radius: 50% 25px;
+  border-top-right-radius: 50% 25px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 /* Horizon line - curved table edge */
@@ -446,33 +450,20 @@
   box-shadow: 0 0 12px rgba(255, 255, 255, 0.5);
 }
 
-/* Floating area - positioned above rail with proper clearance */
-.mobile-floating-area {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  pointer-events: none;
-  padding-bottom: 8px;
-  min-height: 36px; /* Reserve space even when chips are small */
-}
-
-.mobile-chip-stack {
-  pointer-events: auto;
-}
-
 /* Mobile rail grid */
 .mobile-rail-grid {
   display: flex;
   flex-direction: column;
+  overflow: visible;
 }
 
-/* Two column layout for mobile */
-.mobile-two-columns {
+/* Three column layout for mobile */
+.mobile-three-columns {
   display: flex;
   justify-content: space-between;
-  align-items: stretch;
-  gap: 12px;
+  align-items: center;
+  gap: 8px;
+  overflow: visible;
 }
 
 /* Left column: action buttons + balances */
@@ -480,7 +471,17 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+/* Center column: circular chip pile */
+.mobile-col-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  overflow: visible;
 }
 
 /* Right column: bet display + chip selector */
@@ -488,7 +489,23 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6px;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+/* Circular/arc chip pile layout */
+.chip-pile-circular {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chip-pile-circular .chip-pile {
+  pointer-events: auto;
+}
+
+.chip-pile-circular .chip-in-pile {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
 }
 
 /* Action buttons */
@@ -612,23 +629,65 @@
   overflow-x: auto;
 }
 
-/* Mobile balance adjustments */
-.mobile-col-left .compact-balances {
+/* Mobile balance row with refresh button */
+.mobile-balances-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mobile-balances-text {
+  display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
-.mobile-col-left .compact-balances .refresh-btn-top {
-  display: none; /* Hide on mobile to save space */
+.mobile-balances-text .balance-row {
+  font-size: 9px;
+  font-family: 'Roboto Mono', monospace;
 }
 
-.mobile-col-left .balance-row {
-  font-size: 10px;
+.mobile-balances-text .balance-label {
+  font-size: 7px;
+  color: var(--rail-text-muted);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  width: 34px;
+  display: inline-block;
 }
 
-.mobile-col-left .balance-label {
-  font-size: 8px;
-  width: 38px;
+.mobile-balances-text .balance-value {
+  color: #d1d5db;
+}
+
+.mobile-balances-text .text-highlight {
+  color: var(--rail-text-highlight);
+  font-weight: 600;
+}
+
+.mobile-refresh-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.mobile-refresh-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--rail-accent);
+  border-color: var(--rail-accent);
+}
+
+/* Smaller bet placeholder for circular layout */
+.chip-pile-circular .bet-placeholder {
+  border-radius: 50%;
+  font-size: 9px;
 }
 
 /* ==========================================================================

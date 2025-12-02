@@ -202,27 +202,12 @@ export function BettingRail(props: any) {
 
       {/* MOBILE LAYOUT */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50">
-        {/* Floating chip stack area - positioned above rail with proper spacing */}
-        <div className="mobile-floating-area">
-          <div className="mobile-chip-stack">
-            <ChipStack
-              amount={betAmount}
-              onRemoveChip={removeChip}
-              disabled={disabled}
-              maxChipsPerPile={4}
-              scale={0.7}
-            />
-          </div>
-        </div>
-
-        {/* Mobile rail with horizon line */}
+        {/* Mobile rail with curved top border */}
         <div className={`betting-rail-mobile rail-theme--${railStyle}`}>
-          {/* Horizon line - the curved table edge */}
-          <div className="mobile-horizon-line" />
 
           <div className="mobile-rail-grid">
-            {/* Two column layout */}
-            <div className="mobile-two-columns">
+            {/* Three column layout: left controls | center pile | right controls */}
+            <div className="mobile-three-columns">
               {/* LEFT COLUMN: Action buttons on top, balances below */}
               <div className="mobile-col-left">
                 <div className="mobile-action-buttons">
@@ -256,7 +241,35 @@ export function BettingRail(props: any) {
                     </svg>
                   </button>
                 </div>
-                <CompactBalances />
+                <div className="mobile-balances-row">
+                  <div className="mobile-balances-text">
+                    <div className="balance-row">
+                      <span className="balance-label">CHIPS</span>
+                      <span className="balance-value text-highlight">{formatUSDT(gameBalance)}</span>
+                    </div>
+                    <div className="balance-row">
+                      <span className="balance-label">HOUSE</span>
+                      <span className="balance-value">{formatUSDT(houseBalance)}</span>
+                    </div>
+                  </div>
+                  <button onClick={onBalanceRefresh} className="mobile-refresh-btn" title="Refresh Balances">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M4 12c0-4.4 3.6-8 8-8 3.1 0 5.8 1.8 7.1 4.4M20 12c0 4.4-3.6 8-8 8-3.1 0-5.8-1.8-7.1-4.4"/>
+                      <path d="M20 4v4h-4M4 20v-4h4"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* CENTER COLUMN: Circular chip pile */}
+              <div className="mobile-col-center">
+                <ChipStack
+                  amount={betAmount}
+                  onRemoveChip={removeChip}
+                  disabled={disabled}
+                  layout="circular"
+                  circleSize={125}
+                />
               </div>
 
               {/* RIGHT COLUMN: Bet display on top, chip selector below */}
