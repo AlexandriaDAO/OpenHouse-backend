@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Principal } from '@dfinity/principal';
 import { useAuth } from '../providers/AuthProvider';
 import { useBalance } from '../providers/BalanceProvider';
 import useLedgerActor from '../hooks/actors/useLedgerActor';
 import { LoadingModal, SuccessModal, ErrorModal } from '../components/modals';
 import { TransferArgs, TransferResult, decimalsToUSDT } from '../types/ledger';
+import { parseAmountToE6s } from '../utils/currency';
 
-const CKUSDT_FEE = 2n; // 0.000002 USDT fee (need to confirm actual fee)
+const CKUSDT_FEE = 10_000n; // 0.01 USDT fee (verified on mainnet)
 
 export const Send: React.FC = () => {
   // Hooks
@@ -33,7 +34,11 @@ export const Send: React.FC = () => {
     }
 
     try {
-      Principal.fromText(principalText);
+      const p = Principal.fromText(principalText);
+      if (p.toText() === principal?.toText()) {
+        setPrincipalError("Cannot send to yourself");
+        return false;
+      }
       setPrincipalError("");
       return true;
     } catch (error) {
@@ -84,15 +89,14 @@ export const Send: React.FC = () => {
       return;
     }
 
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum <= 0) {
-      setErrorMessage("Please enter a valid amount");
+    // Safe parsing using string manipulation
+    const amountE6s = parseAmountToE6s(amount);
+    
+    if (amountE6s <= CKUSDT_FEE) {
+      setErrorMessage(`Amount must be greater than the network fee (${decimalsToUSDT(CKUSDT_FEE)} USDT)`);
       setShowError(true);
       return;
     }
-
-    // Convert USDT to e6s (6 decimals)
-    const amountE6s = BigInt(Math.floor(amountNum * 1_000_000));
 
     if (!balance || amountE6s > balance) {
       setErrorMessage("Insufficient balance");
@@ -189,7 +193,7 @@ export const Send: React.FC = () => {
                     </div>
                     <div>
                       <div className="text-pure-white font-bold">ckUSDT</div>
-                      <div className="text-xs text-gray-400">Fee: ~0.000002 USDT</div>
+                      <div className="text-xs text-gray-400">Fee: ~{decimalsToUSDT(CKUSDT_FEE)} USDT</div>
                     </div>
                   </div>
                 </div>
@@ -272,7 +276,7 @@ export const Send: React.FC = () => {
                 <div className="flex justify-between">
                   <span className="text-gray-400">Network Fee</span>
                   <span className="text-pure-white font-mono">
-                    ~0.000002 USDT
+                    ~{decimalsToUSDT(CKUSDT_FEE)} USDT
                   </span>
                 </div>
 
