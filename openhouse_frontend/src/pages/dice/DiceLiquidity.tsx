@@ -8,6 +8,7 @@ import { DECIMALS_PER_CKUSDT, TRANSFER_FEE } from '../../types/balance';
 import { DiceStatistics } from '../../components/game-specific/dice';
 import { PendingWithdrawalRecovery } from '../../components/game-specific/dice/PendingWithdrawalRecovery';
 import { InfoTooltip } from '../../components/InfoTooltip';
+import { useStatsData } from '../../components/game-specific/dice/statistics/useStatsData';
 
 // Local interfaces matching what DiceLiquidityPanel used
 interface PoolStats {
@@ -41,10 +42,13 @@ export function DiceLiquidity() {
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [showHowItWorks, setShowHowItWorks] = useState(false);
-  const [showStats, setShowStats] = useState(false);
+  const [showRiskReturns, setShowRiskReturns] = useState(true);  // Default open
+  const [showAdvancedStats, setShowAdvancedStats] = useState(false);  // Default closed
   const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw'>('deposit');
   const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
+
+  // Fetch APY data for stats bar
+  const { apy7, isLoading: apyLoading } = useStatsData(false); // Only fetch if needed
 
   // Load pool stats
   useEffect(() => {
@@ -207,50 +211,128 @@ export function DiceLiquidity() {
       {/* MAIN CARD */}
       <div className="bg-gray-900/60 border border-gray-700/50 rounded-2xl overflow-hidden backdrop-blur-sm">
         
-        {/* Stats Bar */}
-        <div className="grid grid-cols-2 border-b border-gray-700/50 bg-black/20">
+        {/* Stats Bar - 3 Columns with APY */}
+        <div className="grid grid-cols-3 border-b border-gray-700/50 bg-black/20">
           <div className="p-4 text-center border-r border-gray-700/50">
              <div className="text-gray-500 text-xs uppercase tracking-wider mb-1">Total House Funds</div>
-             <div className="text-2xl font-bold text-white">
+             <div className="text-xl md:text-2xl font-bold text-white">
                ${poolStats ? formatValue(poolStats.pool_reserve) : '---'}
              </div>
           </div>
-          <div className="p-4 text-center">
+          <div className="p-4 text-center border-r border-gray-700/50">
              <div className="text-gray-500 text-xs uppercase tracking-wider mb-1 flex items-center justify-center gap-1">
                Share Price
-               <InfoTooltip content="Share price = Pool Value ÷ Total Shares
-
-When players lose bets, the pool grows and your shares become more valuable.
-
-When players win, the pool shrinks and shares lose value.
-
-With the 1% house edge, share price trends upward over time as the house profits." />
+               <InfoTooltip content="Share price = Pool Value ÷ Total Shares. Trends upward over time as the house profits." />
              </div>
-             <div className="text-xl font-mono font-bold text-purple-400">
+             <div className="text-lg md:text-xl font-mono font-bold text-purple-400">
                ${poolStats ? (Number(poolStats.share_price) / 100_000_000).toFixed(6) : '---'}
              </div>
           </div>
+          {/* NEW: Third column - 7-Day APY */}
+          <div className="p-4 text-center">
+            <div className="text-gray-500 text-xs uppercase tracking-wider mb-1 flex items-center justify-center gap-1">
+              7-Day APY
+              <InfoTooltip content="Annual Percentage Yield based on last 7 days of pool performance. Reflects actual returns vs theoretical 1% house edge." />
+            </div>
+            <div className={`text-lg md:text-xl font-mono font-bold ${
+              apyLoading ? 'text-gray-600' :
+              apy7 && apy7.actual_apy_percent >= 0 ? 'text-green-400' : 'text-red-400'
+            }`}>
+              {apyLoading ? '...' :
+               apy7 ? `${apy7.actual_apy_percent >= 0 ? '+' : ''}${apy7.actual_apy_percent.toFixed(2)}%` :
+               'N/A'}
+            </div>
+            {apy7 && (
+              <div className="text-[10px] text-gray-600 mt-0.5 hidden md:block">
+                Expected: {apy7.expected_apy_percent.toFixed(2)}%
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Key Concepts - Simplified */}
+        {/* NEW: Risk & Returns Section (Replaces "How It Works" Modal) */}
+        <div className="border-b border-gray-700/50">
+          {/* Header - Always visible, clickable to toggle */}
+          <button
+            onClick={() => setShowRiskReturns(!showRiskReturns)}
+            className="w-full p-4 flex items-center justify-between bg-gradient-to-r from-purple-900/10 to-transparent hover:from-purple-900/20 transition-all"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-purple-400 font-bold text-sm">📚 Understanding Liquidity Provision</span>
+            </div>
+            <span className="text-gray-500 text-lg">{showRiskReturns ? '▼' : '▶'}</span>
+          </button>
+
+          {/* Content - Collapsible */}
+          {showRiskReturns && (
+            <div className="p-6 space-y-5 text-sm animate-in fade-in slide-in-from-top-2 duration-200 bg-black/10">
+              {/* YOU ARE THE BANK */}
+              <div className="bg-black/30 p-4 rounded-xl border border-gray-800">
+                <h4 className="font-bold text-white mb-2 flex items-center gap-2">
+                  <span>🏦</span> You are the Bank
+                </h4>
+                <p className="text-gray-400 text-xs leading-relaxed">
+                  When you deposit, your money is pooled to form the game's bankroll.
+                  Unlike a regular deposit, <strong>this money is at risk</strong>. You're taking the House's
+                  position in every bet.
+                </p>
+              </div>
+
+              {/* WIN/LOSE SCENARIOS */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-green-900/10 p-3 rounded-lg border border-green-900/30">
+                  <h4 className="font-bold text-green-400 mb-1 text-xs flex items-center gap-1">
+                    <span>✅</span> You Win When...
+                  </h4>
+                  <p className="text-gray-500 text-[10px]">
+                    Players lose their bets. The House has a 1% statistical advantage that compounds over time.
+                  </p>
+                </div>
+                <div className="bg-red-900/10 p-3 rounded-lg border border-red-900/30">
+                  <h4 className="font-bold text-red-400 mb-1 text-xs flex items-center gap-1">
+                    <span>⚠️</span> You Lose When...
+                  </h4>
+                  <p className="text-gray-500 text-[10px]">
+                    Players get lucky and win big payouts. Short-term variance can be significant.
+                  </p>
+                </div>
+              </div>
+
+              {/* ALEXANDRIA MODEL */}
+              <div className="bg-yellow-900/10 p-4 rounded-xl border border-yellow-900/30">
+                <h4 className="font-bold text-yellow-400 mb-1 flex items-center gap-2">
+                  <span>⚡</span> The Alexandria Model
+                </h4>
+                <p className="text-gray-400 text-xs leading-relaxed">
+                  This is an Alexandria project. We charge <strong>no fees on gameplay</strong>.
+                  Instead, a <strong>1% fee is charged only when you withdraw</strong> your liquidity.
+                  This fee is distributed to $ALEX token stakers. This aligns incentives: we want you
+                  to keep liquidity in the pool and profit alongside the house.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Key Concepts - Simplified (kept as sticky summary) */}
         <div className="p-6 bg-gradient-to-b from-dfinity-turquoise/5 to-transparent">
           <div className="grid gap-4 md:grid-cols-3 mb-6">
             <div className="bg-black/30 p-3 rounded-lg border border-gray-700/30">
               <div className="text-dfinity-turquoise font-bold mb-1 text-sm">Be The House</div>
               <div className="text-xs text-gray-400">
-                Your deposit becomes house money. You win when players lose.
+                Your deposit becomes house money.
               </div>
             </div>
             <div className="bg-black/30 p-3 rounded-lg border border-gray-700/30">
               <div className="text-green-400 font-bold mb-1 text-sm">1% House Edge</div>
               <div className="text-xs text-gray-400">
-                Statistical advantage ensures long-term growth for the house.
+                Statistical advantage ensures long-term growth.
               </div>
             </div>
             <div className="bg-black/30 p-3 rounded-lg border border-gray-700/30">
               <div className="text-yellow-400 font-bold mb-1 text-sm">1% Withdrawal Fee</div>
               <div className="text-xs text-gray-400">
-                When you withdraw LP, 1% goes to $ALEX stakers. No other fees, site-wide.
+                Fee charged on profit + principal when withdrawing.
               </div>
             </div>
           </div>
@@ -372,69 +454,26 @@ With the 1% house edge, share price trends upward over time as the house profits
         </div>
       </div>
 
-      {/* FOOTER CONTROLS */}
-      <div className="flex justify-center gap-4 mt-6">
+      {/* MODIFIED: Advanced Stats Section (Replaces footer toggle) */}
+      <div className="mt-6 bg-gray-900/40 border border-gray-700/50 rounded-2xl overflow-hidden">
+        {/* Header */}
         <button
-          onClick={() => setShowStats(!showStats)}
-          className="text-xs text-gray-500 hover:text-dfinity-turquoise transition"
+          onClick={() => setShowAdvancedStats(!showAdvancedStats)}
+          className="w-full p-4 flex items-center justify-between hover:bg-white/5 transition-all"
         >
-          {showStats ? 'Hide' : 'Show'} Advanced Stats
-        </button>
-        <span className="text-gray-700">|</span>
-        <button
-          onClick={() => setShowHowItWorks(true)}
-          className="text-xs text-gray-500 hover:text-dfinity-turquoise transition flex items-center gap-1"
-        >
-           How it works
-        </button>
-      </div>
-
-      {/* Expandable Statistics */}
-      {showStats && <div className="mt-6"><DiceStatistics /></div>}
-
-      {/* HOW IT WORKS MODAL */}
-      {showHowItWorks && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-             onClick={() => setShowHowItWorks(false)}>
-          <div className="bg-gray-900 rounded-2xl p-6 max-w-md w-full border border-gray-700 shadow-2xl"
-               onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-black text-white">Understanding the House</h3>
-              <button onClick={() => setShowHowItWorks(false)} className="text-gray-400 hover:text-white text-2xl">×</button>
-            </div>
-
-            <div className="space-y-5 text-sm text-gray-300">
-              <div className="bg-black/30 p-4 rounded-xl border border-gray-800">
-                <h4 className="font-bold text-white mb-2">1. You are the Bank</h4>
-                <p className="text-gray-400 text-xs leading-relaxed">
-                  When you deposit, your money is pooled to form the game's bankroll. 
-                  Unlike a regular deposit, <strong>this money is at risk.</strong>
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-green-900/10 p-3 rounded-lg border border-green-900/30">
-                   <h4 className="font-bold text-green-400 mb-1 text-xs">You Win When...</h4>
-                   <p className="text-gray-500 text-[10px]">Players lose their bets. The House has a 1% statistical advantage.</p>
-                </div>
-                <div className="bg-red-900/10 p-3 rounded-lg border border-red-900/30">
-                   <h4 className="font-bold text-red-400 mb-1 text-xs">You Lose When...</h4>
-                   <p className="text-gray-500 text-[10px]">Players get lucky and win big payouts.</p>
-                </div>
-              </div>
-
-              <div className="bg-yellow-900/10 p-4 rounded-xl border border-yellow-900/30">
-                <h4 className="font-bold text-yellow-400 mb-1">The Alexandria Model</h4>
-                <p className="text-gray-400 text-xs leading-relaxed">
-                  This is an Alexandria project. We charge <strong>no fees on gameplay</strong>. 
-                  Instead, a <strong>1% fee is charged only when you withdraw</strong> your liquidity. 
-                  This fee is distributed to $ALEX token stakers.
-                </p>
-              </div>
-            </div>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-400 font-bold text-sm">📊 Historical Performance & Charts</span>
           </div>
-        </div>
-      )}
+          <span className="text-gray-500 text-xl">{showAdvancedStats ? '▼' : '▶'}</span>
+        </button>
+
+        {/* Full Stats Component */}
+        {showAdvancedStats && (
+          <div className="animate-in fade-in slide-in-from-top-2 duration-200 border-t border-gray-700/50">
+            <DiceStatistics />
+          </div>
+        )}
+      </div>
 
       {/* WITHDRAW CONFIRMATION MODAL */}
       {showWithdrawConfirm && (
