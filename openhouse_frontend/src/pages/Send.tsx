@@ -56,7 +56,11 @@ export const Send: React.FC = () => {
 
   // Handle amount input change
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setAmount(e.target.value);
+    const value = e.target.value;
+    // Allow only digits and one decimal point
+    if (value === '' || /^\d*\.?\d*$/.test(value)) {
+      setAmount(value);
+    }
   };
 
   // Max button - sets amount to balance minus fee
@@ -149,6 +153,12 @@ export const Send: React.FC = () => {
           errorMsg = error.GenericError.message;
         } else if ('TemporarilyUnavailable' in error) {
           errorMsg = "Service temporarily unavailable. Please try again.";
+        } else if ('TooOld' in error) {
+          errorMsg = "Transaction expired. Please try again.";
+        } else if ('CreatedInFuture' in error) {
+          errorMsg = "Clock skew detected. Please check your system time.";
+        } else if ('Duplicate' in error) {
+          errorMsg = "Duplicate transaction detected. This may have already been processed.";
         }
 
         setIsLoading(false);
@@ -165,7 +175,10 @@ export const Send: React.FC = () => {
 
   // Calculate available balance display
   const availableBalanceUSDT = balance ? decimalsToUSDT(balance) : 0;
-  const isFormValid = destinationPrincipal && amount && !principalError && parseFloat(amount) > 0;
+  
+  const amountE6s = parseAmountToE6s(amount);
+  const isAmountValid = amountE6s > 0n && (balance ? amountE6s <= balance : false);
+  const isFormValid = destinationPrincipal && amount && !principalError && isAmountValid;
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -225,12 +238,12 @@ export const Send: React.FC = () => {
                 </label>
                 <div className="relative">
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9.]*"
                     value={amount}
                     onChange={handleAmountChange}
                     placeholder="0.00"
-                    step="0.000001"
-                    min="0"
                     className="w-full bg-gray-800 border border-pure-white/10 rounded px-4 py-3 pr-20 text-pure-white placeholder-gray-500 focus:outline-none focus:border-dfinity-turquoise"
                   />
                   <button
