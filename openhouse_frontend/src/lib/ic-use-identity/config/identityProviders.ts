@@ -12,17 +12,17 @@ export const IDENTITY_PROVIDERS: IdentityProviderConfig[] = [
     id: 'classic',
     name: 'Internet Identity',
     url: 'https://identity.ic0.app',
-    description: 'Secure authentication with identity anchors',
+    description: 'Classic identity anchors',
     isBeta: false,
-    features: ['Identity Anchors', 'Device-based Keys', 'Battle-tested']
+    features: []
   },
   {
     id: 'v2',
     name: 'Internet Identity 2.0',
     url: 'https://id.ai',
-    description: 'Modern authentication with passkeys and social login',
+    description: 'Sign in with Google, Microsoft, or Apple',
     isBeta: true,
-    features: ['Passkeys (FIDO2)', 'Google Sign-In', 'No identity numbers needed']
+    features: []
   }
 ];
 
