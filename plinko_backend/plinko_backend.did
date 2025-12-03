@@ -149,7 +149,6 @@ service : {
   admin_health_check: () -> (variant { Ok: HealthCheck; Err: text });
   admin_get_all_pending_withdrawals: () -> (variant { Ok: vec PendingWithdrawalInfo; Err: text }) query;
   admin_get_orphaned_funds_report: (opt nat64) -> (variant { Ok: OrphanedFundsReport; Err: text }) query;
-  // refresh_canister_balance: () -> (nat64); // Commented out as implementation wasn't clear/standard
 
   // NEW: Statistics
   get_daily_stats: (nat32) -> (vec DailySnapshot) query;
