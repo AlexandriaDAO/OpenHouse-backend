@@ -1,5 +1,4 @@
 use crate::types::{MinimalGameResult, RollDirection, DECIMALS_PER_CKUSDT, MIN_BET, MAX_NUMBER};
-use crate::seed::{generate_dice_roll_instant, maybe_schedule_seed_rotation};
 use crate::defi_accounting::{self as accounting, liquidity_pool};
 use candid::Principal;
 
@@ -111,11 +110,9 @@ pub async fn play_dice(
         return Err("Client seed too long (max 256 characters)".to_string());
     }
 
-    // Check if seed needs rotation
-    maybe_schedule_seed_rotation();
-
-    // Generate roll BEFORE deducting balance
-    let (rolled_number, _nonce, _server_seed_hash) = generate_dice_roll_instant(&client_seed)?;
+    // Generate roll BEFORE deducting balance using per-game VRF
+    let (rolled_number, server_seed, nonce) = crate::seed::generate_dice_roll_vrf(&client_seed).await?;
+    let server_seed_hash = crate::seed::hash_server_seed(&server_seed);
 
     // Deduct bet AFTER all validations and fallible operations pass
     let balance_after_bet = user_balance.checked_sub(bet_amount)
@@ -175,6 +172,10 @@ pub async fn play_dice(
         rolled_number,
         is_win,
         payout,
+        server_seed,
+        server_seed_hash,
+        nonce,
+        client_seed: client_seed.clone(),
     })
 }
 

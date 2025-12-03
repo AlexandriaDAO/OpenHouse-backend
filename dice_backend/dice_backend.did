@@ -7,6 +7,10 @@ type MinimalGameResult = record {
   rolled_number: nat8;
   is_win: bool;
   payout: nat64;
+  server_seed: blob;
+  server_seed_hash: text;
+  nonce: nat64;
+  client_seed: text;
 };
 
 type LPPosition = record {
@@ -106,9 +110,7 @@ service : {
   calculate_payout_info: (nat8, RollDirection) -> (variant { Ok: record { float64; float64 }; Err: text }) query;
 
   // Provable fairness verification methods
-  get_current_seed_hash: () -> (text) query;
   verify_game_result: (blob, text, nat64, nat8) -> (variant { Ok: bool; Err: text }) query;
-  get_seed_info: () -> (text, nat64, nat64) query;
 
   // Accounting methods
   deposit: (nat64) -> (variant { Ok: nat64; Err: text });
