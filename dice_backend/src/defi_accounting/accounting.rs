@@ -721,7 +721,7 @@ pub(crate) fn build_orphaned_funds_report_internal(recent_limit: Option<usize>)
         let mut recent: VecDeque<super::types::AbandonedEntry> = VecDeque::new();
 
         // Collect all abandoned withdrawals
-        let all_abandonments: Vec<super::types::AbandonedEntry> = log.borrow()
+        let mut all_abandonments: Vec<super::types::AbandonedEntry> = log.borrow()
             .iter()
             .filter_map(|entry| {
                 if let AuditEvent::WithdrawalAbandoned { user, amount } = &entry.value().event {
@@ -738,10 +738,12 @@ pub(crate) fn build_orphaned_funds_report_internal(recent_limit: Option<usize>)
             })
             .collect();
 
+        // Sort by timestamp descending (most recent first)
+        all_abandonments.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
         // Apply limit if specified, otherwise return all
         let limited_abandonments = if let Some(limit) = recent_limit {
             all_abandonments.into_iter()
-                .rev()  // Most recent first
                 .take(limit)
                 .collect()
         } else {

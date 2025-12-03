@@ -5,7 +5,7 @@ use super::types::*;
 
 const ADMIN_PRINCIPAL: &str = "p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae";
 const WASM_PAGE_SIZE_BYTES: u64 = 65536;
-const MAX_PAGINATION_LIMIT: u64 = 100;
+// const MAX_PAGINATION_LIMIT: u64 = 100; // Historical limit - removed to allow unlimited admin queries
 
 fn require_admin() -> Result<(), String> {
     let caller = ic_cdk::api::msg_caller();
