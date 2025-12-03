@@ -13,12 +13,26 @@ interface PlinkoGameResult {
   clientId?: string;
 }
 
+interface MultiBallBackendResult {
+  results: {
+    path: boolean[];
+    final_position: number;
+    multiplier: number;
+    win: boolean;
+  }[];
+  total_balls: number;
+  total_wins: number;
+  average_multiplier: number;
+}
+
 export const Plinko: React.FC = () => {
   const { actor } = usePlinkoActor();
 
   // Game state
   const [isPlaying, setIsPlaying] = useState(false);
   const [gameError, setGameError] = useState('');
+  const [ballCount, setBallCount] = useState<number>(1);
+  const [multiBallResult, setMultiBallResult] = useState<MultiBallBackendResult | null>(null);
 
   // Fixed configuration - no user choices
   const ROWS = 8;
@@ -50,31 +64,47 @@ export const Plinko: React.FC = () => {
     loadGameData();
   }, [actor]);
 
-  // Drop a single ball
-  const dropBall = async () => {
+  // Drop multiple balls (or single)
+  const dropMultipleBalls = async () => {
     if (!actor) return;
 
     setIsPlaying(true);
     setGameError('');
+    setMultiBallResult(null);
     setCurrentResult(null);
 
     try {
-      // Use single ball method
-      const result = await actor.drop_ball();
+      if (ballCount === 1) {
+        // Use single ball method
+        const result = await actor.drop_ball();
 
-      if ('Ok' in result) {
-        const gameResult: PlinkoGameResult = {
-          ...result.Ok,
-          timestamp: Date.now(),
-        };
-        setCurrentResult(gameResult);
+        if ('Ok' in result) {
+          const gameResult: PlinkoGameResult = {
+            ...result.Ok,
+            timestamp: Date.now(),
+          };
+          // Set result immediately for state, but animation will handle visual timing
+          setCurrentResult(gameResult);
+        } else {
+          setGameError(result.Err);
+          setIsPlaying(false);
+        }
       } else {
-        setGameError(result.Err);
-        setIsPlaying(false);
+        // Use multi-ball method
+        // @ts-ignore - method added in recent backend update
+        const result = await actor.drop_multiple_balls(ballCount);
+
+        if ('Ok' in result) {
+          setMultiBallResult(result.Ok);
+          // No sequential animation needed anymore - PlinkoBoard handles it
+        } else {
+          setGameError(result.Err);
+          setIsPlaying(false);
+        }
       }
     } catch (err) {
-      console.error('Failed to drop ball:', err);
-      setGameError(err instanceof Error ? err.message : 'Failed to drop ball');
+      console.error('Failed to drop balls:', err);
+      setGameError(err instanceof Error ? err.message : 'Failed to drop balls');
       setIsPlaying(false);
     }
   };
@@ -128,13 +158,33 @@ export const Plinko: React.FC = () => {
       <div className="card max-w-2xl mx-auto">
         <GameStats stats={stats} />
 
-        <div className="mt-6">
+        <div className="mt-6 mb-6">
+            <label className="block text-sm font-medium mb-2 text-pure-white">
+                Number of Balls: <span className="text-dfinity-turquoise">{ballCount}</span>
+            </label>
+            <input
+                type="range"
+                min="1"
+                max="30"
+                value={ballCount}
+                onChange={(e) => setBallCount(parseInt(e.target.value))}
+                disabled={isPlaying}
+                className="w-full h-2 bg-pure-white/20 rounded-lg appearance-none cursor-pointer"
+            />
+            <div className="flex justify-between text-xs text-pure-white/40 mt-1">
+                <span>1 ball</span>
+                <span>15 balls</span>
+                <span>30 balls</span>
+            </div>
+        </div>
+
+        <div>
           <GameButton
-            onClick={dropBall}
+            onClick={dropMultipleBalls}
             disabled={!actor}
             loading={isPlaying}
-            label="DROP BALL"
-            loadingLabel="Dropping..."
+            label={ballCount === 1 ? "DROP BALL" : `DROP ${ballCount} BALLS`}
+            loadingLabel={ballCount === 1 ? "Dropping..." : `Dropping ${ballCount} balls...`}
             icon="🎯"
           />
         </div>
@@ -150,10 +200,18 @@ export const Plinko: React.FC = () => {
       <div className="card max-w-4xl mx-auto">
         <PlinkoBoard
           rows={ROWS}
-          path={currentResult?.path || null}
+          paths={
+             isPlaying 
+               ? (ballCount === 1 && currentResult ? [currentResult.path] : multiBallResult?.results.map(r => r.path) || null)
+               : null
+          }
           isDropping={isPlaying}
           onAnimationComplete={handleAnimationComplete}
-          finalPosition={currentResult?.final_position}
+          finalPositions={
+            ballCount === 1 
+              ? (currentResult ? [currentResult.final_position] : [])
+              : (multiBallResult?.results.map(r => r.final_position) || [])
+          }
         />
 
         {/* Multiplier Display with Win/Loss Indicators */}
@@ -199,6 +257,66 @@ export const Plinko: React.FC = () => {
               </div>
             )}
           </div>
+        )}
+
+        {/* Multi-Ball Aggregate Results */}
+        {multiBallResult && !isPlaying && (
+            <div className="mt-8 p-6 bg-pure-black/30 rounded-xl border border-pure-white/10">
+                <h3 className="text-lg font-bold mb-4 text-center text-pure-white">
+                    Multi-Ball Summary
+                </h3>
+                <div className="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                        <div className="text-2xl font-bold text-dfinity-turquoise">
+                            {multiBallResult.total_balls}
+                        </div>
+                        <div className="text-xs text-pure-white/60 uppercase tracking-wider">Total Balls</div>
+                    </div>
+                    <div>
+                        <div className="text-2xl font-bold text-green-400">
+                            {multiBallResult.total_wins}
+                        </div>
+                        <div className="text-xs text-pure-white/60 uppercase tracking-wider">Wins</div>
+                    </div>
+                    <div>
+                        <div className="text-2xl font-bold text-pure-white">
+                            {multiBallResult.average_multiplier.toFixed(3)}x
+                        </div>
+                        <div className="text-xs text-pure-white/60 uppercase tracking-wider">Avg Multiplier</div>
+                    </div>
+                </div>
+
+                <div className="mt-4 text-center">
+                    <div className={`text-xl font-bold ${
+                        multiBallResult.average_multiplier >= 1
+                            ? 'text-green-400'
+                            : 'text-red-400'
+                    }`}>
+                        {multiBallResult.average_multiplier >= 1
+                            ? `✨ Net Win: ${((multiBallResult.average_multiplier - 1) * 100).toFixed(1)}%`
+                            : `💔 Net Loss: ${((1 - multiBallResult.average_multiplier) * 100).toFixed(1)}%`
+                        }
+                    </div>
+                </div>
+
+                <details className="mt-6 group">
+                    <summary className="cursor-pointer text-sm text-pure-white/60 hover:text-pure-white transition-colors list-none text-center">
+                        <span className="border-b border-pure-white/20 pb-1 group-open:border-transparent">
+                            View Individual Results ({multiBallResult.results.length} balls)
+                        </span>
+                    </summary>
+                    <div className="mt-4 max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                        {multiBallResult.results.map((result, idx) => (
+                            <div key={idx} className="text-xs font-mono flex justify-between px-3 py-2 bg-pure-black/40 rounded border border-pure-white/5">
+                                <span className="text-pure-white/60">Ball {idx + 1}</span>
+                                <span className={result.win ? 'text-green-400' : 'text-red-400'}>
+                                    {result.multiplier.toFixed(3)}x (pos {result.final_position})
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </details>
+            </div>
         )}
       </div>
     </GameLayout>

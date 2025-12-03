@@ -31,6 +31,14 @@ pub struct PlinkoResult {
     pub win: bool,              // true if multiplier >= 1.0
 }
 
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct MultiBallResult {
+    pub results: Vec<PlinkoResult>,
+    pub total_balls: u8,
+    pub total_wins: u8,
+    pub average_multiplier: f64,
+}
+
 
 
 // Memory management for future upgrades
@@ -84,6 +92,66 @@ async fn drop_ball() -> Result<PlinkoResult, String> {
         final_position,
         multiplier,
         win,
+    })
+}
+
+/// Drop multiple balls at once (1-30 balls)
+/// Efficient: uses single VRF call for up to 32 balls
+#[update]
+async fn drop_multiple_balls(count: u8) -> Result<MultiBallResult, String> {
+    const ROWS: u8 = 8;
+    const MAX_BALLS: u8 = 30;
+
+    // Validation
+    if count < 1 {
+        return Err("Must drop at least 1 ball".to_string());
+    }
+    if count > MAX_BALLS {
+        return Err(format!("Maximum {} balls allowed", MAX_BALLS));
+    }
+
+    // Get randomness - one VRF call gives us 32 bytes
+    let random_bytes = raw_rand().await
+        .map_err(|e| format!("Randomness unavailable: {:?}", e))?;
+
+    if random_bytes.len() < count as usize {
+        return Err("Insufficient randomness".to_string());
+    }
+
+    // Process each ball using sequential bytes
+    let mut results = Vec::with_capacity(count as usize);
+
+    for i in 0..count {
+        let random_byte = random_bytes[i as usize];
+
+        // Generate path for this ball
+        let path: Vec<bool> = (0..ROWS)
+            .map(|bit| (random_byte >> bit) & 1 == 1)
+            .collect();
+
+        // Calculate result
+        let final_position = path.iter().filter(|&&d| d).count() as u8;
+        let multiplier = calculate_multiplier(final_position);
+        let win = multiplier >= 1.0;
+
+        results.push(PlinkoResult {
+            path,
+            final_position,
+            multiplier,
+            win,
+        });
+    }
+
+    // Calculate aggregate stats
+    let total_wins = results.iter().filter(|r| r.win).count() as u8;
+    let sum_multipliers: f64 = results.iter().map(|r| r.multiplier).sum();
+    let average_multiplier = sum_multipliers / (count as f64);
+
+    Ok(MultiBallResult {
+        results,
+        total_balls: count,
+        total_wins,
+        average_multiplier,
     })
 }
 

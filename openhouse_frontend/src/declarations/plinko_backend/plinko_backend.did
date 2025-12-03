@@ -5,9 +5,19 @@ type PlinkoResult = record {
   win: bool;
 };
 
+type MultiBallResult = record {
+  results: vec PlinkoResult;
+  total_balls: nat8;
+  total_wins: nat8;
+  average_multiplier: float64;
+};
+
 service : {
   // Drop a ball - no parameters needed (fixed 8 rows)
   drop_ball: () -> (variant { Ok: PlinkoResult; Err: text });
+
+  // Drop multiple balls (1-30)
+  drop_multiple_balls: (nat8) -> (variant { Ok: MultiBallResult; Err: text });
 
   // Get all 9 multipliers (positions 0-8)
   get_multipliers: () -> (vec float64) query;

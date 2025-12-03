@@ -5,10 +5,21 @@ export const idlFactory = ({ IDL }) => {
     'path' : IDL.Vec(IDL.Bool),
     'final_position' : IDL.Nat8,
   });
+  const MultiBallResult = IDL.Record({
+    'total_balls' : IDL.Nat8,
+    'results' : IDL.Vec(PlinkoResult),
+    'total_wins' : IDL.Nat8,
+    'average_multiplier' : IDL.Float64,
+  });
   return IDL.Service({
     'drop_ball' : IDL.Func(
         [],
         [IDL.Variant({ 'Ok' : PlinkoResult, 'Err' : IDL.Text })],
+        [],
+      ),
+    'drop_multiple_balls' : IDL.Func(
+        [IDL.Nat8],
+        [IDL.Variant({ 'Ok' : MultiBallResult, 'Err' : IDL.Text })],
         [],
       ),
     'get_expected_value' : IDL.Func([], [IDL.Float64], ['query']),

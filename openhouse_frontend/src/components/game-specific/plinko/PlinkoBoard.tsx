@@ -3,79 +3,115 @@ import './PlinkoBoard.css';
 
 interface PlinkoBoardProps {
   rows: number;
-  path: boolean[] | null; // true = right, false = left
+  paths: boolean[][] | null; // Array of paths for multi-ball
   isDropping: boolean;
   onAnimationComplete?: () => void;
-  finalPosition?: number;
+  finalPositions?: number[]; // Array of final positions to highlight
 }
 
 interface BallPosition {
+  id: number;
   row: number;
   column: number;
+  finished: boolean;
 }
 
 export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
   rows,
-  path,
+  paths,
   isDropping,
   onAnimationComplete,
-  finalPosition,
+  finalPositions,
 }) => {
-  const [ballPosition, setBallPosition] = useState<BallPosition | null>(null);
+  const [activeBalls, setActiveBalls] = useState<BallPosition[]>([]);
   const [animationKey, setAnimationKey] = useState(0);
 
-  // Simple effect: When new path arrives, increment key to force fresh animation
+  // Reset/Start animation when paths change
   useEffect(() => {
-    if (path && isDropping) {
+    if (paths && paths.length > 0 && isDropping) {
       setAnimationKey(prev => prev + 1);
+    } else if (!isDropping) {
+      setActiveBalls([]);
     }
-  }, [path, isDropping]);
+  }, [paths, isDropping]);
 
-  // Single ball animation effect
+  // Multi-ball animation effect
   useEffect(() => {
-    // Don't start if no path or not dropping
-    if (!path || !isDropping) {
+    if (!paths || paths.length === 0 || !isDropping) {
       return;
     }
 
-    // Start animation immediately
-    let currentRow = 0;
-    let currentColumn = 0;
+    const totalBalls = paths.length;
+    let completedBalls = 0;
     const timeouts: number[] = [];
 
-    setBallPosition({ row: 0, column: 0 });
+    // Initialize balls
+    const initialBalls = paths.map((_, index) => ({
+      id: index,
+      row: 0,
+      column: 0,
+      finished: false,
+    }));
+    setActiveBalls(initialBalls);
 
-    const animateStep = () => {
-      if (currentRow < path.length) {
-        currentRow++;
-        if (path[currentRow - 1]) {
-          currentColumn++;
-        }
+    // Animate each ball
+    paths.forEach((path, index) => {
+      let currentRow = 0;
+      let currentColumn = 0;
 
-        setBallPosition({ row: currentRow, column: currentColumn });
-        const timeoutId = window.setTimeout(animateStep, 150);
-        timeouts.push(timeoutId);
-      } else {
-        // Animation complete - call callback after short delay
-        const completeTimeout = window.setTimeout(() => {
-          if (onAnimationComplete) {
-            onAnimationComplete();
+      // Add slight random delay to start for natural feel (0-200ms)
+      const startDelay = Math.random() * 200;
+
+      const animateStep = () => {
+        if (currentRow < path.length) {
+          currentRow++;
+          if (path[currentRow - 1]) {
+            currentColumn++;
           }
-        }, 500);
-        timeouts.push(completeTimeout);
-      }
-    };
 
-    // Start animation
-    const initialTimeout = window.setTimeout(animateStep, 200);
-    timeouts.push(initialTimeout);
+          // Update this specific ball's position
+          setActiveBalls(prev => prev.map(ball => 
+            ball.id === index 
+              ? { ...ball, row: currentRow, column: currentColumn } 
+              : ball
+          ));
 
-    // Cleanup: ALWAYS cancel all timeouts
+          // Schedule next step
+          const stepDelay = 150 + (Math.random() * 20); // Slight speed variation
+          const timeoutId = window.setTimeout(animateStep, stepDelay);
+          timeouts.push(timeoutId);
+        } else {
+          // Mark this ball as finished
+          setActiveBalls(prev => prev.map(ball => 
+            ball.id === index 
+              ? { ...ball, finished: true } 
+              : ball
+          ));
+
+          completedBalls++;
+          
+          // Check if all balls are done
+          if (completedBalls === totalBalls) {
+            const completeTimeout = window.setTimeout(() => {
+              if (onAnimationComplete) {
+                onAnimationComplete();
+              }
+            }, 500);
+            timeouts.push(completeTimeout);
+          }
+        }
+      };
+
+      // Start this ball's animation
+      const startTimeout = window.setTimeout(animateStep, 100 + startDelay);
+      timeouts.push(startTimeout);
+    });
+
+    // Cleanup
     return () => {
       timeouts.forEach(clearTimeout);
-      setBallPosition(null);
     };
-  }, [animationKey, path, isDropping, onAnimationComplete]);
+  }, [animationKey, paths, isDropping, onAnimationComplete]);
 
   // Generate pegs for the board
   const renderPegs = () => {
@@ -104,6 +140,9 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
       left: `calc(50% + ${(position.column - position.row / 2) * 40}px)`,
       top: `${position.row * 50}px`,
       transition: 'all 0.15s ease-in-out',
+      // Add slight transparency for multi-ball to see overlaps
+      opacity: 0.9,
+      zIndex: 10 + position.id, // Ensure some stacking order
     };
   };
 
@@ -119,13 +158,14 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
         {/* Render all pegs */}
         {renderPegs()}
 
-        {/* Single Ball */}
-        {ballPosition && (
+        {/* Render all active balls */}
+        {activeBalls.map(ball => (
           <div
+            key={`ball-${ball.id}`}
             className="plinko-ball"
-            style={getBallStyle(ballPosition)}
+            style={getBallStyle(ball)}
           />
-        )}
+        ))}
 
         {/* Landing slots */}
         <div
@@ -135,11 +175,27 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
           {Array.from({ length: rows + 1 }, (_, i) => (
             <div
               key={`slot-${i}`}
-              className={`plinko-slot ${finalPosition === i && !isDropping ? 'plinko-slot-active' : ''}`}
+              className={`plinko-slot ${
+                !isDropping && finalPositions?.includes(i) 
+                  ? 'plinko-slot-active' 
+                  : ''
+              }`}
               style={{
                 left: `calc(50% + ${(i - rows / 2) * 40}px)`,
               }}
-            />
+            >
+               {/* Show count if multiple balls landed here */}
+               {!isDropping && finalPositions && (
+                 (() => {
+                   const count = finalPositions.filter(p => p === i).length;
+                   return count > 0 ? (
+                     <span className="text-[10px] font-bold text-pure-black bg-dfinity-turquoise rounded-full w-5 h-5 flex items-center justify-center absolute -top-3 left-1/2 transform -translate-x-1/2">
+                       {count}
+                     </span>
+                   ) : null;
+                 })()
+               )}
+            </div>
           ))}
         </div>
       </div>
