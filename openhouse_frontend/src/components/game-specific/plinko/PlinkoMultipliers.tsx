@@ -3,13 +3,11 @@ import React from 'react';
 interface PlinkoMultipliersProps {
   multipliers: number[];
   highlightedIndex?: number;
-  showWinLoss?: boolean;
 }
 
 export const PlinkoMultipliers: React.FC<PlinkoMultipliersProps> = ({
   multipliers,
-  highlightedIndex,
-  showWinLoss = false
+  highlightedIndex
 }) => {
   return (
     <div className="flex justify-center gap-1 flex-wrap">

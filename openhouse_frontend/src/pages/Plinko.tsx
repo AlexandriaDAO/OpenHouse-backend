@@ -3,6 +3,11 @@ import usePlinkoActor from '../hooks/actors/usePlinkoActor';
 import { GameLayout } from '../components/game-ui';
 import { PlinkoBoard, PlinkoMultipliers } from '../components/game-specific/plinko';
 
+// Game Constants
+const ROWS = 8;
+const MAX_BALLS = 30;
+const ANIMATION_SAFETY_TIMEOUT_MS = 15000; // 15s fallback to prevent UI lock
+
 interface PlinkoGameResult {
   path: boolean[];
   final_position: number;
@@ -60,6 +65,19 @@ export const Plinko: React.FC = () => {
     loadGameData();
   }, [actor]);
 
+  // Safety timeout to prevent UI lock
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    if (isPlaying) {
+      timeoutId = setTimeout(() => {
+        console.warn('Game animation timed out - forcing reset');
+        setIsPlaying(false);
+        setGameError('Game response timed out. Please refresh if stuck.');
+      }, ANIMATION_SAFETY_TIMEOUT_MS);
+    }
+    return () => clearTimeout(timeoutId);
+  }, [isPlaying]);
+
   // Drop ball(s) function
   const dropBalls = async () => {
     if (!actor) return;
@@ -86,7 +104,6 @@ export const Plinko: React.FC = () => {
         }
       } else {
         // Use multi-ball method
-        // @ts-ignore - method added in recent backend update
         const result = await actor.drop_multiple_balls(ballCount);
 
         if ('Ok' in result) {
@@ -118,7 +135,7 @@ export const Plinko: React.FC = () => {
         {/* PlinkoBoard - Centerpiece, no card wrapper */}
         <div className="flex-shrink-0 py-4 flex justify-center">
           <PlinkoBoard
-            rows={8}
+            rows={ROWS}
             paths={
                isPlaying 
                  ? (ballCount === 1 && currentResult ? [currentResult.path] : multiBallResult?.results.map(r => r.path) || null)
@@ -150,7 +167,6 @@ export const Plinko: React.FC = () => {
             <PlinkoMultipliers
               multipliers={multipliers}
               highlightedIndex={currentResult?.final_position}
-              showWinLoss={false}
             />
           </div>
         )}
@@ -162,7 +178,7 @@ export const Plinko: React.FC = () => {
             <input
               type="range"
               min="1"
-              max="30"
+              max={MAX_BALLS}
               value={ballCount}
               onChange={(e) => setBallCount(parseInt(e.target.value))}
               disabled={isPlaying}
@@ -179,10 +195,10 @@ export const Plinko: React.FC = () => {
             disabled={!actor || isPlaying}
             className="w-full py-4 bg-dfinity-turquoise text-black font-bold rounded-xl
                        hover:bg-dfinity-turquoise/90 disabled:opacity-50 disabled:cursor-not-allowed
-                       transition-all"
+                       transition-all uppercase tracking-wider"
           >
             {isPlaying
-              ? 'DROPPING...'
+              ? ballCount > 1 ? `DROPPING ${ballCount} BALLS...` : 'DROPPING...'
               : ballCount === 1
                 ? 'DROP BALL'
                 : `DROP ${ballCount} BALLS`
