@@ -7,7 +7,6 @@ const ANIMATION_CONFIG = {
   FAST_INTERVAL: 50,            // Fast rolling interval
   SLOWDOWN_DELAYS: [100, 150, 250, 400, 600], // Progressive slowdown steps
   STAGGER_DELAY: 500,           // Delay between each dice reveal
-  RESULT_DISPLAY_DURATION: 2000
 } as const;
 
 // Dice size scaling based on count
@@ -165,29 +164,15 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
       timeoutRefs.current.push(completeTimeout);
     }
     // Note: We do NOT reset dice states when !isRolling - let them stay visible
-    // Reset only happens after RESULT_DISPLAY_DURATION or when starting a new roll
+    // Reset only happens when starting a new roll (isRolling && results === null)
 
     return () => clearAllTimers();
   }, [isRolling, results, diceCount, clearAllTimers, startRolling, revealDice, onAnimationComplete]);
 
-  // Reset display after result shown (with delay so user can see results)
-  useEffect(() => {
-    if (allRevealed && !isRolling) {
-      const timer = setTimeout(() => {
-        setAllRevealed(false);
-        // Reset dice states back to 0 after display duration
-        setDiceStates(Array(diceCount).fill(null).map(() => ({
-          displayNumber: 0,
-          isRevealed: false,
-          isWin: null
-        })));
-      }, ANIMATION_CONFIG.RESULT_DISPLAY_DURATION);
-      return () => clearTimeout(timer);
-    }
-  }, [allRevealed, isRolling, diceCount]);
+  // Note: Dice states persist at their final values until the next roll starts.
+  // The reset happens naturally in the main useEffect when isRolling && results === null.
 
   const scale = DICE_SCALE[diceCount];
-  const isAnimating = isRolling && !allRevealed;
 
   return (
     <div

@@ -138,6 +138,9 @@ export function DiceGame() {
 
   // Roll Dice (Multi-dice)
   const rollDice = async () => {
+    // Guard against rapid clicks causing race conditions
+    if (isPlaying) return;
+
     if (!isAuthenticated) {
       setGameError('Please log in to play.');
       return;
