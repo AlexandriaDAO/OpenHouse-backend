@@ -246,19 +246,6 @@ fn get_multipliers_bp() -> Vec<u64> {
         .collect()
 }
 
-/// Get all multipliers as f64 for display (backward compatible).
-/// Returns exactly 9 values.
-#[query]
-fn get_multipliers() -> Vec<f64> {
-    (0..=ROWS)
-        .map(|pos| {
-            let bp = calculate_multiplier_bp(pos)
-                .expect("Position 0-8 should always be valid");
-            bp as f64 / MULTIPLIER_SCALE as f64
-        })
-        .collect()
-}
-
 /// Get the mathematical formula as a string.
 /// Generated from constants to stay in sync with implementation.
 /// Note: If constants change, update this formula to match:
@@ -285,19 +272,6 @@ fn get_expected_value() -> f64 {
         .sum()
 }
 
-/// Calculate multiplier as f64 (for backward compatibility).
-/// Delegates to integer function and converts.
-///
-/// DEPRECATED: Use calculate_multiplier_bp() for financial calculations.
-#[deprecated(
-    since = "0.2.0",
-    note = "Use calculate_multiplier_bp() for financial calculations to avoid floating-point errors"
-)]
-pub fn calculate_multiplier(position: u8) -> Result<f64, String> {
-    let bp = calculate_multiplier_bp(position)?;
-    Ok(bp as f64 / MULTIPLIER_SCALE as f64)
-}
-
 #[query]
 fn greet(name: String) -> String {
     format!("Pure Mathematical Plinko: Transparent odds, {} wins or loses fairly with USDT!", name)
@@ -308,7 +282,6 @@ fn greet(name: String) -> String {
 // ============================================================================
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use super::*;
 
@@ -334,21 +307,6 @@ mod tests {
         }
 
         #[test]
-        fn test_bp_to_f64_conversion_matches() {
-            // Verify integer and float functions agree
-            for pos in 0..=ROWS {
-                let bp = calculate_multiplier_bp(pos).expect("Valid");
-                let f64_val = calculate_multiplier(pos).expect("Valid");
-                let converted = bp as f64 / MULTIPLIER_SCALE as f64;
-                assert!(
-                    (f64_val - converted).abs() < 0.0001,
-                    "Position {}: f64={} converted={}",
-                    pos, f64_val, converted
-                );
-            }
-        }
-
-        #[test]
         fn test_constants_consistency() {
             // Verify constants are internally consistent
             assert_eq!(NUM_POSITIONS as usize, BINOMIAL_COEFFICIENTS.len());
@@ -366,26 +324,11 @@ mod tests {
         }
 
         #[test]
-        fn test_exact_multipliers() {
-            // Test each position matches expected values
-            let expected = [6.52, 3.755, 1.78, 0.595, 0.2, 0.595, 1.78, 3.755, 6.52];
-
-            for (pos, &expected_mult) in expected.iter().enumerate() {
-                let calculated = calculate_multiplier(pos as u8).expect("Valid position should not fail");
-                assert!(
-                    (calculated - expected_mult).abs() < 0.001,
-                    "Position {}: expected {}, got {}",
-                    pos, expected_mult, calculated
-                );
-            }
-        }
-
-        #[test]
         fn test_invalid_position_returns_error() {
-            assert!(calculate_multiplier(9).is_err());
-            assert!(calculate_multiplier(255).is_err());
+            assert!(calculate_multiplier_bp(9).is_err());
+            assert!(calculate_multiplier_bp(255).is_err());
 
-            let err = calculate_multiplier(9).unwrap_err();
+            let err = calculate_multiplier_bp(9).unwrap_err();
             assert!(err.contains("Invalid position"));
         }
 
@@ -414,10 +357,10 @@ mod tests {
         fn test_multiplier_symmetry() {
             // Verify perfect symmetry
             for i in 0..=4 {
-                let left = calculate_multiplier(i).expect("Valid position");
-                let right = calculate_multiplier(8 - i).expect("Valid position");
-                assert!(
-                    (left - right).abs() < 0.0001,
+                let left = calculate_multiplier_bp(i).expect("Valid position");
+                let right = calculate_multiplier_bp(8 - i).expect("Valid position");
+                assert_eq!(
+                    left, right,
                     "Asymmetry at position {}: {} != {}",
                     i, left, right
                 );
@@ -426,11 +369,11 @@ mod tests {
 
         #[test]
         fn test_win_loss_positions() {
-            let multipliers = get_multipliers();
+            let multipliers = get_multipliers_bp();
 
-            // Count winning and losing positions
-            let winners = multipliers.iter().filter(|&&m| m >= 1.0).count();
-            let losers = multipliers.iter().filter(|&&m| m < 1.0).count();
+            // Count winning and losing positions (1.0x = 10000 BP)
+            let winners = multipliers.iter().filter(|&&m| m >= 10_000).count();
+            let losers = multipliers.iter().filter(|&&m| m < 10_000).count();
 
             assert_eq!(winners, 6, "Should have 6 winning positions");
             assert_eq!(losers, 3, "Should have 3 losing positions");
@@ -438,11 +381,11 @@ mod tests {
 
         #[test]
         fn test_variance_ratio() {
-            let multipliers = get_multipliers();
-            let max = multipliers.iter().fold(0.0_f64, |a, &b| a.max(b));
-            let min = multipliers.iter().fold(f64::MAX, |a, &b| a.min(b));
+            let multipliers = get_multipliers_bp();
+            let max = multipliers.iter().fold(0_u64, |a, &b| a.max(b));
+            let min = multipliers.iter().fold(u64::MAX, |a, &b| a.min(b));
 
-            let variance_ratio = max / min;
+            let variance_ratio = max as f64 / min as f64;
             assert!(
                 (variance_ratio - 32.6).abs() < 0.1,
                 "Variance ratio should be ~32.6:1, got {}:1",
@@ -471,7 +414,8 @@ mod tests {
             let final_position = path.iter().filter(|&&d| d).count() as u8;
 
             // Calculate multiplier
-            let multiplier = calculate_multiplier(final_position).expect("Valid position");
+            let multiplier_bp = calculate_multiplier_bp(final_position).expect("Valid position");
+            let multiplier = multiplier_bp as f64 / MULTIPLIER_SCALE as f64;
 
             // For 1 unit bet, payout is multiplier
             let payout = multiplier;
