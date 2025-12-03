@@ -124,6 +124,13 @@ pub fn verify_multi_dice_result(
     nonce: u64,
     expected_rolls: Vec<u8>,
 ) -> Result<bool, String> {
+    use crate::types::MAX_DICE_COUNT;
+
+    // Bounds validation to prevent DoS via excessive computation
+    if expected_rolls.is_empty() || expected_rolls.len() > MAX_DICE_COUNT as usize {
+        return Err(format!("Expected rolls count must be 1-{}", MAX_DICE_COUNT));
+    }
+
     for (i, &expected_roll) in expected_rolls.iter().enumerate() {
         let calculated_roll = derive_single_roll(&server_seed, &client_seed, nonce, i as u8);
         if calculated_roll != expected_roll {

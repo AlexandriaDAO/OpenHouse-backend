@@ -92,7 +92,7 @@ pub async fn play_dice(
     let multiplier = calculate_multiplier_direct(target_number, &direction);
 
     // NEW SIMPLIFIED CHECK - 10% house limit (uses cached balance for speed)
-    let max_payout = (bet_amount as f64 * multiplier) as u64;
+    let max_payout = (bet_amount as f64 * multiplier).round() as u64;
     let max_allowed = accounting::get_max_allowed_payout();
     if max_allowed == 0 {
         return Err("House balance not yet initialized. Please try again in a moment.".to_string());
@@ -136,7 +136,7 @@ pub async fn play_dice(
     };
 
     let payout = if is_win {
-        (bet_amount as f64 * multiplier) as u64
+        (bet_amount as f64 * multiplier).round() as u64
     } else {
         0
     };
@@ -245,7 +245,7 @@ pub async fn play_multi_dice(
     let multiplier = calculate_multiplier_direct(target_number, &direction);
 
     // AGGREGATE MAX PAYOUT CHECK (worst case: all dice win)
-    let max_payout_per_dice = (bet_per_dice as f64 * multiplier) as u64;
+    let max_payout_per_dice = (bet_per_dice as f64 * multiplier).round() as u64;
     let max_aggregate_payout = max_payout_per_dice
         .checked_mul(dice_count as u64)
         .ok_or("Max payout calculation overflow")?;
@@ -295,7 +295,7 @@ pub async fn play_multi_dice(
         };
 
         let payout = if is_win {
-            (bet_per_dice as f64 * multiplier) as u64
+            (bet_per_dice as f64 * multiplier).round() as u64
         } else {
             0
         };
