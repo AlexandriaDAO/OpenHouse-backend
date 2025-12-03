@@ -104,10 +104,6 @@ stable_memory_allocation:
   purpose: "Prevent memory ID collisions across canister upgrades"
 
   ranges:
-    core_game: [0-9]
-      - SEED_STATE: 1
-      - NONCE_COUNTER: 2
-
     accounting: [10-19]
       - USER_BALANCES: 10
       - LP_SHARES: 11

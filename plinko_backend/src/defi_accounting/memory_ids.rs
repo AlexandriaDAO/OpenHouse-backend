@@ -4,14 +4,9 @@
 //! Run `cargo test` to verify no collisions exist.
 //!
 //! Allocation strategy:
-//! - 0-9: Core game state (seed, nonce)
 //! - 10-19: User accounting (balances, LP shares, pool state)
 //! - 20-29: Withdrawal & audit (pending, audit log)
 //! - 30-39: Statistics (snapshots, accumulator)
-
-// Core game state (0-9)
-pub const SEED_STATE_MEMORY_ID: u8 = 1;
-pub const NONCE_COUNTER_MEMORY_ID: u8 = 2;
 
 // User accounting (10-19)
 pub const USER_BALANCES_MEMORY_ID: u8 = 10;
@@ -34,8 +29,6 @@ mod tests {
     #[test]
     fn memory_ids_are_unique() {
         let ids = [
-            SEED_STATE_MEMORY_ID,
-            NONCE_COUNTER_MEMORY_ID,
             USER_BALANCES_MEMORY_ID,
             LP_SHARES_MEMORY_ID,
             POOL_STATE_MEMORY_ID,
