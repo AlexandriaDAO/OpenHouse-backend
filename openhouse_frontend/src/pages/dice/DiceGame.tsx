@@ -8,15 +8,9 @@ import { useGameBalance } from '../../providers/GameBalanceProvider';
 import { useBalance } from '../../providers/BalanceProvider';
 import { useAuth } from '../../providers/AuthProvider';
 import { DECIMALS_PER_CKUSDT, formatUSDT } from '../../types/balance';
+import type { MultiDiceGameResult, SingleDiceResult } from '../../declarations/dice_backend/dice_backend.did';
 
 const DICE_BACKEND_CANISTER_ID = 'whchi-hyaaa-aaaao-a4ruq-cai';
-
-// Minimal game result from backend
-interface MinimalGameResult {
-  rolled_number: number;
-  is_win: boolean;
-  payout: bigint;
-}
 
 export function DiceGame() {
   const { actor } = useDiceActor();
@@ -27,7 +21,7 @@ export function DiceGame() {
   const { balance: walletBalance, refreshBalance: refreshWalletBalance } = useBalance();
   const gameBalanceContext = useGameBalance('dice');
   const balance = gameBalanceContext.balance;
-  
+
   const handleBalanceRefresh = useCallback(() => {
     refreshWalletBalance();
     gameBalanceContext.refresh();
@@ -35,18 +29,23 @@ export function DiceGame() {
 
   // Game State
   const [maxBet, setMaxBet] = useState(10);
-  const [lastResult, setLastResult] = useState<MinimalGameResult | null>(null);
+  const [lastResult, setLastResult] = useState<MultiDiceGameResult | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [gameError, setGameError] = useState<string | null>(null);
-  const [betAmount, setBetAmount] = useState(0.01);
+  const [betAmount, setBetAmount] = useState(0.01);  // Per-dice bet amount
 
   // Dice-specific State
+  const [diceCount, setDiceCount] = useState<1 | 2 | 3>(1);  // Default: 1 (conservative)
   const [targetNumber, setTargetNumber] = useState(50);
   const [direction, setDirection] = useState<DiceDirection>('Over');
   const [winChance, setWinChance] = useState(0);
   const [multiplier, setMultiplier] = useState(0);
-  const [animatingResult, setAnimatingResult] = useState<number | null>(null);
+  const [animatingResults, setAnimatingResults] = useState<SingleDiceResult[] | null>(null);
   const [showOddsExplainer, setShowOddsExplainer] = useState(false);
+
+  // Computed values
+  const totalBet = betAmount * diceCount;
+  const maxPayout = totalBet * multiplier;
 
   // Helper to parse backend errors
   const parseBackendError = (errorMsg: string): string => {
@@ -80,7 +79,7 @@ export function DiceGame() {
     return errorMsg;
   };
 
-  // Calculate odds
+  // Calculate odds and max bet
   useEffect(() => {
     const updateOdds = async () => {
       if (!actor) return;
@@ -98,15 +97,16 @@ export function DiceGame() {
           setGameError(result.Err);
         }
 
-        // Calculate max bet: backend returns 15%, scale to 10% for UI safety margin
+        // Use get_max_bet_per_dice for multi-dice aware max bet calculation
         try {
-          const maxPayoutE8s = await actor.get_max_allowed_payout();
-          const maxPayout15 = Number(maxPayoutE8s) / DECIMALS_PER_CKUSDT;
-          const maxPayoutUSDT = maxPayout15 * (10 / 15); // Scale 15% down to 10% for UI
-          const maxBetUSDT = mult > 0 ? maxPayoutUSDT / mult : 0;
-          setMaxBet(maxBetUSDT);
-          if (betAmount > maxBetUSDT) {
-            setBetAmount(maxBetUSDT);
+          const maxBetResult = await actor.get_max_bet_per_dice(diceCount, targetNumber, directionVariant);
+          if ('Ok' in maxBetResult) {
+            // Apply 10% safety margin for UI
+            const maxBetPerDiceUSDT = (Number(maxBetResult.Ok) / DECIMALS_PER_CKUSDT) * 0.9;
+            setMaxBet(maxBetPerDiceUSDT);
+            if (betAmount > maxBetPerDiceUSDT) {
+              setBetAmount(maxBetPerDiceUSDT);
+            }
           }
         } catch (e) {
           setMaxBet(10);
@@ -116,7 +116,7 @@ export function DiceGame() {
       }
     };
     updateOdds();
-  }, [targetNumber, direction, actor, betAmount]);
+  }, [targetNumber, direction, diceCount, actor, betAmount]);
 
   // Balance management
   useEffect(() => {
@@ -136,7 +136,7 @@ export function DiceGame() {
     }
   }, [actor]);
 
-  // Roll Dice
+  // Roll Dice (Multi-dice)
   const rollDice = async () => {
     if (!isAuthenticated) {
       setGameError('Please log in to play.');
@@ -152,41 +152,46 @@ export function DiceGame() {
       return;
     }
 
-    // Frontend limit check - use 15% to match backend (UI shows 10% for safety margin)
-    const maxPayout = BigInt(Math.floor(betAmount * multiplier * DECIMALS_PER_CKUSDT));
+    // Frontend limit check - use 15% to match backend
+    const totalBetE8s = BigInt(Math.floor(totalBet * DECIMALS_PER_CKUSDT));
+    const maxPayoutE8s = BigInt(Math.floor(maxPayout * DECIMALS_PER_CKUSDT));
     const maxAllowedPayout = (balance.house * BigInt(15)) / BigInt(100);
-    if (maxPayout > maxAllowedPayout) {
-      setGameError('Potential payout exceeds house limit.');
+    if (maxPayoutE8s > maxAllowedPayout) {
+      setGameError('Potential payout exceeds house limit. Reduce bet or dice count.');
+      return;
+    }
+
+    // Check user has enough balance for total bet
+    if (totalBetE8s > balance.game) {
+      setGameError(`Insufficient balance for ${diceCount} dice. Total bet: $${totalBet.toFixed(2)}`);
       return;
     }
 
     setIsPlaying(true);
     setGameError(null);
-    setAnimatingResult(null);
+    setAnimatingResults(null);
+    setLastResult(null);
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => reject(new Error('Game timed out.')), 15000);
     });
 
     try {
-      const betAmountBigInt = BigInt(Math.floor(betAmount * DECIMALS_PER_CKUSDT));
+      const betPerDiceE8s = BigInt(Math.floor(betAmount * DECIMALS_PER_CKUSDT));
       const directionVariant = direction === 'Over' ? { Over: null } : { Under: null };
       const randomBytes = new Uint8Array(16);
       crypto.getRandomValues(randomBytes);
       const clientSeed = Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
 
       const result = await Promise.race([
-        actor.play_dice(betAmountBigInt, targetNumber, directionVariant, clientSeed),
+        actor.play_multi_dice(diceCount, betPerDiceE8s, targetNumber, directionVariant, clientSeed),
         timeoutPromise
       ]);
 
       if ('Ok' in result) {
-        const gameResult: MinimalGameResult = {
-          rolled_number: result.Ok.rolled_number,
-          is_win: result.Ok.is_win,
-          payout: result.Ok.payout,
-        };
-        setAnimatingResult(gameResult.rolled_number);
+        const gameResult = result.Ok;
+        // Start animation with results
+        setAnimatingResults(gameResult.dice_results);
         setLastResult(gameResult);
         gameBalanceContext.refresh().catch(console.error);
       } else {
@@ -221,85 +226,101 @@ export function DiceGame() {
           </div>
         )}
 
-                {/* Dice Animation - Centerpiece, Clickable */}
-                <div className="flex-shrink-0 flex justify-center pt-2 pb-4 relative">
-                  <div className="relative">
-                    <DiceAnimation
-                      targetNumber={animatingResult}
-                      isRolling={isPlaying}
-                      onAnimationComplete={handleAnimationComplete}
-                      onClick={rollDice}
-                    />
-                    
-                    {/* Click hint - visible only when idle and logged in */}
-                    {!isPlaying && isAuthenticated && (
-                      <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 text-[10px] text-gray-500 font-mono tracking-widest opacity-60 pointer-events-none">
-                        TAP TO ROLL
-                      </div>
-                    )}
-                  </div>
-                </div>
-        
-                {/* Result display - Integrated into layout flow, minimizing shifts */}
-                <div className="h-12 flex items-center justify-center flex-shrink-0">
-                  {lastResult && !isPlaying ? (
-                    <div className={`text-center ${lastResult.is_win ? 'text-green-400' : 'text-red-400'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
-                      <span className="font-black text-xl mr-2">
-                        {lastResult.is_win ? 'WON' : 'LOST'}
-                      </span>
-                      {lastResult.is_win && (
-                        <span className="text-dfinity-turquoise font-mono font-bold text-lg">
-                          +{formatUSDT(lastResult.payout)}
-                        </span>
-                      )}
-                      <span className="text-gray-600 text-xs ml-3 border-l border-gray-700 pl-3">
-                         Rolled {lastResult.rolled_number}
-                      </span>
-                    </div>
-                  ) : (
-                    /* Placeholder to prevent layout jump */
-                    <div className="h-full w-full"></div>
-                  )}
-                </div>
-        
-                {/* Direction buttons row - Underneath Dice as requested */}
-                <div className="flex gap-4 justify-center mb-2 flex-shrink-0">
-                  <button
-                    onClick={() => setDirection('Under')}
-                    className={`flex-1 md:flex-none md:w-32 px-4 py-3 text-sm font-bold rounded-xl transition ${
-                      direction === 'Under'
-                        ? 'border-2 border-white text-white bg-white/5'
-                        : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
-                    }`}
-                    disabled={isPlaying}
-                  >
-                    UNDER
-                  </button>
-        
-                  <button
-                    onClick={() => setDirection('Over')}
-                    className={`flex-1 md:flex-none md:w-32 px-4 py-3 text-sm font-bold rounded-xl transition ${
-                      direction === 'Over'
-                        ? 'border-2 border-white text-white bg-white/5'
-                        : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
-                    }`}
-                    disabled={isPlaying}
-                  >
-                    OVER
-                  </button>
-                </div>
-        
-                {/* Controls Section - Pushed down slightly */}
-                <div className="flex-1 flex flex-col justify-start space-y-4 pt-2">
-        
-                  {/* Target slider */}
-                  <DiceControls
-                    targetNumber={targetNumber}
-                    onTargetChange={setTargetNumber}
-                    disabled={isPlaying}
-                  />
-        
-                  {/* Stats row */}          <div className="flex justify-between items-center bg-black/20 rounded-lg p-3 border border-gray-800/50">
+        {/* Dice Animation - Centerpiece, Clickable */}
+        <div className="flex-shrink-0 flex justify-center pt-2 pb-4 relative">
+          <div className="relative">
+            <DiceAnimation
+              results={animatingResults}
+              diceCount={diceCount}
+              isRolling={isPlaying}
+              targetNumber={targetNumber}
+              direction={direction}
+              onAnimationComplete={handleAnimationComplete}
+              onClick={rollDice}
+            />
+
+            {/* Click hint - visible only when idle and logged in */}
+            {!isPlaying && isAuthenticated && (
+              <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 text-[10px] text-gray-500 font-mono tracking-widest opacity-60 pointer-events-none">
+                TAP TO ROLL
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Result display - Shows net result for multi-dice */}
+        <div className="h-14 flex items-center justify-center flex-shrink-0">
+          {lastResult && !isPlaying ? (
+            <div className={`text-center animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+              {/* Win count for multi-dice */}
+              {lastResult.dice_count > 1 && (
+                <span className={`font-black text-lg mr-2 ${lastResult.total_wins > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {lastResult.total_wins}/{lastResult.dice_count}
+                </span>
+              )}
+              {/* Net result */}
+              <span className={`font-black text-xl mr-2 ${Number(lastResult.net_result) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {Number(lastResult.net_result) >= 0 ? 'WON' : 'LOST'}
+              </span>
+              {Number(lastResult.net_result) > 0 && (
+                <span className="text-dfinity-turquoise font-mono font-bold text-lg">
+                  +{formatUSDT(lastResult.total_payout)}
+                </span>
+              )}
+              {/* Rolled numbers for single dice */}
+              {lastResult.dice_count === 1 && lastResult.dice_results[0] && (
+                <span className="text-gray-600 text-xs ml-3 border-l border-gray-700 pl-3">
+                  Rolled {lastResult.dice_results[0].rolled_number}
+                </span>
+              )}
+            </div>
+          ) : (
+            /* Placeholder to prevent layout jump */
+            <div className="h-full w-full"></div>
+          )}
+        </div>
+
+        {/* Direction buttons row - Underneath Dice */}
+        <div className="flex gap-4 justify-center mb-2 flex-shrink-0">
+          <button
+            onClick={() => setDirection('Under')}
+            className={`flex-1 md:flex-none md:w-32 px-4 py-3 text-sm font-bold rounded-xl transition ${
+              direction === 'Under'
+                ? 'border-2 border-white text-white bg-white/5'
+                : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
+            }`}
+            disabled={isPlaying}
+          >
+            UNDER
+          </button>
+
+          <button
+            onClick={() => setDirection('Over')}
+            className={`flex-1 md:flex-none md:w-32 px-4 py-3 text-sm font-bold rounded-xl transition ${
+              direction === 'Over'
+                ? 'border-2 border-white text-white bg-white/5'
+                : 'border border-gray-700 text-gray-500 hover:text-gray-300 bg-black/20'
+            }`}
+            disabled={isPlaying}
+          >
+            OVER
+          </button>
+        </div>
+
+        {/* Controls Section */}
+        <div className="flex-1 flex flex-col justify-start space-y-4 pt-2">
+
+          {/* Target slider with inline dice count stepper */}
+          <DiceControls
+            targetNumber={targetNumber}
+            onTargetChange={setTargetNumber}
+            diceCount={diceCount}
+            onDiceCountChange={setDiceCount}
+            disabled={isPlaying}
+          />
+
+          {/* Stats row - includes Total Bet */}
+          <div className="flex justify-between items-center bg-black/20 rounded-lg p-3 border border-gray-800/50">
             <div className="flex flex-col">
               <span className="text-[10px] text-gray-500 uppercase tracking-wider">Win Chance</span>
               <span className="text-yellow-400 font-mono font-bold">{winChance.toFixed(0)}%</span>
@@ -310,17 +331,22 @@ export function DiceGame() {
               <span className="text-green-400 font-mono font-bold">{multiplier.toFixed(2)}x</span>
             </div>
             <div className="h-6 w-px bg-gray-800 mx-2"></div>
-            <div className="flex flex-col text-right">
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Payout</span>
-              <span className="text-dfinity-turquoise font-mono font-bold">${(betAmount * multiplier).toFixed(2)}</span>
+            <div className="flex flex-col">
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total Bet</span>
+              <span className="text-white font-mono font-bold">${totalBet.toFixed(2)}</span>
             </div>
-             <button
-                onClick={() => setShowOddsExplainer(true)}
-                className="ml-3 text-gray-600 hover:text-gray-400"
-                title="How odds work"
-              >
-                ?
-              </button>
+            <div className="h-6 w-px bg-gray-800 mx-2"></div>
+            <div className="flex flex-col text-right">
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Max Payout</span>
+              <span className="text-dfinity-turquoise font-mono font-bold">${maxPayout.toFixed(2)}</span>
+            </div>
+            <button
+              onClick={() => setShowOddsExplainer(true)}
+              className="ml-3 text-gray-600 hover:text-gray-400"
+              title="How odds work"
+            >
+              ?
+            </button>
           </div>
 
           {/* Error display */}
@@ -332,7 +358,7 @@ export function DiceGame() {
         </div>
       </div>
 
-      {/* BettingRail - Stays at bottom */}
+      {/* BettingRail - Stays at bottom, shows per-dice bet */}
       <div className="flex-shrink-0">
       <BettingRail
         betAmount={betAmount}
@@ -382,6 +408,14 @@ export function DiceGame() {
                 </div>
 
                 <div>
+                  <p className="font-semibold text-white mb-1">Multi-Dice Mode</p>
+                  <p>
+                    Roll 1-3 dice at once! Each dice is an <span className="font-bold">independent bet</span> with the same target and direction.
+                    You can win some and lose others.
+                  </p>
+                </div>
+
+                <div>
                   <p className="font-semibold text-white mb-1">Exact Payouts</p>
                   <p>
                     You get <span className="font-bold text-yellow-400">exact fair odds</span> based on probability.
@@ -391,7 +425,7 @@ export function DiceGame() {
                     <p className="mt-1">• Only <span className="text-white">0</span> wins (1 out of 101 outcomes)</p>
                     <p>• Win chance: <span className="text-yellow-400">~0.99%</span></p>
                     <p>• Fair payout: <span className="text-green-400">~100x</span></p>
-                    <p className="mt-1">Bet $1 → Win $100 💰</p>
+                    <p className="mt-1">Bet $1 → Win $100</p>
                   </div>
                 </div>
 

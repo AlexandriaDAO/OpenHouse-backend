@@ -82,9 +82,30 @@ export const idlFactory = ({ IDL }) => {
     'minimum_liquidity_burned' : IDL.Nat,
   });
   const MinimalGameResult = IDL.Record({
+    'server_seed' : IDL.Vec(IDL.Nat8),
+    'client_seed' : IDL.Text,
+    'is_win' : IDL.Bool,
+    'server_seed_hash' : IDL.Text,
+    'nonce' : IDL.Nat64,
+    'rolled_number' : IDL.Nat8,
+    'payout' : IDL.Nat64,
+  });
+  const SingleDiceResult = IDL.Record({
     'is_win' : IDL.Bool,
     'rolled_number' : IDL.Nat8,
     'payout' : IDL.Nat64,
+  });
+  const MultiDiceGameResult = IDL.Record({
+    'server_seed' : IDL.Vec(IDL.Nat8),
+    'net_result' : IDL.Int64,
+    'total_payout' : IDL.Nat64,
+    'client_seed' : IDL.Text,
+    'dice_count' : IDL.Nat8,
+    'total_bet' : IDL.Nat64,
+    'total_wins' : IDL.Nat8,
+    'server_seed_hash' : IDL.Text,
+    'nonce' : IDL.Nat64,
+    'dice_results' : IDL.Vec(SingleDiceResult),
   });
   return IDL.Service({
     'abandon_withdrawal' : IDL.Func(
@@ -149,7 +170,6 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'get_balance' : IDL.Func([IDL.Principal], [IDL.Nat64], ['query']),
-    'get_current_seed_hash' : IDL.Func([], [IDL.Text], ['query']),
     'get_daily_stats' : IDL.Func(
         [IDL.Nat32],
         [IDL.Vec(DailySnapshot)],
@@ -159,6 +179,11 @@ export const idlFactory = ({ IDL }) => {
     'get_house_mode' : IDL.Func([], [IDL.Text], ['query']),
     'get_lp_position' : IDL.Func([IDL.Principal], [LPPosition], ['query']),
     'get_max_allowed_payout' : IDL.Func([], [IDL.Nat64], ['query']),
+    'get_max_bet_per_dice' : IDL.Func(
+        [IDL.Nat8, IDL.Nat8, RollDirection],
+        [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],
+        ['query'],
+      ),
     'get_my_balance' : IDL.Func([], [IDL.Nat64], ['query']),
     'get_my_lp_position' : IDL.Func([], [LPPosition], ['query']),
     'get_my_withdrawal_status' : IDL.Func(
@@ -168,7 +193,6 @@ export const idlFactory = ({ IDL }) => {
       ),
     'get_pool_apy' : IDL.Func([IDL.Opt(IDL.Nat32)], [ApyInfo], ['query']),
     'get_pool_stats' : IDL.Func([], [PoolStats], ['query']),
-    'get_seed_info' : IDL.Func([], [IDL.Text, IDL.Nat64, IDL.Nat64], ['query']),
     'get_stats_count' : IDL.Func([], [IDL.Nat64], ['query']),
     'get_stats_range' : IDL.Func(
         [IDL.Nat64, IDL.Nat64],
@@ -181,6 +205,11 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'Ok' : MinimalGameResult, 'Err' : IDL.Text })],
         [],
       ),
+    'play_multi_dice' : IDL.Func(
+        [IDL.Nat8, IDL.Nat64, IDL.Nat8, RollDirection, IDL.Text],
+        [IDL.Variant({ 'Ok' : MultiDiceGameResult, 'Err' : IDL.Text })],
+        [],
+      ),
     'retry_withdrawal' : IDL.Func(
         [],
         [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],
@@ -188,6 +217,11 @@ export const idlFactory = ({ IDL }) => {
       ),
     'verify_game_result' : IDL.Func(
         [IDL.Vec(IDL.Nat8), IDL.Text, IDL.Nat64, IDL.Nat8],
+        [IDL.Variant({ 'Ok' : IDL.Bool, 'Err' : IDL.Text })],
+        ['query'],
+      ),
+    'verify_multi_dice_result' : IDL.Func(
+        [IDL.Vec(IDL.Nat8), IDL.Text, IDL.Nat64, IDL.Vec(IDL.Nat8)],
         [IDL.Variant({ 'Ok' : IDL.Bool, 'Err' : IDL.Text })],
         ['query'],
       ),

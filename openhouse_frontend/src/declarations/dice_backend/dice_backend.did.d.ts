@@ -46,9 +46,25 @@ export interface LPPosition {
 }
 export interface LPPositionInfo { 'shares' : bigint, 'user' : Principal }
 export interface MinimalGameResult {
+  'server_seed' : Uint8Array | number[],
+  'client_seed' : string,
   'is_win' : boolean,
+  'server_seed_hash' : string,
+  'nonce' : bigint,
   'rolled_number' : number,
   'payout' : bigint,
+}
+export interface MultiDiceGameResult {
+  'server_seed' : Uint8Array | number[],
+  'net_result' : bigint,
+  'total_payout' : bigint,
+  'client_seed' : string,
+  'dice_count' : number,
+  'total_bet' : bigint,
+  'total_wins' : number,
+  'server_seed_hash' : string,
+  'nonce' : bigint,
+  'dice_results' : Array<SingleDiceResult>,
 }
 export interface OrphanedFundsReport {
   'abandoned_count' : bigint,
@@ -75,6 +91,11 @@ export interface PoolStats {
 }
 export type RollDirection = { 'Over' : null } |
   { 'Under' : null };
+export interface SingleDiceResult {
+  'is_win' : boolean,
+  'rolled_number' : number,
+  'payout' : bigint,
+}
 export interface UserBalance { 'balance' : bigint, 'user' : Principal }
 export type WithdrawalType = {
     'LP' : { 'shares' : bigint, 'reserve' : bigint, 'amount' : bigint }
@@ -129,18 +150,21 @@ export interface _SERVICE {
       { 'Err' : string }
   >,
   'get_balance' : ActorMethod<[Principal], bigint>,
-  'get_current_seed_hash' : ActorMethod<[], string>,
   'get_daily_stats' : ActorMethod<[number], Array<DailySnapshot>>,
   'get_house_balance' : ActorMethod<[], bigint>,
   'get_house_mode' : ActorMethod<[], string>,
   'get_lp_position' : ActorMethod<[Principal], LPPosition>,
   'get_max_allowed_payout' : ActorMethod<[], bigint>,
+  'get_max_bet_per_dice' : ActorMethod<
+    [number, number, RollDirection],
+    { 'Ok' : bigint } |
+      { 'Err' : string }
+  >,
   'get_my_balance' : ActorMethod<[], bigint>,
   'get_my_lp_position' : ActorMethod<[], LPPosition>,
   'get_my_withdrawal_status' : ActorMethod<[], [] | [PendingWithdrawal]>,
   'get_pool_apy' : ActorMethod<[[] | [number]], ApyInfo>,
   'get_pool_stats' : ActorMethod<[], PoolStats>,
-  'get_seed_info' : ActorMethod<[], [string, bigint, bigint]>,
   'get_stats_count' : ActorMethod<[], bigint>,
   'get_stats_range' : ActorMethod<[bigint, bigint], Array<DailySnapshot>>,
   'greet' : ActorMethod<[string], string>,
@@ -149,9 +173,19 @@ export interface _SERVICE {
     { 'Ok' : MinimalGameResult } |
       { 'Err' : string }
   >,
+  'play_multi_dice' : ActorMethod<
+    [number, bigint, number, RollDirection, string],
+    { 'Ok' : MultiDiceGameResult } |
+      { 'Err' : string }
+  >,
   'retry_withdrawal' : ActorMethod<[], { 'Ok' : bigint } | { 'Err' : string }>,
   'verify_game_result' : ActorMethod<
     [Uint8Array | number[], string, bigint, number],
+    { 'Ok' : boolean } |
+      { 'Err' : string }
+  >,
+  'verify_multi_dice_result' : ActorMethod<
+    [Uint8Array | number[], string, bigint, Uint8Array | number[]],
     { 'Ok' : boolean } |
       { 'Err' : string }
   >,
