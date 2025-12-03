@@ -702,36 +702,57 @@ pub(crate) fn sum_abandoned_from_audit_internal() -> u64 {
     })
 }
 
+pub(crate) fn get_cached_canister_balance_internal() -> u64 {
+    CACHED_CANISTER_BALANCE.with(|cache| *cache.borrow())
+}
+
 /// Build orphaned funds report from audit log
-pub(crate) fn build_orphaned_funds_report_internal() -> super::types::OrphanedFundsReport {
+///
+/// # Parameters
+/// - `recent_limit`: Optional limit for recent abandonments. If None, returns ALL.
+pub(crate) fn build_orphaned_funds_report_internal(recent_limit: Option<usize>)
+    -> super::types::OrphanedFundsReport
+{
     use std::collections::VecDeque;
     AUDIT_LOG_MAP.with(|log| {
         let mut total = 0u64;
         let mut count = 0u64;
         let mut recent: VecDeque<super::types::AbandonedEntry> = VecDeque::new();
 
-        for entry in log.borrow().iter() {
-            if let AuditEvent::WithdrawalAbandoned { user, amount } = &entry.value().event {
-                total += amount;
-                count += 1;
-                
-                recent.push_back(super::types::AbandonedEntry {
-                    user: *user,
-                    amount: *amount,
-                    timestamp: entry.value().timestamp,
-                });
-                
-                // Keep only last 50
-                if recent.len() > MAX_RECENT_ABANDONMENTS {
-                    recent.pop_front();
+        // Collect all abandoned withdrawals
+        let mut all_abandonments: Vec<super::types::AbandonedEntry> = log.borrow()
+            .iter()
+            .filter_map(|entry| {
+                if let AuditEvent::WithdrawalAbandoned { user, amount } = &entry.value().event {
+                    total += amount;
+                    count += 1;
+                    Some(super::types::AbandonedEntry {
+                        user: *user,
+                        amount: *amount,
+                        timestamp: entry.value().timestamp,
+                    })
+                } else {
+                    None
                 }
-            }
-        }
+            })
+            .collect();
+
+        // Sort by timestamp descending (most recent first)
+        all_abandonments.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+        // Apply limit if specified, otherwise return all
+        let limited_abandonments = if let Some(limit) = recent_limit {
+            all_abandonments.into_iter()
+                .take(limit)
+                .collect()
+        } else {
+            all_abandonments  // Return ALL
+        };
 
         super::types::OrphanedFundsReport {
             total_abandoned_amount: total,
             abandoned_count: count,
-            recent_abandonments: recent.into_iter().collect(),
+            recent_abandonments: limited_abandonments,
         }
     })
 }

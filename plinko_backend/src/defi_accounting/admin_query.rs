@@ -5,7 +5,8 @@ use super::types::*;
 
 const ADMIN_PRINCIPAL: &str = "p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae";
 const WASM_PAGE_SIZE_BYTES: u64 = 65536;
-const MAX_PAGINATION_LIMIT: u64 = 100;
+// const MAX_PAGINATION_LIMIT: u64 = 100; // Historical limit - removed to allow unlimited admin queries
+const REASONABLE_MAX_LIMIT: usize = 10_000; // Safety net
 
 fn require_admin() -> Result<(), String> {
     let caller = ic_cdk::api::msg_caller();
@@ -36,9 +37,12 @@ pub async fn admin_health_check() -> Result<HealthCheck, String> {
     let excess = canister_balance as i64 - calculated_total as i64;
     let excess_usdt = excess as f64 / 1_000_000.0;
 
-    // Health status
-    let (is_healthy, health_status) = if excess < 0 {
-        (false, "CRITICAL: DEFICIT".to_string())
+    // NEW: Explicit solvency check
+    let is_solvent = excess >= 0;
+
+    // Health status (update logic to reflect solvency)
+    let (is_healthy, health_status) = if !is_solvent {
+        (false, format!("CRITICAL: INSOLVENT (deficit {} USDT)", excess_usdt.abs()))
     } else if excess < 1_000_000 {
         (true, "HEALTHY".to_string())
     } else if excess < 5_000_000 {
@@ -78,6 +82,7 @@ pub async fn admin_health_check() -> Result<HealthCheck, String> {
         total_abandoned_amount: total_abandoned,
         unique_users,
         unique_lps,
+        is_solvent,  // NEW field
     })
 }
 
@@ -88,22 +93,41 @@ pub fn get_all_pending_withdrawals() -> Result<Vec<PendingWithdrawalInfo>, Strin
 }
 
 /// Analyze orphaned funds from audit log
-pub fn get_orphaned_funds_report() -> Result<OrphanedFundsReport, String> {
+pub fn get_orphaned_funds_report(recent_limit: Option<u64>) -> Result<OrphanedFundsReport, String> {
     require_admin()?;
-    Ok(accounting::build_orphaned_funds_report_internal())
+    let limit = recent_limit.map(|l| l as usize);
+    Ok(accounting::build_orphaned_funds_report_internal(limit))
 }
 
 /// Paginated list of all user balances
 pub fn get_all_balances(offset: u64, limit: u64) -> Result<Vec<UserBalance>, String> {
     require_admin()?;
-    let limit = limit.min(MAX_PAGINATION_LIMIT);
+    // Removed: let limit = limit.min(MAX_PAGINATION_LIMIT);
     Ok(accounting::iter_user_balances_internal(offset as usize, limit as usize))
 }
 
 /// Paginated list of all LP positions
 pub fn get_all_lp_positions(offset: u64, limit: u64) -> Result<Vec<LPPositionInfo>, String> {
     require_admin()?;
-    let limit = limit.min(MAX_PAGINATION_LIMIT);
+    // Removed: let limit = limit.min(MAX_PAGINATION_LIMIT);
     Ok(liquidity_pool::iter_lp_positions_internal(offset as usize, limit as usize))
+}
+
+/// Get all user balances without pagination (admin convenience)
+pub fn get_all_balances_complete() -> Result<Vec<UserBalance>, String> {
+    require_admin()?;
+    Ok(accounting::iter_user_balances_internal(0, REASONABLE_MAX_LIMIT))
+}
+
+/// Get all LP positions without pagination (admin convenience)
+pub fn get_all_lp_positions_complete() -> Result<Vec<LPPositionInfo>, String> {
+    require_admin()?;
+    Ok(liquidity_pool::iter_lp_positions_internal(0, REASONABLE_MAX_LIMIT))
+}
+
+/// Get complete orphaned funds report (all abandonments, no limit)
+pub fn get_orphaned_funds_report_full() -> Result<OrphanedFundsReport, String> {
+    require_admin()?;
+    Ok(accounting::build_orphaned_funds_report_internal(None))
 }
 

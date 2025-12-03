@@ -68,7 +68,28 @@ fn post_upgrade() {
 
 #[update]
 async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection, client_seed: String) -> Result<MinimalGameResult, String> {
+    // NEW: Check solvency before accepting bet (O(1) operation)
+    if !is_canister_solvent() {
+        return Err("Game temporarily paused - insufficient funds. Contact admin.".to_string());
+    }
     game::play_dice(bet_amount, target_number, direction, client_seed, ic_cdk::api::msg_caller()).await
+}
+
+fn is_canister_solvent() -> bool {
+    let pool_reserve = defi_accounting::liquidity_pool::get_pool_reserve();
+    let total_deposits = defi_accounting::accounting::calculate_total_deposits_internal();
+    let canister_balance = defi_accounting::accounting::get_cached_canister_balance_internal();
+
+    // Use checked_add to detect impossible overflow scenarios
+    let obligations = match pool_reserve.checked_add(total_deposits) {
+        Some(o) => o,
+        None => {
+            ic_cdk::println!("CRITICAL: Obligations overflow u64::MAX");
+            return false;  // Treat as insolvent if obligations overflow
+        }
+    };
+    
+    canister_balance >= obligations
 }
 
 #[query]
@@ -191,8 +212,13 @@ fn admin_get_all_pending_withdrawals() -> Result<Vec<defi_accounting::types::Pen
 }
 
 #[query]
-fn admin_get_orphaned_funds_report() -> Result<defi_accounting::types::OrphanedFundsReport, String> {
-    defi_accounting::admin_query::get_orphaned_funds_report()
+fn admin_get_orphaned_funds_report(recent_limit: Option<u64>) -> Result<defi_accounting::types::OrphanedFundsReport, String> {
+    defi_accounting::admin_query::get_orphaned_funds_report(recent_limit)
+}
+
+#[query]
+fn admin_get_orphaned_funds_report_full() -> Result<defi_accounting::types::OrphanedFundsReport, String> {
+    defi_accounting::admin_query::get_orphaned_funds_report_full()
 }
 
 #[query]
@@ -201,8 +227,18 @@ fn admin_get_all_balances(offset: u64, limit: u64) -> Result<Vec<defi_accounting
 }
 
 #[query]
+fn admin_get_all_balances_complete() -> Result<Vec<defi_accounting::types::UserBalance>, String> {
+    defi_accounting::admin_query::get_all_balances_complete()
+}
+
+#[query]
 fn admin_get_all_lp_positions(offset: u64, limit: u64) -> Result<Vec<defi_accounting::types::LPPositionInfo>, String> {
     defi_accounting::admin_query::get_all_lp_positions(offset, limit)
+}
+
+#[query]
+fn admin_get_all_lp_positions_complete() -> Result<Vec<defi_accounting::types::LPPositionInfo>, String> {
+    defi_accounting::admin_query::get_all_lp_positions_complete()
 }
 
 // =============================================================================

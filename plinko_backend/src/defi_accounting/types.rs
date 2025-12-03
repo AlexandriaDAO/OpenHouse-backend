@@ -118,6 +118,7 @@ pub struct HealthCheck {
     pub total_abandoned_amount: u64,
     pub unique_users: u64,
     pub unique_lps: u64,
+    pub is_solvent: bool,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
