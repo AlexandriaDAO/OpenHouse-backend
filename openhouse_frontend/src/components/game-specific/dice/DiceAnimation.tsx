@@ -142,6 +142,14 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
       // We have results - stagger the reveals
       setAllRevealed(false);
 
+      // Ensure dice show rolling state even if rolling phase was extremely brief
+      // This fixes edge case on fresh page load where backend returns before rolling animation starts
+      setDiceStates(Array(diceCount).fill(null).map(() => ({
+        displayNumber: Math.floor(Math.random() * 101),
+        isRevealed: false,
+        isWin: null
+      })));
+
       let lastRevealTime = 0;
       results.forEach((result, index) => {
         const staggerDelay = index * ANIMATION_CONFIG.STAGGER_DELAY;
