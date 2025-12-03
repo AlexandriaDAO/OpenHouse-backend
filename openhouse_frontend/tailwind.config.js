@@ -34,4 +34,17 @@ export default {
   plugins: [
     require('@tailwindcss/container-queries'),
   ],
+  safelist: [
+    {
+      pattern: /^(text|bg|border)-(dfinity-turquoise|orange-500|green-500|purple-400|yellow-400|emerald-400)/,
+      variants: ['hover'],
+    },
+    {
+      pattern: /^from-(dfinity-turquoise|orange-500|green-500)\/5/,
+    },
+    {
+      pattern: /^(bg|border)-(dfinity-turquoise|orange-500|green-500)\/(10|20|30)/,
+      variants: ['hover'],
+    },
+  ],
 }

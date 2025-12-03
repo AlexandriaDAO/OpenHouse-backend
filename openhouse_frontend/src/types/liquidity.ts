@@ -16,7 +16,7 @@ export interface PoolStats {
 export interface LPPosition {
   shares: bigint;
   pool_ownership_percent: number;
-  redeemable_icp: bigint;
+  redeemable_amount: bigint;
 }
 
 export interface ApyInfo {

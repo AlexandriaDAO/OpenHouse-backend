@@ -1,8 +1,7 @@
+import { useActor } from 'ic-use-actor';
 import { GameType } from '../../types/balance';
 import { LiquidityActorInterface, isLiquidityActor } from '../../types/liquidity';
-import useDiceActor from './useDiceActor';
-import usePlinkoActor from './usePlinkoActor';
-import useBlackjackActor from './useBlackjackActor';
+import { getGameConfig } from '../../config/gameRegistry';
 
 interface UseGameActorResult {
   actor: LiquidityActorInterface | null;
@@ -12,28 +11,16 @@ interface UseGameActorResult {
 /**
  * Returns the appropriate actor for a given game type, cast to the common LiquidityActorInterface.
  * This allows shared components to be type-safe without using `any`.
+ * 
+ * PERFORMANCE: Uses the generic useActor hook with a dynamic canister ID to avoid 
+ * instantiating all 3 game hooks (useDiceActor, usePlinkoActor, useBlackjackActor) simultaneously.
  */
 export function useGameActor(gameId: GameType): UseGameActorResult {
-  const diceResult = useDiceActor();
-  const plinkoResult = usePlinkoActor();
-  const blackjackResult = useBlackjackActor();
-
-  // Select the appropriate actor based on gameId
-  let rawActor: unknown = null;
-  switch (gameId) {
-    case 'dice':
-      rawActor = diceResult.actor;
-      break;
-    case 'plinko':
-      rawActor = plinkoResult.actor;
-      break;
-    case 'blackjack':
-      rawActor = blackjackResult.actor;
-      break;
-    default:
-      console.warn(`No liquidity actor available for game: ${gameId}`);
-      return { actor: null, isReady: false };
-  }
+  const config = getGameConfig(gameId);
+  
+  // Dynamically fetch the actor by canister ID (or name if registered as such)
+  // ic-use-actor registers actors by the canisterId passed to createActorHook
+  const { actor: rawActor } = useActor(config?.canisterId || '');
 
   // Validate and cast to common interface
   if (rawActor && isLiquidityActor(rawActor)) {

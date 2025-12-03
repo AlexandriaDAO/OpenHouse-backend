@@ -20,7 +20,7 @@ export function LiquidityPosition({ position, theme }: Props) {
       </div>
       <div className="text-right">
         <div className="text-2xl font-bold text-white">
-          ${formatValue(position.redeemable_icp)}
+          ${formatValue(position.redeemable_amount)}
         </div>
       </div>
     </div>
