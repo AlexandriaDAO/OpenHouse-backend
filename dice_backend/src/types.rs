@@ -8,6 +8,7 @@ use serde::Serialize;
 pub const DECIMALS_PER_CKUSDT: u64 = 1_000_000; // 1 ckUSDT = 1,000,000 decimals (6 decimals)
 pub const MIN_BET: u64 = 10_000; // 0.01 USDT
 pub const MAX_NUMBER: u8 = 100; // Dice rolls 0-100
+pub const MAX_DICE_COUNT: u8 = 3; // Maximum dice per multi-dice game
 pub const CKUSDT_CANISTER_ID: &str = "cngnf-vqaaa-aaaar-qag4q-cai";
 pub const CKUSDT_TRANSFER_FEE: u64 = 10_000;
 
@@ -40,6 +41,40 @@ pub struct DiceGameResult {
 
 // Keep MinimalGameResult as alias for backward compatibility in other modules if needed
 pub type MinimalGameResult = DiceGameResult;
+
+// =============================================================================
+// MULTI-DICE GAME TYPES
+// =============================================================================
+
+/// Result for a single dice roll within a multi-dice game
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
+pub struct SingleDiceResult {
+    pub rolled_number: u8,
+    pub is_win: bool,
+    pub payout: u64,
+}
+
+/// Complete result for multi-dice game
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
+pub struct MultiDiceGameResult {
+    /// Individual results for each dice
+    pub dice_results: Vec<SingleDiceResult>,
+    /// Number of dice rolled
+    pub dice_count: u8,
+    /// Number of winning dice
+    pub total_wins: u8,
+    /// Sum of all individual payouts
+    pub total_payout: u64,
+    /// Total bet amount (dice_count * bet_per_dice)
+    pub total_bet: u64,
+    /// Net profit/loss (total_payout - total_bet)
+    pub net_result: i64,
+    // Provably fair verification data
+    pub server_seed: [u8; 32],
+    pub server_seed_hash: String,
+    pub nonce: u64,
+    pub client_seed: String,
+}
 
 // =============================================================================
 // ICRC-2 TYPES

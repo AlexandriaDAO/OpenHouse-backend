@@ -16,7 +16,7 @@ pub mod game;
 // RE-EXPORTS
 // =============================================================================
 
-pub use types::{RollDirection, MinimalGameResult};
+pub use types::{RollDirection, MinimalGameResult, MultiDiceGameResult, SingleDiceResult};
 
 // =============================================================================
 // MEMORY MANAGEMENT
@@ -84,6 +84,47 @@ fn calculate_payout_info(target_number: u8, direction: RollDirection) -> Result<
 #[query]
 fn greet(name: String) -> String {
     format!("Welcome to OpenHouse Dice, {}! Roll the dice and test your luck!", name)
+}
+
+// =============================================================================
+// MULTI-DICE ENDPOINTS
+// =============================================================================
+
+#[update]
+async fn play_multi_dice(
+    dice_count: u8,
+    bet_per_dice: u64,
+    target_number: u8,
+    direction: RollDirection,
+    client_seed: String,
+) -> Result<MultiDiceGameResult, String> {
+    game::play_multi_dice(
+        dice_count,
+        bet_per_dice,
+        target_number,
+        direction,
+        client_seed,
+        ic_cdk::api::msg_caller(),
+    ).await
+}
+
+#[query]
+fn verify_multi_dice_result(
+    server_seed: [u8; 32],
+    client_seed: String,
+    nonce: u64,
+    expected_rolls: Vec<u8>,
+) -> Result<bool, String> {
+    seed::verify_multi_dice_result(server_seed, client_seed, nonce, expected_rolls)
+}
+
+#[query]
+fn get_max_bet_per_dice(
+    dice_count: u8,
+    target_number: u8,
+    direction: RollDirection,
+) -> Result<u64, String> {
+    game::calculate_max_bet_per_dice(dice_count, target_number, &direction)
 }
 
 // =============================================================================
