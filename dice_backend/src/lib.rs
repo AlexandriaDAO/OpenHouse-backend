@@ -52,9 +52,6 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() {
-    // Restore game state
-    seed::restore_seed_state();
-
     // Start parent auto-withdrawal timer (weekly fee collection)
     // NOTE: We removed start_retry_timer() - users now retry manually via retry_withdrawal()
     // This eliminates the double-spend vulnerability from automatic TooOld rollbacks
@@ -75,18 +72,8 @@ async fn play_dice(bet_amount: u64, target_number: u8, direction: RollDirection,
 }
 
 #[query]
-fn get_current_seed_hash() -> String {
-    seed::get_current_seed_hash()
-}
-
-#[query]
 fn verify_game_result(server_seed: [u8; 32], client_seed: String, nonce: u64, expected_roll: u8) -> Result<bool, String> {
     seed::verify_game_result(server_seed, client_seed, nonce, expected_roll)
-}
-
-#[query]
-fn get_seed_info() -> (String, u64, u64) {
-    seed::get_seed_info()
 }
 
 #[query]

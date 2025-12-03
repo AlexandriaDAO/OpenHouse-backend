@@ -1,7 +1,5 @@
 use candid::{CandidType, Deserialize, Principal};
 use serde::Serialize;
-use ic_stable_structures::Storable;
-use std::borrow::Cow;
 
 // =============================================================================
 // CONSTANTS
@@ -25,47 +23,23 @@ pub enum RollDirection {
 }
 
 // =============================================================================
-// SEED MANAGEMENT STRUCTURES
-// =============================================================================
-
-#[derive(Clone, Debug, Serialize, Deserialize, CandidType, Default)]
-pub struct RandomnessSeed {
-    pub current_seed: [u8; 32],
-    pub creation_time: u64,
-    pub games_used: u64,
-    pub max_games: u64,
-    pub nonce: u64,
-}
-
-impl Storable for RandomnessSeed {
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(serde_json::to_vec(self).unwrap())
-    }
-
-    fn into_bytes(self) -> Vec<u8> {
-        self.to_bytes().into_owned()
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        serde_json::from_slice(&bytes).unwrap()
-    }
-
-    const BOUND: ic_stable_structures::storable::Bound = ic_stable_structures::storable::Bound::Bounded {
-        max_size: 256,
-        is_fixed_size: false,
-    };
-}
-
-// =============================================================================
-// MINIMAL GAME RESULT (NEW - Simplified return type)
+// GAME RESULT (Updated for VRF)
 // =============================================================================
 
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
-pub struct MinimalGameResult {
+pub struct DiceGameResult {
     pub rolled_number: u8,
     pub is_win: bool,
     pub payout: u64,
+    // Provably fair verification data
+    pub server_seed: [u8; 32],
+    pub server_seed_hash: String,
+    pub nonce: u64,
+    pub client_seed: String,
 }
+
+// Keep MinimalGameResult as alias for backward compatibility in other modules if needed
+pub type MinimalGameResult = DiceGameResult;
 
 // =============================================================================
 // ICRC-2 TYPES
