@@ -48,13 +48,22 @@ export const Plinko: React.FC = () => {
       if (!actor) return;
 
       try {
-        const [mults, formulaText, ev] = await Promise.all([
-          actor.get_multipliers(),
+        const [multsBp, formulaText, ev] = await Promise.all([
+          // @ts-ignore - using new API method which may not be in types yet
+          actor.get_multipliers_bp ? actor.get_multipliers_bp() : actor.get_multipliers(),
           actor.get_formula(),
           actor.get_expected_value()
         ]);
 
-        setMultipliers(mults);
+        // Handle basis points (BigInt) or legacy float
+        let finalMults: number[];
+        if (multsBp && multsBp.length > 0 && typeof multsBp[0] === 'bigint') {
+             finalMults = multsBp.map((bp: bigint) => Number(bp) / 10000);
+        } else {
+             finalMults = multsBp as number[];
+        }
+
+        setMultipliers(finalMults);
         setFormula(formulaText);
         setExpectedValue(ev);
       } catch (err) {

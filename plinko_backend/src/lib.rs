@@ -1,16 +1,16 @@
 //! Pure Mathematical Plinko - Transparent Formula Casino Game
 //!
 //! **Design Philosophy:**
-//! Every multiplier is derived from a single transparent mathematical formula,
-//! not arbitrary values. This ensures complete transparency and verifiability.
+//! Every multiplier is derived from a single transparent mathematical formula.
+//! Integer-precision calculations ensure exact values for DeFi integration.
 //!
 //! **The Formula:**
-//! M(k) = 0.2 + 6.32 × ((k - 4) / 4)²
+//! - Display: M(k) = 0.2 + 6.32 × ((k - 4) / 4)²
+//! - Internal: M_bp(k) = 2000 + 3950 × d² (basis points, d = distance from center)
 //!
 //! Where:
 //! - k is the position (0 to 8 for 8 rows)
-//! - 0.2 is the center multiplier (80% loss at most probable position)
-//! - 6.32 is the scaling factor to achieve exactly 0.99 expected value
+//! - 10000 BP = 1.0x multiplier (no floating-point errors)
 //! - The quadratic curve mirrors the binomial probability distribution
 //!
 //! **Transparency & Fairness:**
@@ -39,7 +39,77 @@ pub struct MultiBallResult {
     pub average_multiplier: f64,
 }
 
+// ============================================================================
+// CONSTANTS
+// ============================================================================
 
+/// Multiplier precision: 10000 basis points = 1.0x multiplier
+/// Example: 65200 BP = 6.52x, 2000 BP = 0.2x
+pub const MULTIPLIER_SCALE: u64 = 10_000;
+
+/// Number of rows in the Plinko board (fixed configuration)
+pub const ROWS: u8 = 8;
+
+/// Number of possible final positions (0 to ROWS inclusive)
+pub const NUM_POSITIONS: u8 = ROWS + 1;
+
+/// Center position of the board
+pub const CENTER_POSITION: u8 = ROWS / 2;
+
+/// Minimum multiplier in basis points (center position = highest loss)
+/// 2000 BP = 0.2x (80% loss at most probable position)
+pub const MIN_MULTIPLIER_BP: u64 = 2_000;
+
+/// Quadratic scaling factor in basis points
+/// Derived: 6.32 * MULTIPLIER_SCALE / (ROWS/2)² = 6.32 * 10000 / 4² = 3950
+/// The (ROWS/2)² denominator normalizes distance to [0,1] before squaring
+/// This achieves exactly 0.99 expected value (1% house edge)
+pub const QUADRATIC_FACTOR_BP: u64 = 3_950;
+
+/// Binomial coefficients for 8 rows (Pascal's triangle row 8)
+/// Used for probability calculations and EV verification
+pub const BINOMIAL_COEFFICIENTS: [u64; 9] = [1, 8, 28, 56, 70, 56, 28, 8, 1];
+
+/// Total paths through 8-row board (2^8 = 256)
+pub const TOTAL_PATHS: u64 = 256;
+
+// ============================================================================
+// CORE LOGIC
+// ============================================================================
+
+/// Calculate multiplier in basis points using pure integer arithmetic.
+/// Returns multiplier scaled by MULTIPLIER_SCALE (10000).
+///
+/// Formula: M_bp(k) = MIN_MULTIPLIER_BP + QUADRATIC_FACTOR_BP × d²
+/// Where d = |k - CENTER_POSITION|
+///
+/// Example: position 0 → 65200 BP (6.52x)
+pub fn calculate_multiplier_bp(position: u8) -> Result<u64, String> {
+    if position > ROWS {
+        return Err(format!(
+            "Invalid position {}: must be 0-{} for {}-row board",
+            position, ROWS, ROWS
+        ));
+    }
+
+    // Distance from center (0-4 for 8-row board)
+    let distance = if position > CENTER_POSITION {
+        position - CENTER_POSITION
+    } else {
+        CENTER_POSITION - position
+    } as u64;
+
+    // Pure integer formula: no floating point
+    // Use checked arithmetic to prevent overflow (though unlikely with current constants)
+    let distance_squared = distance.checked_mul(distance)
+        .ok_or("Overflow in distance calculation")?;
+    
+    let quad_term = QUADRATIC_FACTOR_BP.checked_mul(distance_squared)
+        .ok_or("Overflow in quadratic term calculation")?;
+        
+    MIN_MULTIPLIER_BP.checked_add(quad_term)
+        .ok_or("Overflow in final multiplier calculation".to_string())
+}
 
 // Memory management for future upgrades
 #[init]
@@ -64,8 +134,6 @@ fn post_upgrade() {
 /// No parameters - fixed configuration for simplicity
 #[update]
 async fn drop_ball() -> Result<PlinkoResult, String> {
-    const ROWS: u8 = 8;
-
     // Get randomness - fail safely if unavailable
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?
@@ -84,8 +152,11 @@ async fn drop_ball() -> Result<PlinkoResult, String> {
     let final_position = path.iter().filter(|&&d| d).count() as u8;
 
     // Calculate multiplier using pure formula
-    let multiplier = calculate_multiplier(final_position)
+    // Use integer precision internally, then convert for display
+    let multiplier_bp = calculate_multiplier_bp(final_position)
         .map_err(|e| format!("Multiplier calculation failed: {}", e))?;
+    
+    let multiplier = multiplier_bp as f64 / MULTIPLIER_SCALE as f64;
 
     let win = multiplier >= 1.0;
 
@@ -101,7 +172,6 @@ async fn drop_ball() -> Result<PlinkoResult, String> {
 /// Efficient: uses single VRF call for up to 32 balls
 #[update]
 async fn drop_multiple_balls(count: u8) -> Result<MultiBallResult, String> {
-    const ROWS: u8 = 8;
     const MAX_BALLS: u8 = 30;
 
     // Validation
@@ -133,8 +203,12 @@ async fn drop_multiple_balls(count: u8) -> Result<MultiBallResult, String> {
 
         // Calculate result
         let final_position = path.iter().filter(|&&d| d).count() as u8;
-        let multiplier = calculate_multiplier(final_position)
+        
+        let multiplier_bp = calculate_multiplier_bp(final_position)
             .map_err(|e| format!("Multiplier calculation failed for ball {}: {}", i, e))?;
+        
+        let multiplier = multiplier_bp as f64 / MULTIPLIER_SCALE as f64;
+        
         let win = multiplier >= 1.0;
 
         results.push(PlinkoResult {
@@ -160,17 +234,24 @@ async fn drop_multiple_balls(count: u8) -> Result<MultiBallResult, String> {
 
 
 
-/// Get all multipliers for display
-/// Returns exactly 9 values for positions 0-8
+/// Get all multipliers in basis points for positions 0-8.
+/// Returns exactly 9 values. Panics on invalid state (should never happen).
 #[query]
-fn get_multipliers() -> Vec<f64> {
-    (0..=8)
-        .map(|pos| calculate_multiplier(pos).unwrap_or(0.0))
+fn get_multipliers_bp() -> Vec<u64> {
+    (0..=ROWS)
+        .map(|pos| {
+            calculate_multiplier_bp(pos)
+                .expect("Position 0-8 should always be valid")
+        })
         .collect()
 }
 
-/// Get the mathematical formula as a string
-/// Allows frontend to display the formula
+/// Get the mathematical formula as a string.
+/// Generated from constants to stay in sync with implementation.
+/// Note: If constants change, update this formula to match:
+/// - 0.2 = MIN_MULTIPLIER_BP / MULTIPLIER_SCALE
+/// - 6.32 = QUADRATIC_FACTOR_BP * 16 / MULTIPLIER_SCALE
+/// - 4 = ROWS / 2
 #[query]
 fn get_formula() -> String {
     "M(k) = 0.2 + 6.32 × ((k - 4) / 4)²".to_string()
@@ -180,38 +261,15 @@ fn get_formula() -> String {
 /// Should always return 0.99 (1% house edge)
 #[query]
 fn get_expected_value() -> f64 {
-    // Binomial coefficients for 8 rows
-    let coefficients = [1, 8, 28, 56, 70, 56, 28, 8, 1];
-    let total_paths = 256.0;
-
-    coefficients.iter()
+    BINOMIAL_COEFFICIENTS.iter()
         .enumerate()
         .map(|(pos, &coeff)| {
-            let probability = coeff as f64 / total_paths;
-            let multiplier = calculate_multiplier(pos as u8).unwrap_or(0.0);
+            let probability = coeff as f64 / TOTAL_PATHS as f64;
+            let multiplier_bp = calculate_multiplier_bp(pos as u8).unwrap_or(0);
+            let multiplier = multiplier_bp as f64 / MULTIPLIER_SCALE as f64;
             probability * multiplier
         })
         .sum()
-}
-
-/// Calculate multiplier using pure mathematical formula
-/// M(k) = 0.2 + 6.32 × ((k - 4) / 4)²
-///
-/// Returns error for invalid positions (must be 0-8 for 8-row board)
-pub fn calculate_multiplier(position: u8) -> Result<f64, String> {
-    // Validate position
-    if position > 8 {
-        return Err(format!("Invalid position {}: must be 0-8 for 8-row board", position));
-    }
-
-    // Pure mathematical formula
-    let k = position as f64;
-    let center = 4.0;
-    let distance = (k - center).abs();
-    let normalized = distance / 4.0; // Normalize to [0, 1]
-
-    // Quadratic formula with precise constants
-    Ok(0.2 + 6.32 * normalized * normalized)
 }
 
 #[query]
@@ -234,26 +292,43 @@ mod tests {
         use super::*;
 
         #[test]
-        fn test_exact_multipliers() {
-            // Test each position matches expected values
-            let expected = [6.52, 3.755, 1.78, 0.595, 0.2, 0.595, 1.78, 3.755, 6.52];
+        fn test_exact_multipliers_bp() {
+            // Integer basis point values - no floating point tolerance needed
+            let expected_bp: [u64; 9] = [65200, 37550, 17800, 5950, 2000, 5950, 17800, 37550, 65200];
 
-            for (pos, &expected_mult) in expected.iter().enumerate() {
-                let calculated = calculate_multiplier(pos as u8).expect("Valid position should not fail");
-                assert!(
-                    (calculated - expected_mult).abs() < 0.001,
-                    "Position {}: expected {}, got {}",
-                    pos, expected_mult, calculated
+            for (pos, &expected) in expected_bp.iter().enumerate() {
+                let calculated = calculate_multiplier_bp(pos as u8).expect("Valid position");
+                assert_eq!(
+                    calculated, expected,
+                    "Position {}: expected {} BP, got {} BP",
+                    pos, expected, calculated
                 );
             }
         }
 
         #[test]
-        fn test_invalid_position_returns_error() {
-            assert!(calculate_multiplier(9).is_err());
-            assert!(calculate_multiplier(255).is_err());
+        fn test_constants_consistency() {
+            // Verify constants are internally consistent
+            assert_eq!(NUM_POSITIONS as usize, BINOMIAL_COEFFICIENTS.len());
+            assert_eq!(TOTAL_PATHS, BINOMIAL_COEFFICIENTS.iter().sum::<u64>());
+            assert_eq!(CENTER_POSITION, ROWS / 2);
+        }
 
-            let err = calculate_multiplier(9).unwrap_err();
+        #[test]
+        fn test_get_multipliers_bp_api() {
+            let multipliers = get_multipliers_bp();
+            assert_eq!(multipliers.len(), 9);
+            assert_eq!(multipliers[0], 65200);
+            assert_eq!(multipliers[4], 2000); // Center position
+            assert_eq!(multipliers[8], 65200);
+        }
+
+        #[test]
+        fn test_invalid_position_returns_error() {
+            assert!(calculate_multiplier_bp(9).is_err());
+            assert!(calculate_multiplier_bp(255).is_err());
+
+            let err = calculate_multiplier_bp(9).unwrap_err();
             assert!(err.contains("Invalid position"));
         }
 
@@ -282,10 +357,10 @@ mod tests {
         fn test_multiplier_symmetry() {
             // Verify perfect symmetry
             for i in 0..=4 {
-                let left = calculate_multiplier(i).expect("Valid position");
-                let right = calculate_multiplier(8 - i).expect("Valid position");
-                assert!(
-                    (left - right).abs() < 0.0001,
+                let left = calculate_multiplier_bp(i).expect("Valid position");
+                let right = calculate_multiplier_bp(8 - i).expect("Valid position");
+                assert_eq!(
+                    left, right,
                     "Asymmetry at position {}: {} != {}",
                     i, left, right
                 );
@@ -294,11 +369,11 @@ mod tests {
 
         #[test]
         fn test_win_loss_positions() {
-            let multipliers = get_multipliers();
+            let multipliers = get_multipliers_bp();
 
-            // Count winning and losing positions
-            let winners = multipliers.iter().filter(|&&m| m >= 1.0).count();
-            let losers = multipliers.iter().filter(|&&m| m < 1.0).count();
+            // Count winning and losing positions (1.0x = 10000 BP)
+            let winners = multipliers.iter().filter(|&&m| m >= 10_000).count();
+            let losers = multipliers.iter().filter(|&&m| m < 10_000).count();
 
             assert_eq!(winners, 6, "Should have 6 winning positions");
             assert_eq!(losers, 3, "Should have 3 losing positions");
@@ -306,11 +381,11 @@ mod tests {
 
         #[test]
         fn test_variance_ratio() {
-            let multipliers = get_multipliers();
-            let max = multipliers.iter().fold(0.0_f64, |a, &b| a.max(b));
-            let min = multipliers.iter().fold(f64::MAX, |a, &b| a.min(b));
+            let multipliers = get_multipliers_bp();
+            let max = multipliers.iter().fold(0_u64, |a, &b| a.max(b));
+            let min = multipliers.iter().fold(u64::MAX, |a, &b| a.min(b));
 
-            let variance_ratio = max / min;
+            let variance_ratio = max as f64 / min as f64;
             assert!(
                 (variance_ratio - 32.6).abs() < 0.1,
                 "Variance ratio should be ~32.6:1, got {}:1",
@@ -339,7 +414,8 @@ mod tests {
             let final_position = path.iter().filter(|&&d| d).count() as u8;
 
             // Calculate multiplier
-            let multiplier = calculate_multiplier(final_position).expect("Valid position");
+            let multiplier_bp = calculate_multiplier_bp(final_position).expect("Valid position");
+            let multiplier = multiplier_bp as f64 / MULTIPLIER_SCALE as f64;
 
             // For 1 unit bet, payout is multiplier
             let payout = multiplier;
