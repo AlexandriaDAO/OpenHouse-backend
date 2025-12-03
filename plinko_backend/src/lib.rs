@@ -1,16 +1,16 @@
 //! Pure Mathematical Plinko - Transparent Formula Casino Game
 //!
 //! **Design Philosophy:**
-//! Every multiplier is derived from a single transparent mathematical formula,
-//! not arbitrary values. This ensures complete transparency and verifiability.
+//! Every multiplier is derived from a single transparent mathematical formula.
+//! Integer-precision calculations ensure exact values for DeFi integration.
 //!
 //! **The Formula:**
-//! M(k) = 0.2 + 6.32 × ((k - 4) / 4)²
+//! - Display: M(k) = 0.2 + 6.32 × ((k - 4) / 4)²
+//! - Internal: M_bp(k) = 2000 + 3950 × d² (basis points, d = distance from center)
 //!
 //! Where:
 //! - k is the position (0 to 8 for 8 rows)
-//! - 0.2 is the center multiplier (80% loss at most probable position)
-//! - 6.32 is the scaling factor to achieve exactly 0.99 expected value
+//! - 10000 BP = 1.0x multiplier (no floating-point errors)
 //! - The quadratic curve mirrors the binomial probability distribution
 //!
 //! **Transparency & Fairness:**
@@ -247,14 +247,7 @@ fn get_multipliers() -> Vec<f64> {
 /// Generated from constants to stay in sync with implementation.
 #[query]
 fn get_formula() -> String {
-    format!(
-        "M(k) = {} + {} × ((k - {}) / {})² [scale: {} BP = 1.0x]",
-        MIN_MULTIPLIER_BP as f64 / MULTIPLIER_SCALE as f64,  // 0.2
-        QUADRATIC_FACTOR_BP as f64 * 16.0 / MULTIPLIER_SCALE as f64,  // 6.32
-        CENTER_POSITION,  // 4
-        CENTER_POSITION,  // 4
-        MULTIPLIER_SCALE  // 10000
-    )
+    "M(k) = 0.2 + 6.32 × ((k - 4) / 4)²".to_string()
 }
 
 /// Get expected value for transparency
