@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import usePlinkoActor from '../hooks/actors/usePlinkoActor';
 import { GameLayout } from '../components/game-ui';
-import { PlinkoBoard, PlinkoMultipliers } from '../components/game-specific/plinko';
+import { PlinkoBoard, LeverDropButton } from '../components/game-specific/plinko';
 
 // Game Constants
 const ROWS = 8;
@@ -138,10 +138,41 @@ export const Plinko: React.FC = () => {
 
   return (
     <GameLayout hideFooter noScroll>
-      {/* Main container - flex column, centered */}
-      <div className="flex-1 flex flex-col max-w-2xl mx-auto px-4 overflow-hidden min-h-0 w-full">
+      <div className="flex-1 flex flex-col max-w-3xl mx-auto px-4 overflow-hidden min-h-0 w-full">
 
-        {/* PlinkoBoard - Centerpiece, no card wrapper */}
+        {/* SECTION 1: CONTROLS PANEL - TOP (where balls drop from) */}
+        <div className="flex-shrink-0 py-6">
+          <div className="bg-gray-900/50 backdrop-blur rounded-t-3xl border border-gray-700 p-6">
+
+            {/* Ball count slider */}
+            <div className="mb-6">
+              <div className="flex items-center gap-4 mb-2">
+                <span className="text-sm text-gray-400 w-28">Number of Balls</span>
+                <span className="text-sm text-white font-mono ml-auto">{ballCount}</span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="30"
+                value={ballCount}
+                onChange={(e) => setBallCount(Number(e.target.value))}
+                disabled={isPlaying}
+                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer
+                         disabled:opacity-50 disabled:cursor-not-allowed"
+              />
+            </div>
+
+            {/* LEVER DROP BUTTON */}
+            <LeverDropButton
+              onClick={dropBalls}
+              disabled={!actor || isPlaying}
+              isActive={isPlaying}
+              ballCount={ballCount}
+            />
+          </div>
+        </div>
+
+        {/* SECTION 2: GAME BOARD - CENTER (with integrated multipliers) */}
         <div className="flex-shrink-0 py-4 flex justify-center">
           <PlinkoBoard
             rows={ROWS}
@@ -157,84 +188,46 @@ export const Plinko: React.FC = () => {
                 ? (currentResult ? [currentResult.final_position] : [])
                 : (multiBallResult?.results.map(r => r.final_position) || [])
             }
+            multipliers={multipliers} // NEW: Pass multipliers to board
           />
         </div>
 
-        {/* Result Display - Single line, inline */}
+        {/* SECTION 3: RESULT DISPLAY - BOTTOM (compact) */}
         <div className="h-10 flex items-center justify-center flex-shrink-0">
-          {!isPlaying && (currentResult || multiBallResult) && (
-            <ResultDisplay
-              singleResult={currentResult}
-              multiResult={multiBallResult}
-            />
+          {!isPlaying && currentResult && (
+            <span className={`font-bold ${currentResult.win ? 'text-green-400' : 'text-red-400'}`}>
+              {currentResult.win ? 'WIN' : 'LOST'} {currentResult.multiplier.toFixed(2)}x
+            </span>
+          )}
+          {!isPlaying && multiBallResult && (
+            <span className="text-sm text-gray-300">
+              AVG {multiBallResult.average_multiplier.toFixed(2)}x
+              ({multiBallResult.total_wins}/{multiBallResult.total_balls} wins)
+            </span>
           )}
         </div>
 
-        {/* Multipliers Strip - Compact */}
-        {multipliers.length > 0 && (
-          <div className="flex-shrink-0 py-2">
-            <PlinkoMultipliers
-              multipliers={multipliers}
-              highlightedIndex={currentResult?.final_position}
-            />
-          </div>
-        )}
-
-        {/* Ball Slider - Minimal */}
-        <div className="flex-shrink-0 py-4">
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-400 w-12">Balls</span>
-            <input
-              type="range"
-              min="1"
-              max={MAX_BALLS}
-              value={ballCount}
-              onChange={(e) => setBallCount(parseInt(e.target.value))}
-              disabled={isPlaying}
-              className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-            />
-            <span className="text-sm text-white font-mono w-8 text-right">{ballCount}</span>
-          </div>
-        </div>
-
-        {/* Drop Button - Clean, no emoji */}
-        <div className="flex-shrink-0 py-2">
-          <button
-            onClick={dropBalls}
-            disabled={!actor || isPlaying}
-            className="w-full py-4 bg-dfinity-turquoise text-black font-bold rounded-xl
-                       hover:bg-dfinity-turquoise/90 disabled:opacity-50 disabled:cursor-not-allowed
-                       transition-all uppercase tracking-wider"
-          >
-            {isPlaying
-              ? ballCount > 1 ? `DROPPING ${ballCount} BALLS...` : 'DROPPING...'
-              : ballCount === 1
-                ? 'DROP BALL'
-                : `DROP ${ballCount} BALLS`
-            }
-          </button>
-        </div>
-
-        {/* Error Display */}
+        {/* Error display */}
         {gameError && (
-          <div className="text-red-400 text-xs text-center py-2">
+          <div className="text-red-400 text-xs text-center py-2 flex-shrink-0">
             {gameError}
           </div>
         )}
 
-        {/* Info Button - Bottom right corner */}
-        <div className="flex justify-end pt-4 pb-4">
+        {/* Info button */}
+        <div className="flex justify-end pt-4 pb-4 flex-shrink-0">
           <button
             onClick={() => setShowInfoModal(true)}
-            className="text-gray-600 hover:text-gray-400 text-lg"
-            title="Game info"
+            className="w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700
+                     text-gray-400 hover:text-white transition-colors
+                     flex items-center justify-center"
           >
             ?
           </button>
         </div>
       </div>
 
-      {/* Info Modal - Hidden by default */}
+      {/* Info Modal */}
       {showInfoModal && (
         <InfoModal
           onClose={() => setShowInfoModal(false)}
@@ -246,37 +239,6 @@ export const Plinko: React.FC = () => {
       )}
     </GameLayout>
   );
-};
-
-// Inline Result Component
-interface ResultDisplayProps {
-  singleResult: PlinkoGameResult | null;
-  multiResult: MultiBallBackendResult | null;
-}
-
-const ResultDisplay: React.FC<ResultDisplayProps> = ({singleResult, multiResult}) => {
-  if (singleResult) {
-    const isWin = singleResult.multiplier >= 1.0;
-    return (
-      <div className={`text-xl font-bold ${isWin ? 'text-green-400' : 'text-red-400'}`}>
-        {isWin ? 'WON' : 'LOST'} {singleResult.multiplier.toFixed(2)}x
-      </div>
-    );
-  }
-
-  if (multiResult) {
-    const isNetWin = multiResult.average_multiplier >= 1.0;
-    return (
-      <div className={`text-lg font-bold ${isNetWin ? 'text-green-400' : 'text-red-400'}`}>
-        AVG {multiResult.average_multiplier.toFixed(2)}x
-        <span className="text-gray-500 text-sm ml-2">
-          ({multiResult.total_wins}/{multiResult.total_balls} wins)
-        </span>
-      </div>
-    );
-  }
-
-  return null;
 };
 
 // Info Modal Component

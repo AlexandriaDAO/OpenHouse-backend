@@ -1,0 +1,132 @@
+.lever-button-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 240px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.lever-button-container:active:not(.disabled):not(.active) {
+  transform: scale(0.98);
+}
+
+.lever-button-container.disabled,
+.lever-button-container.active {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* SVG Animation */
+.lever-svg {
+  transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.lever-svg.pulled .lever-handle {
+  animation: lever-pull 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+@keyframes lever-pull {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(40px) rotate(5deg); /* Pull down */
+  }
+  100% {
+    transform: translateY(0) rotate(0deg); /* Spring back */
+  }
+}
+
+/* Hover bob animation */
+.lever-button-container:hover:not(.disabled):not(.active) .lever-svg {
+  animation: lever-bob 1s ease-in-out infinite;
+}
+
+@keyframes lever-bob {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+/* Label styling */
+.lever-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #9CA3AF;
+  margin-top: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: color 0.2s ease;
+}
+
+.lever-button-container:hover:not(.disabled):not(.active) .lever-label {
+  color: #39FF14; /* Lime green on hover */
+}
+
+/* Glow effect */
+.lever-glow {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(57, 255, 20, 0.3) 0%, transparent 70%);
+  animation: glow-pulse 2s ease-in-out infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    opacity: 0.4;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+}
+
+/* Active state */
+.lever-button-container.active .lever-handle {
+  transform: translateY(10px); /* Lever stays slightly down */
+}
+
+/* Responsive sizing */
+@media (max-width: 768px) {
+  .lever-svg {
+    width: 100px;
+    height: 166px;
+  }
+
+  .lever-label {
+    font-size: 0.75rem;
+  }
+
+  .lever-button-container {
+    min-height: 200px;
+  }
+}
+
+@media (max-width: 480px) {
+  .lever-svg {
+    width: 80px;
+    height: 133px;
+  }
+
+  .lever-button-container {
+    min-height: 160px;
+  }
+}

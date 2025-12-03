@@ -7,6 +7,7 @@ interface PlinkoBoardProps {
   isDropping: boolean;
   onAnimationComplete?: () => void;
   finalPositions?: number[]; // Array of final positions to highlight
+  multipliers?: number[]; // NEW: Pass multipliers to board
 }
 
 interface BallPosition {
@@ -14,6 +15,7 @@ interface BallPosition {
   row: number;
   column: number;
   finished: boolean;
+  justMoved: boolean; // NEW: Track position changes for bounce animation
 }
 
 export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
@@ -22,6 +24,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
   isDropping,
   onAnimationComplete,
   finalPositions,
+  multipliers,
 }) => {
   const [activeBalls, setActiveBalls] = useState<BallPosition[]>([]);
   const [animationKey, setAnimationKey] = useState(0);
@@ -51,6 +54,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
       row: 0,
       column: 0,
       finished: false,
+      justMoved: false,
     }));
     setActiveBalls(initialBalls);
 
@@ -69,12 +73,19 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
             currentColumn++;
           }
 
-          // Update this specific ball's position
+          // Update this specific ball's position and set justMoved
           setActiveBalls(prev => prev.map(ball => 
             ball.id === index 
-              ? { ...ball, row: currentRow, column: currentColumn } 
+              ? { ...ball, row: currentRow, column: currentColumn, justMoved: true } 
               : ball
           ));
+
+          // Clear "justMoved" flag after animation duration
+          setTimeout(() => {
+            setActiveBalls(prev => prev.map(ball =>
+              ball.id === index ? { ...ball, justMoved: false } : ball
+            ));
+          }, 150);
 
           // Schedule next step
           const stepDelay = 150 + (Math.random() * 20); // Slight speed variation
@@ -84,7 +95,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
           // Mark this ball as finished
           setActiveBalls(prev => prev.map(ball => 
             ball.id === index 
-              ? { ...ball, finished: true } 
+              ? { ...ball, finished: true, justMoved: false } 
               : ball
           ));
 
@@ -139,7 +150,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
     return {
       left: `calc(50% + ${(position.column - position.row / 2) * 40}px)`,
       top: `${position.row * 50}px`,
-      transition: 'all 0.15s ease-in-out',
+      // REMOVED: transition: 'all 0.15s ease-in-out' - handled by class now
       // Add slight transparency for multi-ball to see overlaps
       opacity: 0.9,
       zIndex: 10 + position.id, // Ensure some stacking order
@@ -147,7 +158,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
   };
 
   // Calculate board height based on rows
-  const boardHeight = rows * 50 + 100;
+  const boardHeight = rows * 50 + 100 + 40; // +40 for multiplier labels
 
   return (
     <div className="plinko-board-container">
@@ -162,7 +173,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
         {activeBalls.map(ball => (
           <div
             key={`ball-${ball.id}`}
-            className="plinko-ball"
+            className={`plinko-ball ${ball.justMoved ? 'ball-bouncing' : ''}`}
             style={getBallStyle(ball)}
           />
         ))}
@@ -198,6 +209,35 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
             </div>
           ))}
         </div>
+
+        {/* NEW: Multiplier labels below slots */}
+        {multipliers && multipliers.length > 0 && (
+          <div
+            className="plinko-multiplier-labels"
+            style={{ top: `${rows * 50 + 90}px` }}
+          >
+            {multipliers.map((mult, index) => {
+              const isHighlighted = !isDropping && finalPositions?.includes(index);
+              const isWin = mult >= 1.0;
+
+              return (
+                <div
+                  key={`mult-${index}`}
+                  className={`
+                    plinko-multiplier-label
+                    ${isWin ? 'win-multiplier' : 'lose-multiplier'}
+                    ${isHighlighted ? 'highlighted' : ''}
+                  `}
+                  style={{
+                    left: `calc(50% + ${(index - rows / 2) * 40}px)`,
+                  }}
+                >
+                  {mult.toFixed(2)}x
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

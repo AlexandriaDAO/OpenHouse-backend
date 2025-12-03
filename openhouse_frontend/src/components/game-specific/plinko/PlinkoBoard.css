@@ -1,20 +1,24 @@
+/* MODIFY: Remove padding, clean up container */
 .plinko-board-container {
   width: 100%;
-  overflow-x: auto;
-  padding: 20px;
+  overflow: visible; /* Changed from overflow-x: auto */
+  padding: 0; /* REMOVED: padding: 20px; */
   display: flex;
   justify-content: center;
 }
 
+/* MODIFY: Remove background box and border */
 .plinko-board {
   position: relative;
   width: 800px;
   margin: 0 auto;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.1) 100%);
-  border-radius: 8px;
-  border: 2px solid rgba(72, 209, 204, 0.3);
+  /* REMOVED: background gradient */
+  /* REMOVED: border-radius */
+  /* REMOVED: border */
+  background: transparent; /* NEW: No ugly box */
 }
 
+/* MODIFY: Add stronger glow to compensate for lost background */
 .plinko-peg {
   position: absolute;
   width: 10px;
@@ -22,9 +26,12 @@
   background: radial-gradient(circle, rgba(72, 209, 204, 1) 0%, rgba(72, 209, 204, 0.6) 100%);
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 10px rgba(72, 209, 204, 0.5);
+  box-shadow:
+    0 0 10px rgba(72, 209, 204, 0.5),
+    0 0 20px rgba(72, 209, 204, 0.3); /* NEW: Additional ambient glow */
 }
 
+/* MODIFY existing .plinko-ball class */
 .plinko-ball {
   position: absolute;
   width: 16px;
@@ -34,6 +41,29 @@
   transform: translate(-50%, -50%);
   box-shadow: 0 0 20px rgba(255, 215, 0, 0.8), 0 0 30px rgba(255, 165, 0, 0.5);
   z-index: 10;
+  /* REMOVED inline transition - now class-based */
+}
+
+/* NEW: Bounce animation class */
+.plinko-ball.ball-bouncing {
+  will-change: transform; /* Performance optimization */
+  animation: ball-bounce 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* NEW: Bounce keyframes */
+@keyframes ball-bounce {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  30% {
+    transform: translate(-50%, -55%) scale(0.95); /* Squish and slight up */
+  }
+  60% {
+    transform: translate(-50%, -48%) scale(1.05); /* Stretch and bounce */
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
 }
 
 .plinko-ball-complete {
@@ -76,7 +106,48 @@
   transform: translateX(-50%) scale(1.2);
 }
 
-/* Responsive adjustments */
+/* NEW: Multiplier labels container */
+.plinko-multiplier-labels {
+  position: absolute;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* NEW: Individual multiplier label */
+.plinko-multiplier-label {
+  position: absolute;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+/* NEW: Win multiplier styling */
+.plinko-multiplier-label.win-multiplier {
+  color: #22C55E;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+/* NEW: Loss multiplier styling */
+.plinko-multiplier-label.lose-multiplier {
+  color: #EF4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* NEW: Highlighted state */
+.plinko-multiplier-label.highlighted {
+  transform: translateX(-50%) scale(1.15);
+  background: rgba(57, 255, 20, 0.2); /* Lime green highlight */
+  box-shadow: 0 0 10px rgba(57, 255, 20, 0.4);
+}
+
+/* Responsive multiplier sizing */
 @media (max-width: 900px) {
   .plinko-board {
     width: 600px;
@@ -90,6 +161,10 @@
   .plinko-ball {
     width: 14px;
     height: 14px;
+  }
+
+  .plinko-multiplier-label {
+    font-size: 10px;
   }
 }
 
@@ -106,5 +181,10 @@
   .plinko-ball {
     width: 12px;
     height: 12px;
+  }
+
+  .plinko-multiplier-label {
+    font-size: 8px;
+    padding: 1px 3px;
   }
 }
