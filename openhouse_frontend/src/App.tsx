@@ -7,9 +7,9 @@ import { GameBalanceProvider } from './providers/GameBalanceProvider';
 import { Layout } from './components/Layout';
 import { Home } from './pages/Home';
 import { DiceLayout, DiceGame, DiceLiquidity } from './pages/dice';
-import { Plinko } from './pages/Plinko';
+import { PlinkoLayout, PlinkoGame, PlinkoLiquidity } from './pages/plinko';
 import { Crash } from './pages/Crash';
-import { Blackjack } from './pages/Blackjack';
+import { BlackjackLayout, BlackjackGame, BlackjackLiquidity } from './pages/blackjack';
 import { Admin } from './pages/Admin';
 import { Wallet } from './pages/Wallet';
 
@@ -24,13 +24,24 @@ function App() {
               <Layout>
                 <Routes>
                   <Route path="/" element={<Home />} />
+                  
                   <Route path="/dice" element={<DiceLayout />}>
                     <Route index element={<DiceGame />} />
                     <Route path="liquidity" element={<DiceLiquidity />} />
                   </Route>
-                  <Route path="/plinko" element={<Plinko />} />
+                  
+                  <Route path="/plinko" element={<PlinkoLayout />}>
+                    <Route index element={<PlinkoGame />} />
+                    <Route path="liquidity" element={<PlinkoLiquidity />} />
+                  </Route>
+                  
                   <Route path="/crash" element={<Crash />} />
-                  <Route path="/blackjack" element={<Blackjack />} />
+                  
+                  <Route path="/blackjack" element={<BlackjackLayout />}>
+                    <Route index element={<BlackjackGame />} />
+                    <Route path="liquidity" element={<BlackjackLiquidity />} />
+                  </Route>
+                  
                   <Route path="/wallet" element={<Wallet />} />
                   <Route path="/admin" element={<Admin />} />
                 </Routes>
