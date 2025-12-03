@@ -98,17 +98,20 @@ export const Admin: React.FC = () => {
       } catch (e) { console.warn(`${gameName} missing pending withdrawals API`) }
 
       try {
-        const orphanedRes = await actor.admin_get_orphaned_funds_report?.();
+        // NEW: Call with no limit to get ALL abandonments
+        const orphanedRes = await actor.admin_get_orphaned_funds_report_full?.();
         if (orphanedRes && 'Ok' in orphanedRes) orphaned = orphanedRes.Ok;
       } catch (e) { console.warn(`${gameName} missing orphaned funds API`) }
 
       try {
-        const balanceRes = await actor.admin_get_all_balances?.(BigInt(0), BigInt(50));
+        // NEW: Use complete query (no pagination)
+        const balanceRes = await actor.admin_get_all_balances_complete?.();
         if (balanceRes && 'Ok' in balanceRes) balances = balanceRes.Ok;
       } catch (e) { console.warn(`${gameName} missing balances API`) }
 
       try {
-        const lpRes = await actor.admin_get_all_lp_positions?.(BigInt(0), BigInt(50));
+        // NEW: Use complete query (no pagination)
+        const lpRes = await actor.admin_get_all_lp_positions_complete?.();
         if (lpRes && 'Ok' in lpRes) lps = lpRes.Ok;
       } catch (e) { console.warn(`${gameName} missing LP positions API`) }
 
@@ -212,7 +215,7 @@ export const Admin: React.FC = () => {
       {/* SECTION 1: Platform Overview */}
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6">
         <h2 className="text-lg font-semibold mb-3 text-gray-300">Platform Overview</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
           <div className="bg-gray-900/50 p-3 rounded">
             <div className="text-gray-400 text-xs mb-1">Total Value Locked</div>
             <div className="text-2xl font-mono text-white">${formatUSDT(totalTVL)}</div>
@@ -227,6 +230,19 @@ export const Admin: React.FC = () => {
             <div className={`text-2xl font-bold ${overallHealthy ? 'text-green-400' : 'text-red-400'}`}>
               {overallHealthy ? 'HEALTHY ✓' : 'ISSUES ⚠️'}
             </div>
+          </div>
+          {/* NEW: Solvency Status */}
+          <div className="bg-gray-900/50 p-3 rounded">
+            <div className="text-gray-400 text-xs mb-1">Solvency Status</div>
+            {(() => {
+              const allSolvent = [diceData.health, plinkoData.health]
+                .every(h => !h || (h as any).is_solvent !== false);
+              return (
+                <div className={`text-2xl font-bold ${allSolvent ? 'text-green-400' : 'text-red-400'}`}>
+                  {allSolvent ? 'SOLVENT ✓' : 'DEFICIT ⚠️'}
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -438,10 +454,11 @@ const GameHealthCard: React.FC<{
     );
   }
 
-  const h = data.health;
+  const h = data.health as any; // Type cast to access new fields if they exist
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+      {/* Header with health status */}
       <div className="flex justify-between items-start mb-3">
         <div>
           <h3 className="text-lg font-semibold">{gameName}</h3>
@@ -454,15 +471,81 @@ const GameHealthCard: React.FC<{
         </div>
       </div>
 
+      {/* NEW: Solvency Alert Banner (if insolvent) */}
+      {h.is_solvent !== undefined && !h.is_solvent && (
+        <div className="mb-3 p-3 bg-red-900/30 border border-red-500 rounded">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">⚠️</span>
+            <div>
+              <div className="font-bold text-red-400">INSOLVENCY ALERT</div>
+              <div className="text-xs text-gray-300 mt-1">
+                Canister balance cannot cover all obligations. Bets are blocked.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NEW: Canister Accounting Breakdown */}
+      <div className="mb-3 p-3 bg-gray-900/50 rounded border border-gray-700">
+        <div className="text-xs text-gray-400 mb-2 font-semibold">Canister Accounting</div>
+        <div className="space-y-2 text-xs">
+          {/* Actual Balance */}
+          <div className="flex justify-between items-center">
+            <span className="text-gray-400">Actual Canister Balance:</span>
+            <span className="font-mono text-white font-semibold">
+              {formatUSDT(h.canister_balance)} USDT
+            </span>
+          </div>
+
+          {/* Calculated Total (Obligations) */}
+          <div className="flex justify-between items-center border-t border-gray-700 pt-2">
+            <span className="text-gray-400">Total Obligations:</span>
+            <span className="font-mono text-yellow-400 font-semibold">
+              {formatUSDT(h.calculated_total || (h.pool_reserve + h.total_deposits))} USDT
+            </span>
+          </div>
+
+          {/* Breakdown of obligations */}
+          <div className="ml-4 space-y-1 text-xs text-gray-500">
+            <div className="flex justify-between">
+              <span>• Pool Reserve:</span>
+              <span className="font-mono">{formatUSDT(h.pool_reserve)} USDT</span>
+            </div>
+            <div className="flex justify-between">
+              <span>• User Deposits:</span>
+              <span className="font-mono">{formatUSDT(h.total_deposits)} USDT</span>
+            </div>
+          </div>
+
+          {/* Surplus/Deficit */}
+          <div className="flex justify-between items-center border-t border-gray-700 pt-2">
+            <span className="text-gray-400">Unallocated Balance:</span>
+            <span className={`font-mono font-bold ${
+              Number(h.excess) >= 0 ? 'text-green-400' : 'text-red-400'
+            }`}>
+              {Number(h.excess) >= 0 ? '+' : ''}{formatUSDT(h.excess)} USDT
+            </span>
+          </div>
+
+          {/* NEW: Solvency Indicator */}
+          {h.is_solvent !== undefined && (
+            <div className="flex justify-between items-center pt-1">
+              <span className="text-gray-400">Solvency Status:</span>
+              <span className={`font-mono font-bold text-xs px-2 py-1 rounded ${
+                h.is_solvent
+                  ? 'bg-green-900/30 text-green-400'
+                  : 'bg-red-900/30 text-red-400'
+              }`}>
+                {h.is_solvent ? '✓ SOLVENT' : '✗ INSOLVENT'}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Existing metrics grid (simplified) */}
       <div className="grid grid-cols-2 gap-3 text-xs">
-        <div className="bg-gray-900/50 p-2 rounded">
-          <div className="text-gray-400 mb-1">Pool Reserve</div>
-          <div className="font-mono text-white text-sm">{formatUSDT(h.pool_reserve)} USDT</div>
-        </div>
-        <div className="bg-gray-900/50 p-2 rounded">
-          <div className="text-gray-400 mb-1">User Deposits</div>
-          <div className="font-mono text-white text-sm">{formatUSDT(h.total_deposits)} USDT</div>
-        </div>
         <div className="bg-gray-900/50 p-2 rounded">
           <div className="text-gray-400 mb-1">Pending W/D</div>
           <div className="font-mono text-white text-sm">
@@ -470,11 +553,11 @@ const GameHealthCard: React.FC<{
           </div>
         </div>
         <div className="bg-gray-900/50 p-2 rounded">
-          <div className="text-gray-400 mb-1">Excess</div>
+          <div className="text-gray-400 mb-1">Orphaned Funds</div>
           <div className={`font-mono text-sm ${
-            Number(h.excess) >= 0 ? 'text-green-400' : 'text-red-400'
+            Number(h.total_abandoned_amount) > 0 ? 'text-yellow-400' : 'text-green-400'
           }`}>
-            {Number(h.excess) >= 0 ? '+' : ''}{formatUSDT(h.excess)} USDT
+            {formatUSDT(h.total_abandoned_amount)} USDT
           </div>
         </div>
         <div className="bg-gray-900/50 p-2 rounded">
@@ -487,6 +570,7 @@ const GameHealthCard: React.FC<{
         </div>
       </div>
 
+      {/* Error display */}
       {data.error && (
         <div className="mt-3 p-2 bg-red-900/20 border border-red-500 rounded text-xs text-red-400">
           Error: {data.error}
@@ -501,6 +585,8 @@ const OrphanedFundsCard: React.FC<{
   gameName: string;
   report: OrphanedFundsReport | null;
 }> = ({ gameName, report }) => {
+  const [expanded, setExpanded] = React.useState(false);
+
   if (!report) {
     return (
       <div className="bg-gray-900/50 p-3 rounded">
@@ -510,13 +596,26 @@ const OrphanedFundsCard: React.FC<{
     );
   }
 
+  const hasAbandonments = Number(report.abandoned_count) > 0;
+  const recentAbandonments = (report as any).recent_abandonments; // Access new field if exists
+
   return (
     <div className="bg-gray-900/50 p-3 rounded">
-      <div className="font-semibold text-sm mb-2">{gameName}</div>
-      <div className="flex justify-between items-center">
+      <div className="font-semibold text-sm mb-2 flex items-center gap-2">
+        {gameName}
+        {hasAbandonments && (
+          <span className="text-xs px-2 py-0.5 bg-yellow-900/30 text-yellow-400 rounded">
+            ⚠️ INVESTIGATE
+          </span>
+        )}
+      </div>
+
+      <div className="flex justify-between items-center mb-2">
         <div>
           <div className="text-xs text-gray-400">Total Abandoned</div>
-          <div className="font-mono text-yellow-500 text-lg">
+          <div className={`font-mono text-lg ${
+            hasAbandonments ? 'text-yellow-500' : 'text-green-400'
+          }`}>
             ${formatUSDT(report.total_abandoned_amount)}
           </div>
         </div>
@@ -527,6 +626,51 @@ const OrphanedFundsCard: React.FC<{
           </div>
         </div>
       </div>
+
+      {/* NEW: Warning message if abandonments exist */}
+      {hasAbandonments && (
+        <div className="text-xs text-yellow-400 bg-yellow-900/20 border border-yellow-700 rounded p-2 mb-2">
+          ⚠️ Orphaned funds indicate potential withdrawal flow bugs
+        </div>
+      )}
+
+      {/* NEW: Expandable recent abandonments list */}
+      {hasAbandonments && recentAbandonments && recentAbandonments.length > 0 && (
+        <div className="mt-2">
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-xs text-blue-400 hover:text-blue-300 underline"
+          >
+            {expanded ? '▼ Hide' : '▶'} Recent Abandonments ({recentAbandonments.length})
+          </button>
+
+          {expanded && (
+            <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+              {recentAbandonments.map((entry: any, i: number) => (
+                <div key={i} className="text-xs bg-gray-800/50 p-2 rounded border border-gray-700">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="text-gray-400 text-xs">User</div>
+                      <div className="font-mono text-gray-300" title={entry.user.toString()}>
+                        {truncatePrincipal(entry.user.toString(), 12)}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-gray-400 text-xs">Amount</div>
+                      <div className="font-mono text-yellow-400">
+                        {formatUSDT(entry.amount)} USDT
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-gray-500 text-xs mt-1">
+                    {formatTimeAgo(entry.timestamp)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
