@@ -27,6 +27,7 @@ export interface HealthCheck {
   'is_healthy' : boolean,
   'calculated_total' : bigint,
   'heap_memory_bytes' : bigint,
+  'is_solvent' : boolean,
   'total_abandoned_amount' : bigint,
   'health_status' : string,
   'unique_lps' : bigint,
@@ -112,8 +113,18 @@ export interface _SERVICE {
     { 'Ok' : Array<UserBalance> } |
       { 'Err' : string }
   >,
+  'admin_get_all_balances_complete' : ActorMethod<
+    [],
+    { 'Ok' : Array<UserBalance> } |
+      { 'Err' : string }
+  >,
   'admin_get_all_lp_positions' : ActorMethod<
     [bigint, bigint],
+    { 'Ok' : Array<LPPositionInfo> } |
+      { 'Err' : string }
+  >,
+  'admin_get_all_lp_positions_complete' : ActorMethod<
+    [],
     { 'Ok' : Array<LPPositionInfo> } |
       { 'Err' : string }
   >,
@@ -123,6 +134,11 @@ export interface _SERVICE {
       { 'Err' : string }
   >,
   'admin_get_orphaned_funds_report' : ActorMethod<
+    [[] | [bigint]],
+    { 'Ok' : OrphanedFundsReport } |
+      { 'Err' : string }
+  >,
+  'admin_get_orphaned_funds_report_full' : ActorMethod<
     [],
     { 'Ok' : OrphanedFundsReport } |
       { 'Err' : string }

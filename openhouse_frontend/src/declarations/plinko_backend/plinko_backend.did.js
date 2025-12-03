@@ -24,7 +24,7 @@ export const idlFactory = ({ IDL }) => {
       ),
     'get_expected_value' : IDL.Func([], [IDL.Float64], ['query']),
     'get_formula' : IDL.Func([], [IDL.Text], ['query']),
-    'get_multipliers' : IDL.Func([], [IDL.Vec(IDL.Float64)], ['query']),
+    'get_multipliers_bp' : IDL.Func([], [IDL.Vec(IDL.Nat64)], ['query']),
     'greet' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
   });
 };

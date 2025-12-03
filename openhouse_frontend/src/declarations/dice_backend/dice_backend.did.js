@@ -29,6 +29,7 @@ export const idlFactory = ({ IDL }) => {
     'is_healthy' : IDL.Bool,
     'calculated_total' : IDL.Nat64,
     'heap_memory_bytes' : IDL.Nat64,
+    'is_solvent' : IDL.Bool,
     'total_abandoned_amount' : IDL.Nat64,
     'health_status' : IDL.Text,
     'unique_lps' : IDL.Nat64,
@@ -118,8 +119,18 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'Ok' : IDL.Vec(UserBalance), 'Err' : IDL.Text })],
         ['query'],
       ),
+    'admin_get_all_balances_complete' : IDL.Func(
+        [],
+        [IDL.Variant({ 'Ok' : IDL.Vec(UserBalance), 'Err' : IDL.Text })],
+        ['query'],
+      ),
     'admin_get_all_lp_positions' : IDL.Func(
         [IDL.Nat64, IDL.Nat64],
+        [IDL.Variant({ 'Ok' : IDL.Vec(LPPositionInfo), 'Err' : IDL.Text })],
+        ['query'],
+      ),
+    'admin_get_all_lp_positions_complete' : IDL.Func(
+        [],
         [IDL.Variant({ 'Ok' : IDL.Vec(LPPositionInfo), 'Err' : IDL.Text })],
         ['query'],
       ),
@@ -134,6 +145,11 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'admin_get_orphaned_funds_report' : IDL.Func(
+        [IDL.Opt(IDL.Nat64)],
+        [IDL.Variant({ 'Ok' : OrphanedFundsReport, 'Err' : IDL.Text })],
+        ['query'],
+      ),
+    'admin_get_orphaned_funds_report_full' : IDL.Func(
         [],
         [IDL.Variant({ 'Ok' : OrphanedFundsReport, 'Err' : IDL.Text })],
         ['query'],

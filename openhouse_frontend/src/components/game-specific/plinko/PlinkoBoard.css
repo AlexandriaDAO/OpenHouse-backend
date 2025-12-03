@@ -1,24 +1,104 @@
-/* MODIFY: Remove padding, clean up container */
 .plinko-board-container {
   width: 100%;
-  overflow: visible; /* Changed from overflow-x: auto */
-  padding: 0; /* REMOVED: padding: 20px; */
+  overflow: visible;
+  padding: 0;
   display: flex;
   justify-content: center;
 }
 
-/* MODIFY: Remove background box and border */
 .plinko-board {
   position: relative;
   width: 800px;
   margin: 0 auto;
-  /* REMOVED: background gradient */
-  /* REMOVED: border-radius */
-  /* REMOVED: border */
-  background: transparent; /* NEW: No ugly box */
+  background: transparent;
 }
 
-/* MODIFY: Add stronger glow to compensate for lost background */
+/* Tipping Bucket */
+.plinko-bucket {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform-origin: bottom center;
+  transform: translateX(-50%) rotate(0deg);
+  cursor: pointer;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 20;
+}
+
+.plinko-bucket:hover:not(.bucket-disabled) {
+  transform: translateX(-50%) rotate(-8deg);
+}
+
+.plinko-bucket.bucket-disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.bucket-body {
+  position: relative;
+  width: 70px;
+  height: 40px;
+  background: linear-gradient(180deg, #374151 0%, #1f2937 100%);
+  border: 2px solid #48D1CC;
+  border-radius: 0 0 8px 8px;
+  border-top: none;
+  overflow: hidden;
+}
+
+.bucket-body::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: -6px;
+  right: -6px;
+  height: 10px;
+  background: linear-gradient(180deg, #4B5563 0%, #374151 100%);
+  border: 2px solid #48D1CC;
+  border-radius: 4px 4px 0 0;
+}
+
+.bucket-balls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 100%;
+}
+
+.bucket-ball {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: radial-gradient(circle at 30% 30%, #fff 0%, #FFD700 50%, #FFA500 100%);
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(255, 215, 0, 0.6);
+}
+
+.bucket-count {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  font-size: 9px;
+  font-weight: bold;
+  color: #48D1CC;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.bucket-label {
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: #9CA3AF;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+
+.plinko-bucket:hover:not(.bucket-disabled) .bucket-label {
+  color: #48D1CC;
+}
+
+/* Pegs */
 .plinko-peg {
   position: absolute;
   width: 10px;
@@ -28,10 +108,10 @@
   transform: translate(-50%, -50%);
   box-shadow:
     0 0 10px rgba(72, 209, 204, 0.5),
-    0 0 20px rgba(72, 209, 204, 0.3); /* NEW: Additional ambient glow */
+    0 0 20px rgba(72, 209, 204, 0.3);
 }
 
-/* MODIFY existing .plinko-ball class */
+/* Balls */
 .plinko-ball {
   position: absolute;
   width: 16px;
@@ -41,29 +121,7 @@
   transform: translate(-50%, -50%);
   box-shadow: 0 0 20px rgba(255, 215, 0, 0.8), 0 0 30px rgba(255, 165, 0, 0.5);
   z-index: 10;
-  /* REMOVED inline transition - now class-based */
-}
-
-/* NEW: Bounce animation class */
-.plinko-ball.ball-bouncing {
-  will-change: transform; /* Performance optimization */
-  animation: ball-bounce 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
-
-/* NEW: Bounce keyframes */
-@keyframes ball-bounce {
-  0% {
-    transform: translate(-50%, -50%) scale(1);
-  }
-  30% {
-    transform: translate(-50%, -55%) scale(0.95); /* Squish and slight up */
-  }
-  60% {
-    transform: translate(-50%, -48%) scale(1.05); /* Stretch and bounce */
-  }
-  100% {
-    transform: translate(-50%, -50%) scale(1);
-  }
+  will-change: left, top;
 }
 
 .plinko-ball-complete {
@@ -81,6 +139,7 @@
   }
 }
 
+/* Slots */
 .plinko-slots {
   position: absolute;
   width: 100%;
@@ -103,10 +162,27 @@
   border-color: rgba(255, 215, 0, 1);
   background: rgba(255, 215, 0, 0.2);
   box-shadow: 0 0 20px rgba(255, 215, 0, 0.6);
-  transform: translateX(-50%) scale(1.2);
+  transform: translateX(-50%) scale(1.1);
 }
 
-/* NEW: Multiplier labels container */
+.slot-count {
+  font-size: 10px;
+  font-weight: bold;
+  color: #000;
+  background: #48D1CC;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* Multiplier labels */
 .plinko-multiplier-labels {
   position: absolute;
   width: 100%;
@@ -115,7 +191,6 @@
   pointer-events: none;
 }
 
-/* NEW: Individual multiplier label */
 .plinko-multiplier-label {
   position: absolute;
   font-family: 'JetBrains Mono', monospace;
@@ -128,26 +203,23 @@
   transition: all 0.3s ease;
 }
 
-/* NEW: Win multiplier styling */
 .plinko-multiplier-label.win-multiplier {
   color: #22C55E;
   background: rgba(34, 197, 94, 0.1);
 }
 
-/* NEW: Loss multiplier styling */
 .plinko-multiplier-label.lose-multiplier {
   color: #EF4444;
   background: rgba(239, 68, 68, 0.1);
 }
 
-/* NEW: Highlighted state */
 .plinko-multiplier-label.highlighted {
   transform: translateX(-50%) scale(1.15);
-  background: rgba(57, 255, 20, 0.2); /* Lime green highlight */
+  background: rgba(57, 255, 20, 0.2);
   box-shadow: 0 0 10px rgba(57, 255, 20, 0.4);
 }
 
-/* Responsive multiplier sizing */
+/* Responsive */
 @media (max-width: 900px) {
   .plinko-board {
     width: 600px;
@@ -165,6 +237,11 @@
 
   .plinko-multiplier-label {
     font-size: 10px;
+  }
+
+  .bucket-body {
+    width: 60px;
+    height: 35px;
   }
 }
 
@@ -186,5 +263,15 @@
   .plinko-multiplier-label {
     font-size: 8px;
     padding: 1px 3px;
+  }
+
+  .bucket-body {
+    width: 50px;
+    height: 30px;
+  }
+
+  .bucket-ball {
+    width: 8px;
+    height: 8px;
   }
 }

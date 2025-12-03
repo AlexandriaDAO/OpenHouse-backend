@@ -23,7 +23,7 @@ export interface _SERVICE {
   >,
   'get_expected_value' : ActorMethod<[], number>,
   'get_formula' : ActorMethod<[], string>,
-  'get_multipliers' : ActorMethod<[], Array<number>>,
+  'get_multipliers_bp' : ActorMethod<[], BigUint64Array | bigint[]>,
   'greet' : ActorMethod<[string], string>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;

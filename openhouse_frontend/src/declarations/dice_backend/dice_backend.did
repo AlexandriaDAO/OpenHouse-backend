@@ -90,6 +90,7 @@ type HealthCheck = record {
   total_abandoned_amount: nat64;
   unique_users: nat64;
   unique_lps: nat64;
+  is_solvent: bool;
 };
 
 type PendingWithdrawalInfo = record {
@@ -156,9 +157,12 @@ service : {
   // Admin endpoints
   admin_health_check: () -> (variant { Ok: HealthCheck; Err: text });
   admin_get_all_pending_withdrawals: () -> (variant { Ok: vec PendingWithdrawalInfo; Err: text }) query;
-  admin_get_orphaned_funds_report: () -> (variant { Ok: OrphanedFundsReport; Err: text }) query;
+  admin_get_orphaned_funds_report: (opt nat64) -> (variant { Ok: OrphanedFundsReport; Err: text }) query;
+  admin_get_orphaned_funds_report_full: () -> (variant { Ok: OrphanedFundsReport; Err: text }) query;
   admin_get_all_balances: (nat64, nat64) -> (variant { Ok: vec UserBalance; Err: text }) query;
+  admin_get_all_balances_complete: () -> (variant { Ok: vec UserBalance; Err: text }) query;
   admin_get_all_lp_positions: (nat64, nat64) -> (variant { Ok: vec LPPositionInfo; Err: text }) query;
+  admin_get_all_lp_positions_complete: () -> (variant { Ok: vec LPPositionInfo; Err: text }) query;
 
   // Liquidity Pool Management
   // Deposit liquidity into the pool

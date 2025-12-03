@@ -1,22 +1,35 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import './PlinkoBoard.css';
 
 interface PlinkoBoardProps {
   rows: number;
-  paths: boolean[][] | null; // Array of paths for multi-ball
+  paths: boolean[][] | null;
   isDropping: boolean;
   onAnimationComplete?: () => void;
-  finalPositions?: number[]; // Array of final positions to highlight
-  multipliers?: number[]; // NEW: Pass multipliers to board
+  finalPositions?: number[];
+  multipliers?: number[];
+  ballCount: number;
+  onDrop: () => void;
+  disabled: boolean;
 }
 
-interface BallPosition {
+interface BallState {
   id: number;
-  row: number;
-  column: number;
+  col: number;       // Grid column (for horizontal position)
+  row: number;       // Current row in grid
+  yOffset: number;   // Pixel offset within current row (for smooth falling)
+  velocityY: number;
+  currentStep: number;
   finished: boolean;
-  justMoved: boolean; // NEW: Track position changes for bounce animation
+  path: boolean[];
 }
+
+// Physics constants
+const GRAVITY = 0.6;
+const BOUNCE_DAMPING = 0.5;
+const PEG_SPACING_X = 40;
+const PEG_SPACING_Y = 50;
+const DROP_ZONE_HEIGHT = 60;
 
 export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
   rows,
@@ -25,106 +38,137 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
   onAnimationComplete,
   finalPositions,
   multipliers,
+  ballCount,
+  onDrop,
+  disabled,
 }) => {
-  const [activeBalls, setActiveBalls] = useState<BallPosition[]>([]);
-  const [animationKey, setAnimationKey] = useState(0);
+  const [balls, setBalls] = useState<BallState[]>([]);
+  const [bucketTilt, setBucketTilt] = useState(0);
+  const animationRef = useRef<number | null>(null);
 
-  // Reset/Start animation when paths change
-  useEffect(() => {
-    if (paths && paths.length > 0 && isDropping) {
-      setAnimationKey(prev => prev + 1);
-    } else if (!isDropping) {
-      setActiveBalls([]);
-    }
-  }, [paths, isDropping]);
-
-  // Multi-ball animation effect
+  // Initialize balls when paths change
   useEffect(() => {
     if (!paths || paths.length === 0 || !isDropping) {
+      if (!isDropping) {
+        setBalls([]);
+        setBucketTilt(0);
+      }
       return;
     }
 
-    const totalBalls = paths.length;
-    let completedBalls = 0;
-    const timeouts: number[] = [];
+    // Tilt the bucket
+    setBucketTilt(45);
 
-    // Initialize balls
-    const initialBalls = paths.map((_, index) => ({
+    // Create initial ball states with staggered positions
+    const initialBalls: BallState[] = paths.map((path, index) => ({
       id: index,
-      row: 0,
-      column: 0,
+      col: 0,
+      row: -1,  // Start above the board
+      yOffset: -DROP_ZONE_HEIGHT - (index * 12), // Stagger start heights
+      velocityY: 0,
+      currentStep: 0,
       finished: false,
-      justMoved: false,
+      path,
     }));
-    setActiveBalls(initialBalls);
 
-    // Animate each ball
-    paths.forEach((path, index) => {
-      let currentRow = 0;
-      let currentColumn = 0;
+    // Reset bucket after balls drop
+    setTimeout(() => setBucketTilt(0), 400);
 
-      // Add slight random delay to start for natural feel (0-200ms)
-      const startDelay = Math.random() * 200;
+    setBalls(initialBalls);
+  }, [paths, isDropping]);
 
-      const animateStep = () => {
-        if (currentRow < path.length) {
-          currentRow++;
-          if (path[currentRow - 1]) {
-            currentColumn++;
-          }
+  // Physics animation loop
+  useEffect(() => {
+    if (!isDropping || balls.length === 0) {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+      return;
+    }
 
-          // Update this specific ball's position and set justMoved
-          setActiveBalls(prev => prev.map(ball => 
-            ball.id === index 
-              ? { ...ball, row: currentRow, column: currentColumn, justMoved: true } 
-              : ball
-          ));
+    let lastTime = performance.now();
 
-          // Clear "justMoved" flag after animation duration
-          setTimeout(() => {
-            setActiveBalls(prev => prev.map(ball =>
-              ball.id === index ? { ...ball, justMoved: false } : ball
-            ));
-          }, 150);
+    const animate = (currentTime: number) => {
+      const deltaTime = Math.min((currentTime - lastTime) / 16.67, 2);
+      lastTime = currentTime;
 
-          // Schedule next step
-          const stepDelay = 150 + (Math.random() * 20); // Slight speed variation
-          const timeoutId = window.setTimeout(animateStep, stepDelay);
-          timeouts.push(timeoutId);
-        } else {
-          // Mark this ball as finished
-          setActiveBalls(prev => prev.map(ball => 
-            ball.id === index 
-              ? { ...ball, finished: true, justMoved: false } 
-              : ball
-          ));
+      setBalls(prevBalls => {
+        let allFinished = true;
+        const updatedBalls = prevBalls.map(ball => {
+          if (ball.finished) return ball;
 
-          completedBalls++;
-          
-          // Check if all balls are done
-          if (completedBalls === totalBalls) {
-            const completeTimeout = window.setTimeout(() => {
-              if (onAnimationComplete) {
-                onAnimationComplete();
+          allFinished = false;
+          let { col, row, yOffset, velocityY, currentStep, path } = ball;
+
+          // Apply gravity
+          velocityY += GRAVITY * deltaTime;
+          yOffset += velocityY * deltaTime;
+
+          // Calculate target Y for current row
+          const targetY = 0; // Target is always the peg position (yOffset = 0)
+
+          // Check if ball reached current peg level
+          if (yOffset >= targetY && row >= 0) {
+            // Bounce
+            velocityY = -velocityY * BOUNCE_DAMPING;
+            yOffset = targetY;
+
+            // If velocity small enough, advance to next peg
+            if (Math.abs(velocityY) < 1.5) {
+              if (currentStep < path.length) {
+                // Move to next row
+                row++;
+                currentStep++;
+
+                // Update column based on path
+                if (path[currentStep - 1]) {
+                  col++;
+                }
+
+                yOffset = -PEG_SPACING_Y * 0.8; // Start above next peg
+                velocityY = 2;
+              } else {
+                // Ball finished
+                return { ...ball, col, row, yOffset: 0, finished: true };
               }
-            }, 500);
-            timeouts.push(completeTimeout);
+            }
+          } else if (row < 0 && yOffset >= -PEG_SPACING_Y * 0.3) {
+            // Ball entering the board
+            row = 0;
+            yOffset = -PEG_SPACING_Y * 0.8;
+            velocityY = 2;
           }
+
+          return { ...ball, col, row, yOffset, velocityY, currentStep };
+        });
+
+        if (allFinished) {
+          setTimeout(() => {
+            if (onAnimationComplete) {
+              onAnimationComplete();
+            }
+          }, 300);
+          return updatedBalls;
         }
-      };
 
-      // Start this ball's animation
-      const startTimeout = window.setTimeout(animateStep, 100 + startDelay);
-      timeouts.push(startTimeout);
-    });
+        return updatedBalls;
+      });
 
-    // Cleanup
-    return () => {
-      timeouts.forEach(clearTimeout);
+      animationRef.current = requestAnimationFrame(animate);
     };
-  }, [animationKey, paths, isDropping, onAnimationComplete]);
 
-  // Generate pegs for the board
+    animationRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+    };
+  }, [isDropping, balls.length, onAnimationComplete]);
+
+  // Generate pegs
   const renderPegs = () => {
     const pegs = [];
     for (let row = 0; row <= rows; row++) {
@@ -135,8 +179,8 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
             key={`peg-${row}-${col}`}
             className="plinko-peg"
             style={{
-              left: `calc(50% + ${(col - row / 2) * 40}px)`,
-              top: `${row * 50 + 20}px`,
+              left: `calc(50% + ${(col - row / 2) * PEG_SPACING_X}px)`,
+              top: `${DROP_ZONE_HEIGHT + row * PEG_SPACING_Y}px`,
             }}
           />
         );
@@ -145,35 +189,69 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
     return pegs;
   };
 
-  // Calculate ball position in pixels
-  const getBallStyle = (position: BallPosition): React.CSSProperties => {
+  // Get ball style using same positioning as pegs
+  const getBallStyle = (ball: BallState): React.CSSProperties => {
+    const xOffset = (ball.col - ball.row / 2) * PEG_SPACING_X;
+    const yPos = ball.row < 0
+      ? ball.yOffset
+      : DROP_ZONE_HEIGHT + ball.row * PEG_SPACING_Y + ball.yOffset;
+
     return {
-      left: `calc(50% + ${(position.column - position.row / 2) * 40}px)`,
-      top: `${position.row * 50}px`,
-      // REMOVED: transition: 'all 0.15s ease-in-out' - handled by class now
-      // Add slight transparency for multi-ball to see overlaps
-      opacity: 0.9,
-      zIndex: 10 + position.id, // Ensure some stacking order
+      left: `calc(50% + ${xOffset}px)`,
+      top: `${yPos}px`,
+      opacity: 0.95,
+      zIndex: 10 + ball.id,
     };
   };
 
-  // Calculate board height based on rows
-  const boardHeight = rows * 50 + 100 + 40; // +40 for multiplier labels
+  const handleBucketClick = () => {
+    if (disabled || isDropping) return;
+    onDrop();
+  };
+
+  const boardHeight = DROP_ZONE_HEIGHT + rows * PEG_SPACING_Y + 120;
 
   return (
     <div className="plinko-board-container">
-      <div
-        className="plinko-board"
-        style={{ height: `${boardHeight}px` }}
-      >
-        {/* Render all pegs */}
+      <div className="plinko-board" style={{ height: `${boardHeight}px` }}>
+
+        {/* Tipping Bucket */}
+        <div
+          className={`plinko-bucket ${disabled || isDropping ? 'bucket-disabled' : ''}`}
+          style={{ transform: `rotate(${bucketTilt}deg)` }}
+          onClick={handleBucketClick}
+        >
+          <div className="bucket-body">
+            {/* Balls in bucket */}
+            <div className="bucket-balls">
+              {Array.from({ length: Math.min(ballCount, 10) }).map((_, i) => (
+                <div
+                  key={i}
+                  className="bucket-ball"
+                  style={{
+                    left: `${10 + (i % 5) * 12}px`,
+                    bottom: `${4 + Math.floor(i / 5) * 10}px`,
+                  }}
+                />
+              ))}
+            </div>
+            {ballCount > 10 && (
+              <span className="bucket-count">+{ballCount - 10}</span>
+            )}
+          </div>
+          <div className="bucket-label">
+            {isDropping ? '...' : ballCount > 1 ? `×${ballCount}` : 'TAP'}
+          </div>
+        </div>
+
+        {/* Pegs */}
         {renderPegs()}
 
-        {/* Render all active balls */}
-        {activeBalls.map(ball => (
+        {/* Animated balls */}
+        {balls.map(ball => (
           <div
             key={`ball-${ball.id}`}
-            className={`plinko-ball ${ball.justMoved ? 'ball-bouncing' : ''}`}
+            className={`plinko-ball ${ball.finished ? 'plinko-ball-complete' : ''}`}
             style={getBallStyle(ball)}
           />
         ))}
@@ -181,40 +259,31 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
         {/* Landing slots */}
         <div
           className="plinko-slots"
-          style={{ top: `${rows * 50 + 50}px` }}
+          style={{ top: `${DROP_ZONE_HEIGHT + rows * PEG_SPACING_Y + 30}px` }}
         >
           {Array.from({ length: rows + 1 }, (_, i) => (
             <div
               key={`slot-${i}`}
               className={`plinko-slot ${
-                !isDropping && finalPositions?.includes(i) 
-                  ? 'plinko-slot-active' 
-                  : ''
+                !isDropping && finalPositions?.includes(i) ? 'plinko-slot-active' : ''
               }`}
               style={{
-                left: `calc(50% + ${(i - rows / 2) * 40}px)`,
+                left: `calc(50% + ${(i - rows / 2) * PEG_SPACING_X}px)`,
               }}
             >
-               {/* Show count if multiple balls landed here */}
-               {!isDropping && finalPositions && (
-                 (() => {
-                   const count = finalPositions.filter(p => p === i).length;
-                   return count > 0 ? (
-                     <span className="text-[10px] font-bold text-pure-black bg-dfinity-turquoise rounded-full w-5 h-5 flex items-center justify-center absolute -top-3 left-1/2 transform -translate-x-1/2">
-                       {count}
-                     </span>
-                   ) : null;
-                 })()
-               )}
+              {!isDropping && finalPositions && (() => {
+                const count = finalPositions.filter(p => p === i).length;
+                return count > 1 ? <span className="slot-count">{count}</span> : null;
+              })()}
             </div>
           ))}
         </div>
 
-        {/* NEW: Multiplier labels below slots */}
+        {/* Multiplier labels */}
         {multipliers && multipliers.length > 0 && (
           <div
             className="plinko-multiplier-labels"
-            style={{ top: `${rows * 50 + 90}px` }}
+            style={{ top: `${DROP_ZONE_HEIGHT + rows * PEG_SPACING_Y + 70}px` }}
           >
             {multipliers.map((mult, index) => {
               const isHighlighted = !isDropping && finalPositions?.includes(index);
@@ -223,13 +292,9 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
               return (
                 <div
                   key={`mult-${index}`}
-                  className={`
-                    plinko-multiplier-label
-                    ${isWin ? 'win-multiplier' : 'lose-multiplier'}
-                    ${isHighlighted ? 'highlighted' : ''}
-                  `}
+                  className={`plinko-multiplier-label ${isWin ? 'win-multiplier' : 'lose-multiplier'} ${isHighlighted ? 'highlighted' : ''}`}
                   style={{
-                    left: `calc(50% + ${(index - rows / 2) * 40}px)`,
+                    left: `calc(50% + ${(index - rows / 2) * PEG_SPACING_X}px)`,
                   }}
                 >
                   {mult.toFixed(2)}x
