@@ -46,13 +46,28 @@ pub fn calculate_max_bet() -> u64 {
         return 0; 
     }
     // max_bet = max_allowed / max_multiplier (6.52x)
-    // Multiply first to maintain precision
-    (max_allowed * MULTIPLIER_SCALE / MAX_MULTIPLIER_BP)
+    // Multiply first to maintain precision, but use u128 to prevent overflow during calc
+    let numerator = (max_allowed as u128) * (MULTIPLIER_SCALE as u128);
+    let max_bet = numerator / (MAX_MULTIPLIER_BP as u128);
+    
+    max_bet as u64
 }
 
-/// Calculate payout from bet and multiplier
-fn calculate_payout(bet_amount: u64, multiplier_bp: u64) -> u64 {
-    (bet_amount * multiplier_bp / MULTIPLIER_SCALE)
+/// Calculate payout from bet and multiplier using safe math
+fn calculate_payout(bet_amount: u64, multiplier_bp: u64) -> Result<u64, String> {
+    // (bet * multiplier_bp) / SCALE
+    let scaled = (bet_amount as u128)
+        .checked_mul(multiplier_bp as u128)
+        .ok_or("Payout calculation overflow")?;
+        
+    let payout = scaled / (MULTIPLIER_SCALE as u128);
+    
+    // Check if result fits in u64
+    if payout > u64::MAX as u128 {
+        return Err("Payout exceeds u64 limit".to_string());
+    }
+    
+    Ok(payout as u64)
 }
 
 // =============================================================================
@@ -72,14 +87,13 @@ pub async fn play_plinko(bet_amount: u64, caller: Principal) -> Result<PlinkoGam
     }
 
     // 3. Check max payout against house limit
-    let max_potential_payout = calculate_payout(bet_amount, MAX_MULTIPLIER_BP);
+    let max_potential_payout = calculate_payout(bet_amount, MAX_MULTIPLIER_BP)?;
     let max_allowed = accounting::get_max_allowed_payout();
     if max_potential_payout > max_allowed {
         return Err("Invalid bet: exceeds house limit".to_string());
     }
 
     // 4. Get VRF randomness BEFORE deducting balance (fail safe)
-    // This prevents debiting funds if randomness generation fails
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?;
         
@@ -89,36 +103,41 @@ pub async fn play_plinko(bet_amount: u64, caller: Principal) -> Result<PlinkoGam
     let random_byte = random_bytes[0];
 
     // 5. Deduct bet from balance
-    let balance_after_bet = user_balance - bet_amount;
+    let balance_after_bet = user_balance.checked_sub(bet_amount)
+        .ok_or("Balance underflow")?;
     accounting::update_balance(caller, balance_after_bet)?;
 
     // 6. Record volume for statistics
     crate::defi_accounting::record_bet_volume(bet_amount);
 
     // 7. Generate path and calculate position
-    // 8 independent coin flips
     let path: Vec<bool> = (0..ROWS).map(|i| (random_byte >> i) & 1 == 1).collect();
     let final_position = path.iter().filter(|&&d| d).count() as u8;
 
     // 8. Calculate multiplier and payout
     let multiplier_bp = calculate_multiplier_bp(final_position)?;
-    let payout = calculate_payout(bet_amount, multiplier_bp);
+    let payout = calculate_payout(bet_amount, multiplier_bp)?;
     let multiplier = multiplier_bp as f64 / MULTIPLIER_SCALE as f64;
     let is_win = multiplier_bp >= MULTIPLIER_SCALE;
-    let profit = payout as i64 - bet_amount as i64;
+    let profit = (payout as i64) - (bet_amount as i64);
 
     // 9. Credit payout to user
-    // Re-fetch balance to ensure atomicity with other potential operations
     let current_balance = accounting::get_balance(caller);
-    let new_balance = current_balance + payout;
+    let new_balance = current_balance.checked_add(payout)
+        .ok_or("Balance overflow when adding winnings")?;
     accounting::update_balance(caller, new_balance)?;
 
     // 10. Settle with pool
     // This updates the LP shares/values based on net profit/loss of the house
     if let Err(e) = liquidity_pool::settle_bet(bet_amount, payout) {
         // CRITICAL: Rollback if pool settlement fails
-        // Refund the bet amount to the user
-        accounting::update_balance(caller, current_balance + bet_amount)?;
+        // Refund the bet amount to the user (current_balance is balance BEFORE payout)
+        // refund = (original - bet) + bet = original
+        let refund_balance = current_balance.checked_add(bet_amount)
+            .ok_or("Refund calculation overflow")?;
+        accounting::update_balance(caller, refund_balance)?;
+        
+        ic_cdk::println!("CRITICAL: Payout failure. Refunded {} to {}", bet_amount, caller);
         return Err(format!("House settlement failed. Bet refunded. Error: {}", e));
     }
 
@@ -148,7 +167,8 @@ pub async fn play_multi_plinko(ball_count: u8, bet_per_ball: u64, caller: Princi
         return Err("Invalid bet: minimum is 0.01 USDT per ball".to_string());
     }
 
-    let total_bet = bet_per_ball * ball_count as u64;
+    let total_bet = bet_per_ball.checked_mul(ball_count as u64)
+        .ok_or("Total bet calculation overflow")?;
 
     // 2. Check user balance
     let user_balance = accounting::get_balance(caller);
@@ -157,8 +177,10 @@ pub async fn play_multi_plinko(ball_count: u8, bet_per_ball: u64, caller: Princi
     }
 
     // 3. Check max payout against house limit
-    // Assume worst case: all balls land in max multiplier slot
-    let max_potential_payout = calculate_payout(total_bet, MAX_MULTIPLIER_BP);
+    let max_potential_payout_per_ball = calculate_payout(bet_per_ball, MAX_MULTIPLIER_BP)?;
+    let max_potential_payout = max_potential_payout_per_ball.checked_mul(ball_count as u64)
+        .ok_or("Max payout calculation overflow")?;
+        
     let max_allowed = accounting::get_max_allowed_payout();
     if max_potential_payout > max_allowed {
         return Err("Invalid bet: exceeds house limit for total payout".to_string());
@@ -173,7 +195,8 @@ pub async fn play_multi_plinko(ball_count: u8, bet_per_ball: u64, caller: Princi
     }
 
     // 5. Deduct total bet
-    let balance_after_bet = user_balance - total_bet;
+    let balance_after_bet = user_balance.checked_sub(total_bet)
+        .ok_or("Balance underflow")?;
     accounting::update_balance(caller, balance_after_bet)?;
 
     // 6. Record volume
@@ -192,12 +215,13 @@ pub async fn play_multi_plinko(ball_count: u8, bet_per_ball: u64, caller: Princi
 
         // Calc result
         let multiplier_bp = calculate_multiplier_bp(final_position)?;
-        let payout = calculate_payout(bet_per_ball, multiplier_bp);
+        let payout = calculate_payout(bet_per_ball, multiplier_bp)?;
         let multiplier = multiplier_bp as f64 / MULTIPLIER_SCALE as f64;
         let is_win = multiplier_bp >= MULTIPLIER_SCALE;
-        let profit = payout as i64 - bet_per_ball as i64;
+        let profit = (payout as i64) - (bet_per_ball as i64);
 
-        total_payout += payout;
+        total_payout = total_payout.checked_add(payout)
+            .ok_or("Total payout overflow")?;
 
         results.push(PlinkoGameResult {
             path,
@@ -213,18 +237,23 @@ pub async fn play_multi_plinko(ball_count: u8, bet_per_ball: u64, caller: Princi
 
     // 8. Credit total payout
     let current_balance = accounting::get_balance(caller);
-    let new_balance = current_balance + total_payout;
+    let new_balance = current_balance.checked_add(total_payout)
+        .ok_or("Balance overflow when adding winnings")?;
     accounting::update_balance(caller, new_balance)?;
 
     // 9. Settle with pool
     if let Err(e) = liquidity_pool::settle_bet(total_bet, total_payout) {
         // Rollback on failure
-        accounting::update_balance(caller, current_balance + total_bet)?;
+        let refund_balance = current_balance.checked_add(total_bet)
+            .ok_or("Refund calculation overflow")?;
+        accounting::update_balance(caller, refund_balance)?;
+        
+        ic_cdk::println!("CRITICAL: Multi-ball payout failure. Refunded {} to {}", total_bet, caller);
         return Err(format!("House settlement failed. Bet refunded. Error: {}", e));
     }
 
     // 10. Aggregate results
-    let net_profit = total_payout as i64 - total_bet as i64;
+    let net_profit = (total_payout as i64) - (total_bet as i64);
     let sum_multipliers: f64 = results.iter().map(|r| r.multiplier).sum();
     let average_multiplier = sum_multipliers / (ball_count as f64);
 
@@ -245,8 +274,27 @@ pub fn calculate_max_bet_per_ball(ball_count: u8) -> Result<u64, String> {
     if max_allowed == 0 { return Ok(0); }
 
     // Max bet = Max Allowed Payout / (Balls * Max Multiplier)
-    // We do this carefully to avoid precision loss
-    let total_max_bet = max_allowed * MULTIPLIER_SCALE / MAX_MULTIPLIER_BP;
+    // Use u128 for calculation
+    let max_allowed_u128 = max_allowed as u128;
+    let balls_u128 = ball_count as u128;
+    let scale_u128 = MULTIPLIER_SCALE as u128;
+    let max_mult_u128 = MAX_MULTIPLIER_BP as u128;
+
+    let numerator = max_allowed_u128.checked_mul(scale_u128)
+        .ok_or("Overflow in max bet calculation")?;
     
-    Ok(total_max_bet / ball_count as u64)
+    let denominator = balls_u128.checked_mul(max_mult_u128)
+        .ok_or("Overflow in denominator")?;
+        
+    if denominator == 0 {
+        return Ok(0);
+    }
+
+    let max_bet = numerator / denominator;
+    
+    if max_bet > u64::MAX as u128 {
+        return Ok(u64::MAX);
+    }
+    
+    Ok(max_bet as u64)
 }
