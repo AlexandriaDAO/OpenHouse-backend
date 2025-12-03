@@ -80,7 +80,15 @@ fn is_canister_solvent() -> bool {
     let total_deposits = defi_accounting::accounting::calculate_total_deposits_internal();
     let canister_balance = defi_accounting::accounting::get_cached_canister_balance_internal();
 
-    let obligations = pool_reserve.saturating_add(total_deposits);
+    // Use checked_add to detect impossible overflow scenarios
+    let obligations = match pool_reserve.checked_add(total_deposits) {
+        Some(o) => o,
+        None => {
+            ic_cdk::println!("CRITICAL: Obligations overflow u64::MAX");
+            return false;  // Treat as insolvent if obligations overflow
+        }
+    };
+    
     canister_balance >= obligations
 }
 
