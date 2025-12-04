@@ -23,6 +23,7 @@ const games: GameInfo[] = [
     houseEdge: 1,
     path: '/plinko',
     icon: '🎯',
+    comingSoon: true,
   },
   {
     id: 'crash',

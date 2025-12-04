@@ -63,73 +63,116 @@
 /* ===== BUCKET WITH TRAPDOOR ===== */
 .plinko-bucket {
   position: absolute;
-  top: 5px;
+  top: -10px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 20;
   display: flex;
   flex-direction: column;
   align-items: center;
+  cursor: default;
+  user-select: none;
+  outline: none;
 }
 
-.bucket-container {
+.plinko-bucket.clickable {
+  cursor: pointer;
+}
+
+.plinko-bucket.clickable:hover .bucket-body {
+  border-color: #d4a817;
+  box-shadow: 0 0 20px rgba(212, 168, 23, 0.3), inset 0 4px 20px rgba(0, 0, 0, 0.8);
+}
+
+.plinko-bucket.clickable:hover .bucket-label {
+  color: #d4a817;
+}
+
+.plinko-bucket.clickable:active .bucket-body {
+  transform: scale(0.98);
+}
+
+.plinko-bucket.active .bucket-body {
+  border-color: #d4a817;
+}
+
+/* Main bucket body */
+.bucket-body {
   position: relative;
-  width: 160px;
-  height: 90px;
-  background: #1a1a1a;
-  border: 2px solid #444;
+  width: 240px;
+  height: 120px;
+  background: linear-gradient(180deg, #1a1a1a 0%, #0d0d0d 100%);
+  border: 3px solid #3a3a3a;
   border-bottom: none;
-  border-radius: 8px 8px 0 0;
-  overflow: visible;
+  border-radius: 12px 12px 0 0;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  box-shadow: inset 0 4px 20px rgba(0, 0, 0, 0.8), 0 -2px 10px rgba(0, 0, 0, 0.5);
+}
+
+/* Inner shadow overlay for depth */
+.bucket-inner-shadow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 5;
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.6);
+  border-radius: 9px 9px 0 0;
+}
+
+/* Rim at top of bucket */
+.bucket-body::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  right: -4px;
+  height: 12px;
+  background: linear-gradient(180deg, #4a4a4a 0%, #2a2a2a 50%, #1a1a1a 100%);
+  border-radius: 14px 14px 0 0;
+  border: 2px solid #4a4a4a;
+  border-bottom: none;
+  z-index: 10;
 }
 
 /* Physics canvas for bucket animation */
 .bucket-physics-canvas {
   position: absolute;
-  top: 8px;
-  left: 8px;
-  width: 144px;
-  height: 70px;
+  top: 10px;
+  left: 10px;
+  width: 220px;
+  height: 100px;
   pointer-events: none;
-}
-
-/* Rim at top */
-.bucket-container::before {
-  content: '';
-  position: absolute;
-  top: -3px;
-  left: -3px;
-  right: -3px;
-  height: 8px;
-  background: linear-gradient(to bottom, #555, #333);
-  border-radius: 10px 10px 0 0;
-  border: 1px solid #555;
-  border-bottom: none;
+  z-index: 2;
 }
 
 /* Ball reservoir - where balls stack up (fallback when no physics) */
 .bucket-balls-reservoir {
   position: absolute;
-  bottom: 0;
-  left: 4px;
-  right: 4px;
-  top: 10px;
+  bottom: 10px;
+  left: 10px;
+  right: 10px;
+  top: 15px;
   display: flex;
   flex-wrap: wrap;
   align-content: flex-end;
   justify-content: center;
-  gap: 3px;
-  padding: 6px;
+  gap: 4px;
+  padding: 8px;
   overflow: hidden;
+  z-index: 1;
 }
 
 .bucket-ball-item {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   background: radial-gradient(circle at 30% 30%, #ffd54f 0%, #d4a817 50%, #b8860b 100%);
   border-radius: 50%;
   flex-shrink: 0;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4), inset 0 1px 2px rgba(255,255,255,0.2);
 }
 
 /* Gentle wobble when waiting for backend */
@@ -142,84 +185,109 @@
   animation: ball-wobble 0.4s ease-in-out infinite;
 }
 
-/* Trapdoor mechanism - forms the bottom of the bucket */
-.bucket-door {
+/* Bucket label */
+.bucket-label {
   position: absolute;
-  bottom: -2px;
-  left: -2px;
-  right: -2px;
-  height: 12px;
-  display: flex;
-  perspective: 200px;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: #666;
+  z-index: 20;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  transition: color 0.2s ease;
+  white-space: nowrap;
 }
 
-.door-left,
-.door-right {
+/* ===== TRAPDOOR MECHANISM ===== */
+.bucket-trapdoor {
+  display: flex;
+  width: 240px;
+  height: 18px;
+  perspective: 800px;
+  position: relative;
+}
+
+.trapdoor-left,
+.trapdoor-right {
   width: 50%;
   height: 100%;
-  background: linear-gradient(to bottom, #333, #222);
-  border: 2px solid #444;
-  border-top: 1px solid #555;
-  transition: transform 0.4s ease-out;
-  backface-visibility: hidden;
+  background: linear-gradient(180deg, #2a2a2a 0%, #1a1a1a 50%, #0d0d0d 100%);
+  border: 3px solid #3a3a3a;
+  border-top: 1px solid #2a2a2a;
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+  transform-style: preserve-3d;
 }
 
-.door-left {
-  border-radius: 0 0 0 6px;
-  border-right: 1px solid #444;
-  transform-origin: top left;
+.trapdoor-left {
+  border-radius: 0 0 0 10px;
+  border-right: 1px solid #2a2a2a;
+  transform-origin: left center;
 }
 
-.door-right {
-  border-radius: 0 0 6px 0;
-  border-left: 1px solid #444;
-  transform-origin: top right;
+.trapdoor-right {
+  border-radius: 0 0 10px 0;
+  border-left: 1px solid #2a2a2a;
+  transform-origin: right center;
 }
 
-/* Trapdoor open - swing down and out */
-.bucket-door.open .door-left {
-  transform: rotateX(-100deg) translateY(2px);
-}
-
-.bucket-door.open .door-right {
-  transform: rotateX(-100deg) translateY(2px);
-}
-
-/* Drop button integrated below bucket */
-.bucket-drop-button {
-  margin-top: 12px;
-  padding: 10px 24px;
-  background: #1a1a1a;
-  border: 1px solid #d4a817;
-  border-radius: 8px;
-  color: #d4a817;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.bucket-drop-button:hover:not(:disabled) {
-  background: #d4a817;
-  color: #0a0a0a;
-}
-
-.bucket-drop-button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* Ball count badge */
-.bucket-ball-count {
+/* Hinge details - positioned on outer edges */
+.trapdoor-hinge {
   position: absolute;
-  bottom: 22px;
-  right: 6px;
-  font-size: 10px;
-  font-weight: 600;
-  color: #d4a817;
-  font-family: 'JetBrains Mono', monospace;
+  top: 2px;
+  width: 8px;
+  height: 14px;
+  background: linear-gradient(90deg, #666 0%, #444 50%, #333 100%);
+  border-radius: 2px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.trapdoor-hinge-left {
+  left: -2px;
+}
+
+.trapdoor-hinge-right {
+  right: -2px;
+}
+
+/* Trapdoor open animation - swing outward like doors */
+.bucket-trapdoor.open .trapdoor-left {
+  transform: rotateY(-95deg);
+  box-shadow: -5px 4px 15px rgba(0, 0, 0, 0.6);
+}
+
+.bucket-trapdoor.open .trapdoor-right {
+  transform: rotateY(95deg);
+  box-shadow: 5px 4px 15px rgba(0, 0, 0, 0.6);
+}
+
+/* Visual funnel guide */
+.bucket-funnel {
+  width: 0;
+  height: 0;
+  border-left: 40px solid transparent;
+  border-right: 40px solid transparent;
+  border-top: 30px solid rgba(30, 30, 30, 0.5);
+  margin-top: -2px;
+  position: relative;
+}
+
+.bucket-funnel::after {
+  content: '';
+  position: absolute;
+  top: -30px;
+  left: -42px;
+  width: 0;
+  height: 0;
+  border-left: 42px solid transparent;
+  border-right: 42px solid transparent;
+  border-top: 32px solid rgba(60, 60, 60, 0.3);
+  z-index: -1;
 }
 
 /* ===== LANDING SLOTS ===== */
@@ -308,9 +376,18 @@
     width: 800px;
   }
 
-  .bucket-container {
-    width: 100px;
-    height: 70px;
+  .bucket-body {
+    width: 200px;
+    height: 100px;
+  }
+
+  .bucket-trapdoor {
+    width: 200px;
+  }
+
+  .bucket-physics-canvas {
+    width: 180px;
+    height: 80px;
   }
 }
 
@@ -319,9 +396,23 @@
     width: 600px;
   }
 
-  .bucket-container {
-    width: 80px;
-    height: 60px;
+  .bucket-body {
+    width: 160px;
+    height: 85px;
+  }
+
+  .bucket-trapdoor {
+    width: 160px;
+    height: 14px;
+  }
+
+  .bucket-physics-canvas {
+    width: 140px;
+    height: 65px;
+  }
+
+  .bucket-label {
+    font-size: 11px;
   }
 
   .plinko-multiplier-label {
@@ -333,6 +424,12 @@
     width: 40px;
     height: 40px;
   }
+
+  .bucket-funnel {
+    border-left: 30px solid transparent;
+    border-right: 30px solid transparent;
+    border-top: 25px solid rgba(30, 30, 30, 0.5);
+  }
 }
 
 @media (max-width: 650px) {
@@ -341,18 +438,39 @@
     overflow-x: auto;
   }
 
-  .bucket-container {
-    width: 70px;
+  .bucket-body {
+    width: 130px;
+    height: 70px;
+  }
+
+  .bucket-trapdoor {
+    width: 130px;
+    height: 12px;
+  }
+
+  .bucket-physics-canvas {
+    width: 110px;
     height: 50px;
   }
 
   .bucket-ball-item {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
+  }
+
+  .bucket-label {
+    font-size: 10px;
+    letter-spacing: 0.1em;
   }
 
   .plinko-multiplier-label {
     font-size: 8px;
+  }
+
+  .bucket-funnel {
+    border-left: 25px solid transparent;
+    border-right: 25px solid transparent;
+    border-top: 20px solid rgba(30, 30, 30, 0.5);
   }
 }
 
@@ -360,8 +478,8 @@
 @media (prefers-reduced-motion: reduce) {
   .bucket-ball-item,
   .bucket-ball-item.waiting,
-  .door-left,
-  .door-right {
+  .trapdoor-left,
+  .trapdoor-right {
     animation: none;
     transition: none;
   }

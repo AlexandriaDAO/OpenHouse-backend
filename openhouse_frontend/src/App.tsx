@@ -5,6 +5,7 @@ import { ActorProvider } from './providers/ActorProvider';
 import { BalanceProvider } from './providers/BalanceProvider';
 import { GameBalanceProvider } from './providers/GameBalanceProvider';
 import { Layout } from './components/Layout';
+import { AdminRoute } from './components/AdminRoute';
 import { Home } from './pages/Home';
 import { DiceLayout, DiceGame, DiceLiquidity } from './pages/dice';
 import { PlinkoLayout, PlinkoGame, PlinkoLiquidity } from './pages/plinko';
@@ -30,14 +31,14 @@ function App() {
                     <Route path="liquidity" element={<DiceLiquidity />} />
                   </Route>
                   
-                  <Route path="/plinko" element={<PlinkoLayout />}>
+                  <Route path="/plinko" element={<AdminRoute><PlinkoLayout /></AdminRoute>}>
                     <Route index element={<PlinkoGame />} />
                     <Route path="liquidity" element={<PlinkoLiquidity />} />
                   </Route>
-                  
-                  <Route path="/crash" element={<Crash />} />
-                  
-                  <Route path="/blackjack" element={<BlackjackLayout />}>
+
+                  <Route path="/crash" element={<AdminRoute><Crash /></AdminRoute>} />
+
+                  <Route path="/blackjack" element={<AdminRoute><BlackjackLayout /></AdminRoute>}>
                     <Route index element={<BlackjackGame />} />
                     <Route path="liquidity" element={<BlackjackLiquidity />} />
                   </Route>

@@ -48,10 +48,10 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
   const bucketCanvasRef = useRef<HTMLCanvasElement>(null);
   const [landedBalls, setLandedBalls] = useState<Set<number>>(new Set());
 
-  // Bucket physics for filling animation (larger bucket)
-  const { fillBucket, clearBalls: clearBucketBalls, releaseBalls } = usePlinkoBucketPhysics(
+  // Bucket physics for filling animation (larger bucket - 220x100 interior)
+  const { fillBucket, clearBalls: clearBucketBalls, releaseBalls, resetBucket } = usePlinkoBucketPhysics(
     bucketCanvasRef,
-    { width: 144, height: 70, ballRadius: 8 }
+    { width: 220, height: 100, ballRadius: 10 }
   );
 
   // Path animation for game drop
@@ -95,7 +95,8 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
   useEffect(() => {
     if (gamePhase !== 'animating' || !paths || paths.length === 0) {
       if (gamePhase === 'idle') {
-        clearBucketBalls();
+        // Reset bucket physics (restore floor for next game)
+        resetBucket();
         clearAnimationBalls();
         setLandedBalls(new Set());
       }
@@ -108,7 +109,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
         dropBall({ id: index, path });
       }, index * 200);
     });
-  }, [gamePhase, paths, dropBall, clearBucketBalls, clearAnimationBalls]);
+  }, [gamePhase, paths, dropBall, resetBucket, clearAnimationBalls]);
 
   // Check if all balls landed
   useEffect(() => {
@@ -155,9 +156,19 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
     <div className="plinko-board-container">
       <div className="plinko-board" style={{ height: `${boardHeight}px` }}>
 
-        {/* Bucket with door */}
-        <div className="plinko-bucket">
-          <div className="bucket-container">
+        {/* Clickable Bucket with trapdoor */}
+        <div
+          className={`plinko-bucket ${gamePhase === 'idle' && !disabled ? 'clickable' : ''} ${gamePhase !== 'idle' ? 'active' : ''}`}
+          onClick={handleDropClick}
+          role="button"
+          tabIndex={disabled || gamePhase !== 'idle' ? -1 : 0}
+          onKeyDown={(e) => e.key === 'Enter' && handleDropClick()}
+        >
+          {/* Bucket body */}
+          <div className="bucket-body">
+            {/* Inner shadow overlay */}
+            <div className="bucket-inner-shadow" />
+
             {/* Physics canvas for bucket balls */}
             <canvas
               ref={bucketCanvasRef}
@@ -167,7 +178,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
             {/* Fallback static balls when not animating */}
             {gamePhase === 'idle' && fillProgress > 0 && (
               <div className="bucket-balls-reservoir">
-                {Array.from({ length: Math.min(fillProgress, 50) }).map((_, i) => (
+                {Array.from({ length: Math.min(fillProgress, 80) }).map((_, i) => (
                   <div
                     key={i}
                     className={`bucket-ball-item ${isWaitingForBackend ? 'waiting' : ''}`}
@@ -177,21 +188,26 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({
               </div>
             )}
 
-            {/* Door at bottom */}
-            <div className={`bucket-door ${doorOpen ? 'open' : ''}`}>
-              <div className="door-left" />
-              <div className="door-right" />
+            {/* Bucket label */}
+            <div className="bucket-label">
+              {gamePhase === 'filling' ? 'LOADING...' :
+               gamePhase === 'releasing' || gamePhase === 'animating' ? 'DROPPING...' :
+               ballCount > 1 ? `DROP ${ballCount}` : 'DROP'}
             </div>
           </div>
 
-          {/* Drop button */}
-          <button
-            className="bucket-drop-button"
-            onClick={handleDropClick}
-            disabled={disabled || gamePhase !== 'idle'}
-          >
-            {getButtonText()}
-          </button>
+          {/* Trapdoor at bottom */}
+          <div className={`bucket-trapdoor ${doorOpen ? 'open' : ''}`}>
+            <div className="trapdoor-left">
+              <div className="trapdoor-hinge trapdoor-hinge-left" />
+            </div>
+            <div className="trapdoor-right">
+              <div className="trapdoor-hinge trapdoor-hinge-right" />
+            </div>
+          </div>
+
+          {/* Visual funnel guide below bucket */}
+          <div className="bucket-funnel" />
         </div>
 
         {/* Pegs - rendered as CSS divs */}

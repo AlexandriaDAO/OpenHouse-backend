@@ -21,6 +21,7 @@ export function usePlinkoBucketPhysics(
   const renderRef = useRef<Matter.Render | null>(null);
   const runnerRef = useRef<Matter.Runner | null>(null);
   const ballsRef = useRef<Matter.Body[]>([]);
+  const floorRef = useRef<Matter.Body | null>(null);
 
   // Initialize Matter.js engine for bucket
   useEffect(() => {
@@ -52,32 +53,43 @@ export function usePlinkoBucketPhysics(
 
     // Create bucket walls (invisible)
     const wallThickness = 10;
+    // Position floor so balls stay visibly inside the bucket
+    // Floor should be at canvas height minus padding for balls to rest above trapdoor
+    const floorY = config.height - wallThickness / 2 - 5; // 5px above bottom edge
+
+    // Adjust wall positions inward to match visual bucket boundaries
+    // Left wall moved right, right wall moved left to contain balls properly
+    const wallInset = 8;
+
     const walls = [
-      // Left wall
+      // Left wall (moved inward)
       Matter.Bodies.rectangle(
-        -wallThickness / 2,
+        wallInset - wallThickness / 2,
         config.height / 2,
         wallThickness,
-        config.height,
+        config.height * 2,
         { isStatic: true, render: { visible: false } }
       ),
-      // Right wall
+      // Right wall (moved inward)
       Matter.Bodies.rectangle(
-        config.width + wallThickness / 2,
+        config.width - wallInset + wallThickness / 2,
         config.height / 2,
         wallThickness,
-        config.height,
+        config.height * 2,
         { isStatic: true, render: { visible: false } }
       ),
-      // Bottom wall (above the door)
+      // Bottom wall (floor inside the visible bucket area)
       Matter.Bodies.rectangle(
         config.width / 2,
-        config.height + wallThickness / 2,
+        floorY,
         config.width,
         wallThickness,
-        { isStatic: true, render: { visible: false } }
+        { isStatic: true, render: { visible: false }, label: 'floor' }
       ),
     ];
+
+    // Store floor reference for later restoration
+    floorRef.current = walls[2];
 
     Matter.Composite.add(engine.world, walls);
 
@@ -161,15 +173,12 @@ export function usePlinkoBucketPhysics(
   const releaseBalls = useCallback(() => {
     if (!engineRef.current) return;
 
-    // Find and remove bottom wall
+    // Find and remove bottom wall by label
     const bodies = Matter.Composite.allBodies(engineRef.current.world);
-    const bottomWall = bodies.find(body =>
-      body.isStatic &&
-      body.position.y > config.height
-    );
+    const floor = bodies.find(body => body.label === 'floor');
 
-    if (bottomWall) {
-      Matter.Composite.remove(engineRef.current.world, bottomWall);
+    if (floor) {
+      Matter.Composite.remove(engineRef.current.world, floor);
     }
 
     // Apply downward impulse to all balls
@@ -181,7 +190,36 @@ export function usePlinkoBucketPhysics(
     setTimeout(() => {
       clearBalls();
     }, 500);
-  }, [config.height, clearBalls]);
+  }, [clearBalls]);
 
-  return { addBall, fillBucket, clearBalls, releaseBalls };
+  // Reset bucket - restore floor for next game
+  const resetBucket = useCallback(() => {
+    if (!engineRef.current) return;
+
+    // Clear any remaining balls
+    clearBalls();
+
+    // Check if floor exists in world
+    const bodies = Matter.Composite.allBodies(engineRef.current.world);
+    const existingFloor = bodies.find(body => body.label === 'floor');
+
+    // If floor was removed, create a new one
+    if (!existingFloor) {
+      const wallThickness = 10;
+      const floorY = config.height - wallThickness / 2 - 5;
+
+      const newFloor = Matter.Bodies.rectangle(
+        config.width / 2,
+        floorY,
+        config.width,
+        wallThickness,
+        { isStatic: true, render: { visible: false }, label: 'floor' }
+      );
+
+      floorRef.current = newFloor;
+      Matter.Composite.add(engineRef.current.world, newFloor);
+    }
+  }, [clearBalls, config.width, config.height]);
+
+  return { addBall, fillBucket, clearBalls, releaseBalls, resetBucket };
 }
