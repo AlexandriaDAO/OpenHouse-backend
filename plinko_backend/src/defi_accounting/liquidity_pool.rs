@@ -109,7 +109,7 @@ thread_local! {
 pub struct LPPosition {
     pub shares: Nat,
     pub pool_ownership_percent: f64,
-    pub redeemable_usdt: Nat,
+    pub redeemable_icp: Nat,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -150,7 +150,10 @@ fn calculate_shares_for_deposit(amount_nat: &Nat) -> Result<Nat, String> {
 }
 
 // Deposit liquidity
-// Uses ICRC-2 transfer_from (requires prior user approval)
+// NOTE: We use `icrc2_transfer_from` here because the user must approve the canister
+// to spend their funds (ICRC-2 approval flow). This is different from user deposits
+// in `accounting.rs` which use the legacy `transfer` (ICRC-1) where the user sends
+// funds directly to the canister's subaccount.
 pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) -> Result<Nat, String> {
     // Validate
     if amount < MIN_DEPOSIT {
@@ -222,7 +225,7 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
             // P5 FIX: Actionable error message
             return Err(format!(
                 "Slippage exceeded: expected min {} shares but would receive {} (pool conditions changed during transfer). \n\
-                Your {} has been credited to your betting balance. \n\
+                Your {} e8s has been credited to your betting balance. \n\
                 Next steps: \n\
                 1. Call calculate_shares_preview({}) to get updated share estimate \n\
                 2. Try depositing again with adjusted min_shares_expected \n\
@@ -324,7 +327,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     // Check minimum withdrawal
     let payout_u64 = payout_nat.0.to_u64().ok_or("Payout too large")?;
     if payout_u64 < MIN_WITHDRAWAL {
-        return Err(format!("Minimum withdrawal is {}", MIN_WITHDRAWAL));
+        return Err(format!("Minimum withdrawal is {} e8s", MIN_WITHDRAWAL));
     }
 
     // Calculate fee (1% using basis points for precision)
@@ -373,6 +376,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
 
     // Attempt transfer immediately (same pattern as user withdrawals)
     // NOTE: Fee credit moved to Success branch to prevent orphaned fees on rollback
+    // (Gemini Audit V4, Finding 1 fix)
     match accounting::attempt_transfer(caller, lp_amount, created_at).await {
         accounting::TransferResult::Success(_) => {
             // Credit parent fee AFTER successful transfer
@@ -425,7 +429,7 @@ pub(crate) fn get_lp_position_internal(user: Principal) -> LPPosition {
     let total_shares = calculate_total_supply();
     let pool_reserve = get_pool_reserve_nat();
 
-    let (ownership_percent, redeemable_usdt) = if total_shares == 0u64 {
+    let (ownership_percent, redeemable_icp) = if total_shares == 0u64 {
         (0.0, Nat::from(0u64))
     } else if pool_reserve == 0u64 {
         // Edge case: shares exist but no reserve
@@ -445,7 +449,7 @@ pub(crate) fn get_lp_position_internal(user: Principal) -> LPPosition {
     LPPosition {
         shares: user_shares,
         pool_ownership_percent: ownership_percent,
-        redeemable_usdt,
+        redeemable_icp,
     }
 }
 
@@ -538,7 +542,7 @@ pub(crate) fn update_pool_on_win(payout: u64) {
         if pool_state.reserve < payout_nat {
              // CRITICAL: Halt operations to protect LP funds
              ic_cdk::trap(format!(
-                "CRITICAL: Pool insolvent. Attempted payout {} exceeds reserve {}. Halting to protect LPs.",
+                "CRITICAL: Pool insolvent. Attempted payout {} e8s exceeds reserve {} e8s. Halting to protect LPs.",
                 payout,
                 pool_state.reserve.0.to_u64().unwrap_or(u64::MAX) // Use MAX to indicate overflow if it happens
             ));
@@ -564,8 +568,8 @@ pub(crate) fn update_pool_on_loss(bet: u64) {
 /// update_pool_on_win/loss.
 ///
 /// # Arguments
-/// * `bet_amount` - Original wager amount in smallest units
-/// * `payout_amount` - Total payout to player in smallest units (0 for total loss, bet for push, >bet for win)
+/// * `bet_amount` - Original wager amount in e8s
+/// * `payout_amount` - Total payout to player in e8s (0 for total loss, bet for push, >bet for win)
 ///
 /// # Returns
 /// * `Ok(())` on success
@@ -599,7 +603,7 @@ pub fn settle_bet(bet_amount: u64, payout_amount: u64) -> Result<(), String> {
         let pool_reserve = get_pool_reserve();
         if profit > pool_reserve {
             return Err(format!(
-                "POOL_INSOLVENT|Profit {} exceeds reserve {}|Bet not settled",
+                "POOL_INSOLVENT|Profit {} e8s exceeds reserve {} e8s|Bet not settled",
                 profit, pool_reserve
             ));
         }

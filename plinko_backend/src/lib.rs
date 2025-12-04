@@ -235,7 +235,7 @@ fn abandon_withdrawal() -> Result<u64, String> {
 }
 
 #[query]
-fn get_pending_withdrawal() -> Option<defi_accounting::types::PendingWithdrawal> {
+fn get_my_withdrawal_status() -> Option<defi_accounting::types::PendingWithdrawal> {
     defi_accounting::accounting::get_withdrawal_status()
 }
 
@@ -247,6 +247,16 @@ fn get_balance(principal: Principal) -> u64 {
 #[query]
 fn get_my_balance() -> u64 {
     defi_accounting::query::get_my_balance()
+}
+
+#[query]
+fn get_house_balance() -> u64 {
+    defi_accounting::query::get_house_balance()
+}
+
+#[query]
+fn get_max_allowed_payout() -> u64 {
+    defi_accounting::query::get_max_allowed_payout()
 }
 
 // =============================================================================
@@ -279,6 +289,16 @@ fn get_my_lp_position() -> defi_accounting::liquidity_pool::LPPosition {
 }
 
 #[query]
+fn calculate_shares_preview(amount: u64) -> Result<candid::Nat, String> {
+    defi_accounting::liquidity_pool::calculate_shares_preview(amount)
+}
+
+#[query]
+fn can_accept_bets() -> bool {
+    defi_accounting::liquidity_pool::can_accept_bets()
+}
+
+#[query]
 fn get_house_mode() -> String {
     defi_accounting::query::get_house_mode()
 }
@@ -302,6 +322,31 @@ fn admin_get_orphaned_funds_report(recent_limit: Option<u64>) -> Result<defi_acc
     defi_accounting::admin_query::get_orphaned_funds_report(recent_limit)
 }
 
+#[query]
+fn admin_get_orphaned_funds_report_full() -> Result<defi_accounting::types::OrphanedFundsReport, String> {
+    defi_accounting::admin_query::get_orphaned_funds_report_full()
+}
+
+#[query]
+fn admin_get_all_balances(offset: u64, limit: u64) -> Result<Vec<defi_accounting::types::UserBalance>, String> {
+    defi_accounting::admin_query::get_all_balances(offset, limit)
+}
+
+#[query]
+fn admin_get_all_balances_complete() -> Result<Vec<defi_accounting::types::UserBalance>, String> {
+    defi_accounting::admin_query::get_all_balances_complete()
+}
+
+#[query]
+fn admin_get_all_lp_positions(offset: u64, limit: u64) -> Result<Vec<defi_accounting::types::LPPositionInfo>, String> {
+    defi_accounting::admin_query::get_all_lp_positions(offset, limit)
+}
+
+#[query]
+fn admin_get_all_lp_positions_complete() -> Result<Vec<defi_accounting::types::LPPositionInfo>, String> {
+    defi_accounting::admin_query::get_all_lp_positions_complete()
+}
+
 // =============================================================================
 // STATISTICS ENDPOINTS
 // =============================================================================
@@ -309,6 +354,16 @@ fn admin_get_orphaned_funds_report(recent_limit: Option<u64>) -> Result<defi_acc
 #[query]
 fn get_daily_stats(limit: u32) -> Vec<defi_accounting::DailySnapshot> {
     defi_accounting::get_daily_snapshots(limit)
+}
+
+#[query]
+fn get_stats_range(start_ts: u64, end_ts: u64) -> Vec<defi_accounting::DailySnapshot> {
+    defi_accounting::get_snapshots_range(start_ts, end_ts)
+}
+
+#[query]
+fn get_stats_count() -> u64 {
+    defi_accounting::get_snapshot_count()
 }
 
 #[query]

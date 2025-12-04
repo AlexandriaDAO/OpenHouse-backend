@@ -30,6 +30,7 @@ defi_accounting/
 ├── mod.rs              # Public interface and exports
 ├── accounting.rs       # Core user accounting
 ├── liquidity_pool.rs   # LP system (deposits, withdrawals, shares)
+├── nat_helpers.rs      # Arbitrary precision math utilities
 ├── CLAUDE.md          # AI assistant guide
 └── README.md          # This file
 ```

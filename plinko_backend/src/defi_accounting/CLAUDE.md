@@ -36,6 +36,7 @@ defi_accounting::update_balance(player, new_balance)?;
 - `mod.rs` - Public interface and exports
 - `accounting.rs` - Core user accounting
 - `liquidity_pool.rs` - LP system (deposits, withdrawals, share calculations)
+- `nat_helpers.rs` - Utilities for Nat (arbitrary precision) math
 
 ## Liquidity Pool System
 

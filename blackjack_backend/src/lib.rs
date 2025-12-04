@@ -117,6 +117,11 @@ fn abandon_withdrawal() -> Result<u64, String> {
 }
 
 #[query]
+fn get_my_withdrawal_status() -> Option<defi_accounting::types::PendingWithdrawal> {
+    defi_accounting::accounting::get_withdrawal_status()
+}
+
+#[query]
 fn get_balance(principal: candid::Principal) -> u64 {
     defi_accounting::query::get_balance(principal)
 }
@@ -144,6 +149,41 @@ async fn get_canister_balance() -> u64 {
 #[update]
 async fn admin_health_check() -> Result<defi_accounting::types::HealthCheck, String> {
     defi_accounting::admin_query::admin_health_check().await
+}
+
+#[query]
+fn admin_get_all_pending_withdrawals() -> Result<Vec<defi_accounting::types::PendingWithdrawalInfo>, String> {
+    defi_accounting::admin_query::get_all_pending_withdrawals()
+}
+
+#[query]
+fn admin_get_orphaned_funds_report(recent_limit: Option<u64>) -> Result<defi_accounting::types::OrphanedFundsReport, String> {
+    defi_accounting::admin_query::get_orphaned_funds_report(recent_limit)
+}
+
+#[query]
+fn admin_get_orphaned_funds_report_full() -> Result<defi_accounting::types::OrphanedFundsReport, String> {
+    defi_accounting::admin_query::get_orphaned_funds_report_full()
+}
+
+#[query]
+fn admin_get_all_balances(offset: u64, limit: u64) -> Result<Vec<defi_accounting::types::UserBalance>, String> {
+    defi_accounting::admin_query::get_all_balances(offset, limit)
+}
+
+#[query]
+fn admin_get_all_balances_complete() -> Result<Vec<defi_accounting::types::UserBalance>, String> {
+    defi_accounting::admin_query::get_all_balances_complete()
+}
+
+#[query]
+fn admin_get_all_lp_positions(offset: u64, limit: u64) -> Result<Vec<defi_accounting::types::LPPositionInfo>, String> {
+    defi_accounting::admin_query::get_all_lp_positions(offset, limit)
+}
+
+#[query]
+fn admin_get_all_lp_positions_complete() -> Result<Vec<defi_accounting::types::LPPositionInfo>, String> {
+    defi_accounting::admin_query::get_all_lp_positions_complete()
 }
 
 #[update]
@@ -209,6 +249,7 @@ fn get_stats_range(start_ts: u64, end_ts: u64) -> Vec<defi_accounting::DailySnap
 fn get_stats_count() -> u64 {
     defi_accounting::get_snapshot_count()
 }
+
 
 #[query]
 fn get_pool_apy(days: Option<u32>) -> defi_accounting::ApyInfo {

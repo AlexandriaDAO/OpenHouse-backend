@@ -113,6 +113,16 @@ type AbandonedEntry = record {
   timestamp: nat64;
 };
 
+type UserBalance = record {
+  user: principal;
+  balance: nat64;
+};
+
+type LPPositionInfo = record {
+  user: principal;
+  shares: nat;
+};
+
 service : {
   // Existing pure game functions
   drop_ball: () -> (variant { Ok: PlinkoResult; Err: text });
@@ -135,11 +145,15 @@ service : {
   abandon_withdrawal: () -> (variant { Ok: nat64; Err: text });
   get_balance: (principal) -> (nat64) query;
   get_my_balance: () -> (nat64) query;
-  get_pending_withdrawal: () -> (opt PendingWithdrawal) query;
+  get_house_balance: () -> (nat64) query;
+  get_max_allowed_payout: () -> (nat64) query;
+  get_my_withdrawal_status: () -> (opt PendingWithdrawal) query;
 
   // NEW: LP operations
   deposit_liquidity: (nat64, opt nat) -> (variant { Ok: nat; Err: text });
   withdraw_all_liquidity: () -> (variant { Ok: nat64; Err: text });
+  calculate_shares_preview: (nat64) -> (variant { Ok: nat; Err: text }) query;
+  can_accept_bets: () -> (bool) query;
   get_pool_stats: () -> (PoolStats) query;
   get_lp_position: (principal) -> (LPPosition) query;
   get_my_lp_position: () -> (LPPosition) query;
@@ -149,8 +163,15 @@ service : {
   admin_health_check: () -> (variant { Ok: HealthCheck; Err: text });
   admin_get_all_pending_withdrawals: () -> (variant { Ok: vec PendingWithdrawalInfo; Err: text }) query;
   admin_get_orphaned_funds_report: (opt nat64) -> (variant { Ok: OrphanedFundsReport; Err: text }) query;
+  admin_get_orphaned_funds_report_full: () -> (variant { Ok: OrphanedFundsReport; Err: text }) query;
+  admin_get_all_balances: (nat64, nat64) -> (variant { Ok: vec UserBalance; Err: text }) query;
+  admin_get_all_balances_complete: () -> (variant { Ok: vec UserBalance; Err: text }) query;
+  admin_get_all_lp_positions: (nat64, nat64) -> (variant { Ok: vec LPPositionInfo; Err: text }) query;
+  admin_get_all_lp_positions_complete: () -> (variant { Ok: vec LPPositionInfo; Err: text }) query;
 
   // NEW: Statistics
   get_daily_stats: (nat32) -> (vec DailySnapshot) query;
+  get_stats_range: (nat64, nat64) -> (vec DailySnapshot) query;
+  get_stats_count: () -> (nat64) query;
   get_pool_apy: (opt nat32) -> (ApyInfo) query;
 }

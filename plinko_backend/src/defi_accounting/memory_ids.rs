@@ -4,9 +4,13 @@
 //! Run `cargo test` to verify no collisions exist.
 //!
 //! Allocation strategy:
+//! - 0-9: Core game state (seed, nonce)
 //! - 10-19: User accounting (balances, LP shares, pool state)
 //! - 20-29: Withdrawal & audit (pending, audit log)
 //! - 30-39: Statistics (snapshots, accumulator)
+
+// Core game state (0-9)
+// DEPRECATED/RETIRED: 1 (Seed State), 2 (Nonce Counter) - Moved to per-game VRF (no persistence)
 
 // User accounting (10-19)
 pub const USER_BALANCES_MEMORY_ID: u8 = 10;
@@ -21,6 +25,8 @@ pub const AUDIT_LOG_COUNTER_MEMORY_ID: u8 = 25;
 // Statistics (30-39)
 pub const SNAPSHOTS_MEMORY_ID: u8 = 30;
 pub const ACCUMULATOR_MEMORY_ID: u8 = 31;
+
+// ABANDONED (corrupted, do not reuse): 22, 23
 
 #[cfg(test)]
 mod tests {

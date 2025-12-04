@@ -6,7 +6,7 @@ use super::types::*;
 const ADMIN_PRINCIPAL: &str = "p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae";
 const WASM_PAGE_SIZE_BYTES: u64 = 65536;
 // const MAX_PAGINATION_LIMIT: u64 = 100; // Historical limit - removed to allow unlimited admin queries
-const REASONABLE_MAX_LIMIT: usize = 10_000; // Safety net
+const REASONABLE_MAX_LIMIT: usize = 10_000; // Safety net to prevent abuse
 
 fn require_admin() -> Result<(), String> {
     let caller = ic_cdk::api::msg_caller();
@@ -130,4 +130,3 @@ pub fn get_orphaned_funds_report_full() -> Result<OrphanedFundsReport, String> {
     require_admin()?;
     Ok(accounting::build_orphaned_funds_report_internal(None))
 }
-

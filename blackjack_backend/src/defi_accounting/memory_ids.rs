@@ -10,6 +10,7 @@
 //! - 30-39: Statistics (snapshots, accumulator)
 
 // Core game state (0-9)
+// DEPRECATED/RETIRED: 1 (Seed State), 2 (Nonce Counter) - Moved to per-game VRF (no persistence)
 pub const SEED_STATE_MEMORY_ID: u8 = 1;
 pub const NONCE_COUNTER_MEMORY_ID: u8 = 2;
 
@@ -36,8 +37,6 @@ mod tests {
     #[test]
     fn memory_ids_are_unique() {
         let ids = [
-            SEED_STATE_MEMORY_ID,
-            NONCE_COUNTER_MEMORY_ID,
             USER_BALANCES_MEMORY_ID,
             LP_SHARES_MEMORY_ID,
             POOL_STATE_MEMORY_ID,

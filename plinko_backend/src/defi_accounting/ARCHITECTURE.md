@@ -104,6 +104,10 @@ stable_memory_allocation:
   purpose: "Prevent memory ID collisions across canister upgrades"
 
   ranges:
+    core_game: [0-9]
+      - SEED_STATE: 1
+      - NONCE_COUNTER: 2
+
     accounting: [10-19]
       - USER_BALANCES: 10
       - LP_SHARES: 11
@@ -789,4 +793,4 @@ safety_philosophy:
 **End of Architecture Guide**
 
 > This pseudocode represents the complete DeFi accounting module as of the current codebase state.
-> For implementation details, refer to the source files in `plinko_backend/src/defi_accounting/`.
+> For implementation details, refer to the source files in `dice_backend/src/defi_accounting/`.
