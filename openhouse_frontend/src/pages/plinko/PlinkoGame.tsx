@@ -74,7 +74,7 @@ export const Plinko: React.FC = () => {
   const [showInfoModal, setShowInfoModal] = useState(false);
 
   // Betting state
-  const [betAmount, setBetAmount] = useState(1);  // Per-ball bet (min 1 USDT)
+  const [betAmount, setBetAmount] = useState(0.01);  // Per-ball bet (min 0.01 USDT)
   const [maxBet, setMaxBet] = useState(100);
 
   // Ref to track if fill animation is complete
@@ -97,19 +97,14 @@ export const Plinko: React.FC = () => {
       if (!actor) return;
 
       try {
-        const actorAny = actor as any;
         const [multsBp, formulaText, ev] = await Promise.all([
-          actorAny.get_multipliers_bp ? actorAny.get_multipliers_bp() : actor.get_multipliers(),
+          actor.get_multipliers_bp(),
           actor.get_formula(),
           actor.get_expected_value()
         ]);
 
-        let finalMults: number[];
-        if (multsBp && multsBp.length > 0 && typeof multsBp[0] === 'bigint') {
-          finalMults = multsBp.map((bp: bigint) => Number(bp) / 10000);
-        } else {
-          finalMults = multsBp as number[];
-        }
+        // get_multipliers_bp returns basis points (u64), convert to multipliers
+        const finalMults = Array.from(multsBp).map((bp) => Number(bp) / 10000);
 
         setMultipliers(finalMults);
         setFormula(formulaText);
@@ -261,6 +256,7 @@ export const Plinko: React.FC = () => {
           // Refresh balance after game
           refreshGameBalance().catch(console.error);
         } else {
+          console.error('[Plinko] Single ball backend error:', result.Err);
           setGameError(result.Err);
           setGamePhase('idle');
           setIsPlaying(false);
@@ -290,6 +286,7 @@ export const Plinko: React.FC = () => {
           // Refresh balance after game
           refreshGameBalance().catch(console.error);
         } else {
+          console.error('[Plinko] Multi-ball backend error:', result.Err);
           setGameError(result.Err);
           setGamePhase('idle');
           setIsPlaying(false);

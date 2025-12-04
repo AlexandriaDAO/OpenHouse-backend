@@ -186,6 +186,8 @@ fn is_canister_solvent() -> bool {
 
 #[update]
 async fn play_plinko(bet_amount: u64) -> Result<PlinkoGameResult, String> {
+    // Refresh balance cache before solvency check
+    defi_accounting::accounting::refresh_canister_balance().await;
     if !is_canister_solvent() {
         return Err("Game temporarily paused - insufficient funds.".to_string());
     }
@@ -194,6 +196,8 @@ async fn play_plinko(bet_amount: u64) -> Result<PlinkoGameResult, String> {
 
 #[update]
 async fn play_multi_plinko(ball_count: u8, bet_per_ball: u64) -> Result<MultiBallGameResult, String> {
+    // Refresh balance cache before solvency check
+    defi_accounting::accounting::refresh_canister_balance().await;
     if !is_canister_solvent() {
         return Err("Game temporarily paused - insufficient funds.".to_string());
     }

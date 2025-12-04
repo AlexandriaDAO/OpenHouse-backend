@@ -64,7 +64,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 ### 2. Plinko
 - **Mechanics**: Ball bounces through pegs to land in multiplier slots
 - **Features**: Adjustable rows (8/12/16) and risk levels (Low/Medium/High)
-- **Min Bet**: 1 USDT
+- **Min Bet**: 0.01 USDT
 - **Max Win**: 1000x (16 rows, high risk)
 - **House Edge**: 1%
 - **Canister**: `plinko_backend`
