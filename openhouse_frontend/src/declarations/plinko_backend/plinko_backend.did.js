@@ -194,6 +194,11 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(DailySnapshot)],
         ['query'],
       ),
+    'get_effective_multiplier' : IDL.Func(
+        [IDL.Nat8],
+        [IDL.Tuple(IDL.Nat64, IDL.Nat64)],
+        ['query'],
+      ),
     'get_expected_value' : IDL.Func([], [IDL.Float64], ['query']),
     'get_formula' : IDL.Func([], [IDL.Text], ['query']),
     'get_house_balance' : IDL.Func([], [IDL.Nat64], ['query']),

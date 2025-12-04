@@ -214,6 +214,19 @@ fn get_max_bet_per_ball(ball_count: u8) -> Result<u64, String> {
     game::calculate_max_bet_per_ball(ball_count)
 }
 
+/// Get the effective max multiplier used for bet validation.
+/// Returns (effective_multiplier_bp, actual_max_multiplier_bp).
+///
+/// For 1-3 balls: effective = actual (6.52x) - high variance
+/// For 4+ balls: effective decreases based on Law of Large Numbers
+///
+/// This allows higher per-ball bets for multi-ball games while
+/// maintaining the same actual risk to the house.
+#[query]
+fn get_effective_multiplier(ball_count: u8) -> (u64, u64) {
+    game::get_effective_multiplier_bp(ball_count)
+}
+
 // =============================================================================
 // ACCOUNTING ENDPOINTS
 // =============================================================================

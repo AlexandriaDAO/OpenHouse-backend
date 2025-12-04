@@ -170,6 +170,7 @@ export interface _SERVICE {
   >,
   'get_balance' : ActorMethod<[Principal], bigint>,
   'get_daily_stats' : ActorMethod<[number], Array<DailySnapshot>>,
+  'get_effective_multiplier' : ActorMethod<[number], [bigint, bigint]>,
   'get_expected_value' : ActorMethod<[], number>,
   'get_formula' : ActorMethod<[], string>,
   'get_house_balance' : ActorMethod<[], bigint>,

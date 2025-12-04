@@ -137,6 +137,7 @@ service : {
   play_multi_plinko: (nat8, nat64) -> (variant { Ok: MultiBallGameResult; Err: text });
   get_max_bet: () -> (nat64) query;
   get_max_bet_per_ball: (nat8) -> (variant { Ok: nat64; Err: text }) query;
+  get_effective_multiplier: (nat8) -> (record { nat64; nat64 }) query;
 
   // NEW: User accounting
   deposit: (nat64) -> (variant { Ok: nat64; Err: text });

@@ -9,6 +9,13 @@ use serde::Serialize;
 // This must match calculate_multiplier_bp(0) or calculate_multiplier_bp(8)
 const MAX_MULTIPLIER_BP: u64 = 65_200;
 
+// Statistical constants for variance-aware betting
+// These are derived from the multiplier probability distribution:
+// E[X] = 0.99, Var[X] ≈ 1.092, StdDev[X] ≈ 1.045
+const EV_PER_BALL: f64 = 0.99;
+const STD_PER_BALL: f64 = 1.045;
+const SIGMA_FACTOR: f64 = 4.0; // 4-sigma = 99.994% confidence
+
 // =============================================================================
 // GAME RESULT TYPES
 // =============================================================================
@@ -176,11 +183,13 @@ pub async fn play_multi_plinko(ball_count: u8, bet_per_ball: u64, caller: Princi
         return Err("INSUFFICIENT_BALANCE".to_string());
     }
 
-    // 3. Check max payout against house limit
-    let max_potential_payout_per_ball = calculate_payout(bet_per_ball, MAX_MULTIPLIER_BP)?;
+    // 3. Check max payout against house limit (using variance-aware calculation)
+    // Use the effective multiplier based on ball count, not the theoretical max
+    let effective_mult_bp = calculate_effective_max_multiplier_bp(ball_count);
+    let max_potential_payout_per_ball = calculate_payout(bet_per_ball, effective_mult_bp)?;
     let max_potential_payout = max_potential_payout_per_ball.checked_mul(ball_count as u64)
         .ok_or("Max payout calculation overflow")?;
-        
+
     let max_allowed = accounting::get_max_allowed_payout();
     if max_potential_payout > max_allowed {
         return Err("Invalid bet: exceeds house limit for total payout".to_string());
@@ -267,34 +276,75 @@ pub async fn play_multi_plinko(ball_count: u8, bet_per_ball: u64, caller: Princi
     })
 }
 
+/// Calculate the effective max multiplier for a given ball count.
+///
+/// For 1-3 balls: Use actual max (6.52x) - single balls can realistically hit edges
+/// For 4+ balls: Use statistical worst-case (4-sigma) based on the Law of Large Numbers
+///
+/// The formula for 4+ balls:
+///   effective_max = E[X] + sigma_factor * StdDev[X] / sqrt(n)
+///                 = 0.99 + 4 * 1.045 / sqrt(n)
+///                 = 0.99 + 4.18 / sqrt(n)
+///
+/// This allows higher bets for multi-ball games while maintaining the same
+/// actual risk exposure to the house.
+fn calculate_effective_max_multiplier_bp(ball_count: u8) -> u64 {
+    // For low ball counts, use actual max - single balls CAN hit 6.52x
+    if ball_count <= 3 {
+        return MAX_MULTIPLIER_BP;
+    }
+
+    // For 4+ balls, use statistical worst-case
+    // Law of Large Numbers: variance decreases as n increases
+    let n = ball_count as f64;
+    let effective_max = EV_PER_BALL + SIGMA_FACTOR * STD_PER_BALL / n.sqrt();
+
+    // Convert to basis points
+    let effective_bp = (effective_max * MULTIPLIER_SCALE as f64) as u64;
+
+    // Safety cap at actual max (shouldn't be needed for n >= 4)
+    effective_bp.min(MAX_MULTIPLIER_BP)
+}
+
 pub fn calculate_max_bet_per_ball(ball_count: u8) -> Result<u64, String> {
     if ball_count == 0 { return Ok(0); }
-    
+
     let max_allowed = accounting::get_max_allowed_payout();
     if max_allowed == 0 { return Ok(0); }
 
-    // Max bet = Max Allowed Payout / (Balls * Max Multiplier)
-    // Use u128 for calculation
+    // Get the variance-aware effective multiplier for this ball count
+    let effective_mult_bp = calculate_effective_max_multiplier_bp(ball_count);
+
+    // Max bet = Max Allowed Payout / (Balls * Effective Multiplier)
+    // Use u128 for calculation to prevent overflow
     let max_allowed_u128 = max_allowed as u128;
     let balls_u128 = ball_count as u128;
     let scale_u128 = MULTIPLIER_SCALE as u128;
-    let max_mult_u128 = MAX_MULTIPLIER_BP as u128;
 
     let numerator = max_allowed_u128.checked_mul(scale_u128)
         .ok_or("Overflow in max bet calculation")?;
-    
-    let denominator = balls_u128.checked_mul(max_mult_u128)
+
+    let denominator = balls_u128.checked_mul(effective_mult_bp as u128)
         .ok_or("Overflow in denominator")?;
-        
+
     if denominator == 0 {
         return Ok(0);
     }
 
     let max_bet = numerator / denominator;
-    
+
     if max_bet > u64::MAX as u128 {
         return Ok(u64::MAX);
     }
-    
+
     Ok(max_bet as u64)
+}
+
+/// Get the effective max multiplier used for bet validation (in basis points).
+/// This is exposed for frontend transparency - users can see how the limit scales.
+///
+/// Returns: (effective_multiplier_bp, actual_max_multiplier_bp)
+pub fn get_effective_multiplier_bp(ball_count: u8) -> (u64, u64) {
+    let effective = calculate_effective_max_multiplier_bp(ball_count);
+    (effective, MAX_MULTIPLIER_BP)
 }

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import usePlinkoActor from '../../hooks/actors/usePlinkoActor';
 import { GameLayout } from '../../components/game-ui';
-import { PlinkoBoard } from '../../components/game-specific/plinko';
+import { PlinkoCanvas, ResultOverlay } from '../../components/game-specific/plinko';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import { BettingRail } from '../../components/betting';
 import { useGameBalance } from '../../providers/GameBalanceProvider';
@@ -117,22 +117,23 @@ export const Plinko: React.FC = () => {
     loadGameData();
   }, [actor]);
 
-  // Max bet calculation
+  // Max bet calculation - fetches variance-aware limit from backend
   useEffect(() => {
     const updateMaxBet = async () => {
       if (!actor) return;
       try {
         const result = await actor.get_max_bet_per_ball(ballCount);
         if ('Ok' in result) {
-          // 90% safety margin for UI
-          const maxBetUSDT = (Number(result.Ok) / DECIMALS_PER_CKUSDT) * MAX_BET_SAFETY_MARGIN;
-          const newMaxBet = Math.max(1, maxBetUSDT); // Min 1 USDT
+          // 95% safety margin for UI (accounting for timing/rounding)
+          const maxBetUSDT = (Number(result.Ok) / DECIMALS_PER_CKUSDT) * 0.95;
+          const newMaxBet = Math.max(0.01, maxBetUSDT); // Min 0.01 USDT
           setMaxBet(newMaxBet);
+          // Auto-clamp bet to new max when ball count changes
           setBetAmount(prev => Math.min(prev, newMaxBet));
         }
       } catch (err) {
         console.error('Failed to get max bet:', err);
-        setMaxBet(100); // Fallback
+        setMaxBet(10); // Conservative fallback
       }
     };
     updateMaxBet();
@@ -189,6 +190,23 @@ export const Plinko: React.FC = () => {
     if (balance.game === 0n) {
       setGameError('No chips! Use the + button below to deposit.');
       return;
+    }
+
+    // Pre-flight max bet validation - fetch current limit from backend
+    try {
+      const maxBetResult = await actor.get_max_bet_per_ball(ballCount);
+      if ('Ok' in maxBetResult) {
+        const currentMaxBet = Number(maxBetResult.Ok) / DECIMALS_PER_CKUSDT;
+        if (betAmount > currentMaxBet) {
+          setMaxBet(currentMaxBet * 0.95); // Update UI with current limit
+          setBetAmount(Math.min(betAmount, currentMaxBet * 0.95));
+          setGameError(`Max bet reduced to $${currentMaxBet.toFixed(2)}/ball. Adjusting your bet.`);
+          return;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to validate max bet:', err);
+      // Continue anyway - backend will validate
     }
 
     // Calculate bet in e8s (6 decimals for ckUSDT)
@@ -351,62 +369,55 @@ export const Plinko: React.FC = () => {
             />
             <span className="text-sm text-white font-mono w-6 text-right">{ballCount}</span>
           </div>
-          
-          {/* Bet info for multi-ball */}
-          {ballCount > 1 && (
-            <div className="flex justify-center items-center gap-4 py-1 text-xs text-gray-400">
-              <span>Per ball: ${betAmount.toFixed(2)}</span>
+
+          {/* Bet info - always show for clarity */}
+          <div className="flex justify-center items-center gap-4 py-1 text-xs text-gray-400">
+            <span>
+              Per ball: ${betAmount.toFixed(2)}
+              <span className="text-gray-600 ml-1">(max ${maxBet.toFixed(2)})</span>
+            </span>
+            {ballCount > 1 && (
               <span className="text-white font-semibold">Total: ${(betAmount * ballCount).toFixed(2)}</span>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        {/* Game Board with integrated bucket */}
-        <div className="flex-1 flex justify-center items-start py-2 min-h-0">
-          <PlinkoBoard
+        {/* Game Board with Pixi.js canvas */}
+        <div className="flex-1 flex justify-center items-start py-2 min-h-0 relative">
+          <PlinkoCanvas
             rows={ROWS}
+            multipliers={multipliers}
             paths={pendingPaths}
-            isDropping={gamePhase === 'animating'}
-            onAnimationComplete={handleAnimationComplete}
+            gamePhase={gamePhase}
+            fillProgress={fillProgress}
+            doorOpen={doorOpen}
+            ballCount={ballCount}
             finalPositions={
               ballCount === 1
                 ? (currentResult ? [currentResult.final_position] : [])
                 : (multiBallResult?.results.map(r => r.final_position) || [])
             }
-            multipliers={multipliers}
-            ballCount={ballCount}
+            onAnimationComplete={handleAnimationComplete}
             onDrop={dropBalls}
             disabled={!actor || gamePhase !== 'idle'}
-            gamePhase={gamePhase}
-            fillProgress={fillProgress}
-            doorOpen={doorOpen}
             isWaitingForBackend={isWaitingForBackend}
           />
-        </div>
 
-        {/* Result display - compact */}
-        <div className="h-8 flex items-center justify-center flex-shrink-0">
-          {!isPlaying && currentResult && (
-            <span className={`text-sm font-bold ${currentResult.win ? 'text-green-400' : 'text-red-400'}`}>
-              {currentResult.win ? 'WIN' : 'LOST'} {currentResult.multiplier.toFixed(2)}x
-              {currentResult.profit !== undefined && (
-                <span className="ml-2">
-                  {currentResult.profit >= 0 ? '+' : ''}{currentResult.profit.toFixed(2)} USDT
-                </span>
-              )}
-            </span>
-          )}
-          {!isPlaying && multiBallResult && (
-            <span className="text-xs text-gray-300">
-              AVG {multiBallResult.average_multiplier.toFixed(2)}x
-              ({multiBallResult.total_wins}/{multiBallResult.total_balls} wins)
-              {multiBallResult.net_profit !== undefined && (
-                <span className={`ml-2 font-bold ${multiBallResult.net_profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {multiBallResult.net_profit >= 0 ? '+' : ''}{multiBallResult.net_profit.toFixed(2)} USDT
-                </span>
-              )}
-            </span>
-          )}
+          {/* Result overlay with Framer Motion */}
+          <ResultOverlay
+            singleResult={currentResult ? {
+              multiplier: currentResult.multiplier,
+              win: currentResult.win,
+              profit: currentResult.profit,
+            } : null}
+            multiResult={multiBallResult ? {
+              total_balls: multiBallResult.total_balls,
+              total_wins: multiBallResult.total_wins,
+              average_multiplier: multiBallResult.average_multiplier,
+              net_profit: multiBallResult.net_profit,
+            } : null}
+            isVisible={!isPlaying && gamePhase === 'idle' && (!!currentResult || !!multiBallResult)}
+          />
         </div>
 
         {/* Error display */}
