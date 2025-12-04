@@ -35,7 +35,7 @@ type MultiDiceGameResult = record {
 type LPPosition = record {
   shares: nat;
   pool_ownership_percent: float64;
-  redeemable_icp: nat;
+  redeemable_usdt: nat;
 };
 
 type PoolStats = record {

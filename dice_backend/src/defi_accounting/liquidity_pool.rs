@@ -109,7 +109,7 @@ thread_local! {
 pub struct LPPosition {
     pub shares: Nat,
     pub pool_ownership_percent: f64,
-    pub redeemable_icp: Nat,
+    pub redeemable_usdt: Nat,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -429,7 +429,7 @@ pub(crate) fn get_lp_position_internal(user: Principal) -> LPPosition {
     let total_shares = calculate_total_supply();
     let pool_reserve = get_pool_reserve_nat();
 
-    let (ownership_percent, redeemable_icp) = if total_shares == 0u64 {
+    let (ownership_percent, redeemable_usdt) = if total_shares == 0u64 {
         (0.0, Nat::from(0u64))
     } else if pool_reserve == 0u64 {
         // Edge case: shares exist but no reserve
@@ -449,7 +449,7 @@ pub(crate) fn get_lp_position_internal(user: Principal) -> LPPosition {
     LPPosition {
         shares: user_shares,
         pool_ownership_percent: ownership_percent,
-        redeemable_icp,
+        redeemable_usdt,
     }
 }
 
