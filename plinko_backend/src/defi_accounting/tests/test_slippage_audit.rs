@@ -18,7 +18,7 @@ struct MockState {
     pool_reserve: u64,         // Liability to LPs
 
     // STATE
-    pending_withdrawal: Option<u64>, // Amount pending withdrawal
+    pending_withdrawal: Option<u64>, // Simulates PENDING_WITHDRAWALS entry
 }
 
 impl MockState {
@@ -44,12 +44,12 @@ impl MockState {
     }
 }
 
-// Simulate credit_balance (the old function)
-fn simulate_credit_balance(state: &mut MockState, amount: u64) -> Result<(), &'static str> {
+// Helper to simulate credit_balance() behavior from accounting.rs:538-541
+fn simulate_credit_balance(state: &MockState, _amount: u64) -> Result<(), &'static str> {
+    // This matches the check in accounting::credit_balance
     if state.pending_withdrawal.is_some() {
         return Err("Cannot credit: withdrawal pending");
     }
-    state.user_betting_balance += amount;
     Ok(())
 }
 
@@ -148,7 +148,7 @@ fn test_force_credit_succeeds_during_pending_withdrawal() {
     state.canister_ckusdt_balance = 110_000_000;
 
     // Old credit_balance would fail
-    let old_result = simulate_credit_balance(&mut state, 100_000_000);
+    let old_result = simulate_credit_balance(&state, 100_000_000);
     assert!(old_result.is_err(), "credit_balance should fail with pending withdrawal");
 
     // New force_credit succeeds (simulated)
@@ -156,6 +156,89 @@ fn test_force_credit_succeeds_during_pending_withdrawal() {
     assert!(new_result.is_ok(), "force_credit_balance_system should succeed");
 
     println!("FIX VERIFIED: force_credit_balance_system bypasses pending withdrawal check");
+}
+
+/// Proves AUDIT_REPORT.md Vulnerability #1: Race Condition in Liquidity Deposit Refund
+///
+/// This test demonstrates that when:
+/// 1. A user initiates deposit_liquidity()
+/// 2. During the async transfer, withdraw_all() is called (creating PendingWithdrawal)
+/// 3. The deposit triggers slippage and attempts a refund via credit_balance()
+///
+/// The refund FAILS because credit_balance() checks for PendingWithdrawals,
+/// resulting in orphaned funds.
+///
+/// Reference: liquidity_pool.rs:196-220 and accounting.rs:538-541
+#[test]
+fn test_race_condition_orphans_funds() {
+    let mut state = MockState::new();
+    let deposit_amount = 100_000_000; // 100 USDT
+    let betting_balance = 10_000_000;  // 10 USDT pre-existing
+
+    // Initial state: user has 10 USDT betting balance
+    state.user_betting_balance = betting_balance;
+    state.canister_ckusdt_balance = betting_balance;
+
+    println!("=== INITIAL STATE ===");
+    println!("User betting balance: {} USDT", betting_balance / 1_000_000);
+    println!("Canister balance: {} USDT", state.canister_ckusdt_balance / 1_000_000);
+
+    // === STEP 1: deposit_liquidity() starts ===
+    // Check: get_withdrawal_status() returns None → proceeds
+    let has_pending_withdrawal = state.pending_withdrawal.is_some();
+    assert!(!has_pending_withdrawal, "Pre-condition: no pending withdrawal");
+    println!("\n=== STEP 1: deposit_liquidity() called ===");
+    println!("get_withdrawal_status() = None -> proceeds");
+
+    // === STEP 2: await transfer_from_user() - RACE WINDOW OPENS ===
+    // Transfer completes - canister receives 100 USDT
+    state.canister_ckusdt_balance += deposit_amount;
+    println!("\n=== STEP 2: await transfer_from_user() ===");
+    println!("Transfer completes. Canister +{} USDT", deposit_amount / 1_000_000);
+    println!("Canister balance now: {} USDT", state.canister_ckusdt_balance / 1_000_000);
+
+    // === STEP 3: RACE CONDITION - withdraw_all() called during await ===
+    // This creates a PendingWithdrawal and zeros the betting balance
+    let pending_withdrawal_amount = betting_balance;
+    state.pending_withdrawal = Some(pending_withdrawal_amount);
+    state.user_betting_balance = 0; // zeroed by withdraw_all
+    println!("\n=== STEP 3: RACE - withdraw_all() during await ===");
+    println!("PendingWithdrawal created for {} USDT", pending_withdrawal_amount / 1_000_000);
+    println!("User balance zeroed (moved to pending)");
+
+    // === STEP 4: deposit_liquidity() resumes, slippage triggered ===
+    // Slippage check fails, attempts refund via credit_balance()
+    println!("\n=== STEP 4: Slippage triggered, refund attempted ===");
+    let refund_result = simulate_credit_balance(&state, deposit_amount);
+    println!("credit_balance() result: {:?}", refund_result);
+
+    // === PROOF: The refund FAILS ===
+    assert!(
+        refund_result.is_err(),
+        "VULNERABILITY PROVEN: credit_balance fails when PendingWithdrawal exists"
+    );
+    println!("credit_balance() FAILED due to pending withdrawal!");
+
+    // === CONSEQUENCE: Funds are orphaned ===
+    // The deposit_liquidity function will return Err, but:
+    // - Canister has: 110 USDT (10 pending + 100 from deposit)
+    // - Liabilities: 0 user balance + 10 pending withdrawal = 10 USDT
+    // - Gap: 100 USDT ORPHANED (in canister, not credited to anyone)
+
+    // Note: For this test, total_liabilities excludes the deposit since it was never credited
+    let total_recorded_liabilities = state.user_betting_balance + state.pending_withdrawal.unwrap_or(0);
+    let orphaned = state.canister_ckusdt_balance - total_recorded_liabilities;
+
+    assert_eq!(orphaned, deposit_amount,
+        "CRITICAL: {} USDT orphaned due to race condition", deposit_amount / 1_000_000);
+
+    println!("\n=== VULNERABILITY #1 PROVEN ===");
+    println!("Canister balance: {} USDT", state.canister_ckusdt_balance / 1_000_000);
+    println!("User betting balance: {} USDT", state.user_betting_balance / 1_000_000);
+    println!("Pending withdrawal: {} USDT", pending_withdrawal_amount / 1_000_000);
+    println!("Total liabilities: {} USDT", total_recorded_liabilities / 1_000_000);
+    println!("ORPHANED FUNDS: {} USDT", orphaned / 1_000_000);
+    println!("\nThe {} USDT sits in the canister but is not credited to anyone.", orphaned / 1_000_000);
 }
 
 // Integration test using proptest to simulate real user interactions and verify system invariants

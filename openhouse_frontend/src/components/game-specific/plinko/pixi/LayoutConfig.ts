@@ -4,7 +4,7 @@
 export const LAYOUT = {
   // Fixed internal canvas - compact for 8 rows
   CANVAS_WIDTH: 400,
-  CANVAS_HEIGHT: 420,
+  CANVAS_HEIGHT: 440,
 
   // DENSE SPACING - key to fitting everything
   PEG_SPACING_X: 38,   // Tighter: 9 slots * 38 = 342px (fits in 400w)
@@ -13,15 +13,15 @@ export const LAYOUT = {
 
   BALL_RADIUS: 10,     // Proportional to pegs
 
-  DROP_ZONE_HEIGHT: 55,  // Compact bucket area
+  DROP_ZONE_HEIGHT: 70,  // Clear gap between bucket and pegs
   BUCKET_WIDTH: 100,
   BUCKET_HEIGHT: 50,
 
-  // Slots - readable
-  SLOT_WIDTH: 38,        // Match peg spacing
+  // Slots - bucket-style with gaps
+  SLOT_WIDTH: 34,        // Slightly smaller than peg spacing for gaps
   SLOT_HEIGHT: 32,
   SLOT_GAP: 2,
-  SLOT_Y_OFFSET: 8,      // Small gap after pegs
+  SLOT_Y_OFFSET: 16,     // More separation from bottom pegs
 
   // Timing
   MS_PER_ROW: 80,        // Slightly faster for compact board
@@ -40,10 +40,10 @@ export const LAYOUT = {
 } as const;
 
 // Layout math (8 rows):
-// Bucket: 55px
+// Bucket: 70px (with clear gap above pegs)
 // Pegs: 8 * 36 = 288px
-// Gap + Slots: 8 + 32 = 40px
-// Total height: 55 + 288 + 40 = 383px (fits in 420px with margin)
+// Gap + Slots: 16 + 32 = 48px
+// Total height: 70 + 288 + 48 = 406px (fits in 440px with margin)
 // Width: 9 slots * 38px = 342px centered in 400px
 
 // Get center X position

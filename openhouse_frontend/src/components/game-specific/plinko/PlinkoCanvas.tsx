@@ -90,6 +90,10 @@ export const PlinkoCanvas: React.FC<PlinkoCanvasProps> = ({
 
     app.init(container).then(() => {
       appRef.current = app;
+      // Apply multipliers immediately after init (in case they were available before init completed)
+      if (multipliers.length > 0) {
+        app.updateMultipliers(multipliers);
+      }
       setIsInitialized(true);
     }).catch((err) => {
       console.error('Failed to initialize Plinko canvas:', err);
