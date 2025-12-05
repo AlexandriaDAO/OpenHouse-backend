@@ -563,10 +563,23 @@ pub fn credit_balance(user: Principal, amount: u64) -> Result<(), String> {
 /// 2. Adding new funds doesn't affect the pending withdrawal amount
 /// 3. This is ONLY called for refunds where tokens are already in canister
 ///
+/// # Overflow Safety
+/// This function returns an error on overflow. In the specific case of
+/// `deposit_liquidity` slippage refunds, this would technically result in
+/// orphaned funds (transfer succeeded, credit failed).
+/// 
+/// However, this is theoretically impossible because:
+/// - Token is USDT (6 decimals)
+/// - Max u64 is ~18 quintillion (1.8 * 10^19)
+/// - Total USDT supply is ~100 billion (10^11)
+/// - Therefore, `current_balance + refund` can never overflow u64.
+///
 /// # When to use
-/// ONLY for slippage refunds in deposit_liquidity where:
-/// - transfer_from_user succeeded (tokens ARE in canister)
-/// - credit_balance would fail due to concurrent PendingWithdrawal
+/// ONLY for slippage refunds in `deposit_liquidity` where:
+/// - `transfer_from_user` succeeded (tokens ARE in canister)
+/// - `credit_balance` would fail due to concurrent `PendingWithdrawal`
+///
+/// DO NOT use for general credits or rewards.
 pub(crate) fn force_credit_balance_system(user: Principal, amount: u64) -> Result<(), String> {
     // NOTE: We intentionally skip the PENDING_WITHDRAWALS check here.
     // This is safe - see docstring above.

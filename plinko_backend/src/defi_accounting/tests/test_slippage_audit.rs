@@ -54,6 +54,10 @@ fn simulate_credit_balance(state: &mut MockState, amount: u64) -> Result<(), &'s
 }
 
 // Simulate force_credit_balance_system (the new function)
+// NOTE: This is a simulation. We cannot easily call the real function in this unit test
+// because it depends on `USER_BALANCES_STABLE` which is thread-local and requires
+// a specific test harness (MockContext) not fully set up for this file.
+// However, the logic being verified is the *absence* of the check, which this mock reflects.
 fn simulate_force_credit_balance_system(state: &mut MockState, amount: u64) -> Result<(), &'static str> {
     // Intentionally skips the check
     state.user_betting_balance += amount;
