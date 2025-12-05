@@ -27,6 +27,22 @@ export class BucketRenderer {
   private readonly INTERIOR_WIDTH = LAYOUT.BUCKET_WIDTH - 20;
   private readonly INTERIOR_HEIGHT = LAYOUT.BUCKET_HEIGHT - 20;
 
+  // Timeout tracking for cleanup
+  private pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
+
+  // Named event handlers for proper cleanup
+  private pointerOverHandler = () => {
+    if (this.container.eventMode === 'static') {
+      this.container.scale.set(1.05);
+      this.bucketBody.tint = 0xddddff;
+    }
+  };
+
+  private pointerOutHandler = () => {
+    this.container.scale.set(1);
+    this.bucketBody.tint = 0xffffff;
+  };
+
   constructor() {
     this.container = new Container();
     this.bucketBody = new Graphics();
@@ -93,19 +109,10 @@ export class BucketRenderer {
 
     // Make bucket interactive
     this.setInteractive(false);
-    
-    // Add hover effects
-    this.container.on('pointerover', () => {
-      if (this.container.eventMode === 'static') {
-        this.container.scale.set(1.05);
-        this.bucketBody.tint = 0xddddff;
-      }
-    });
-    
-    this.container.on('pointerout', () => {
-      this.container.scale.set(1);
-      this.bucketBody.tint = 0xffffff;
-    });
+
+    // Add hover effects using named handlers for proper cleanup
+    this.container.on('pointerover', this.pointerOverHandler);
+    this.container.on('pointerout', this.pointerOutHandler);
   }
 
   setInteractive(enabled: boolean): void {
@@ -128,6 +135,9 @@ export class BucketRenderer {
   }
 
   fillBucket(count: number): void {
+    // Clear any pending timeouts from previous fill
+    this.clearPendingTimeouts();
+
     // Clear existing balls
     this.clearBalls();
 
@@ -135,7 +145,7 @@ export class BucketRenderer {
     const ballRadius = 8;
 
     for (let i = 0; i < Math.min(count, 30); i++) {
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         const ball = new Graphics();
         ball.circle(0, 0, ballRadius);
         ball.fill({ color: LAYOUT.BALL_COLOR });
@@ -153,7 +163,12 @@ export class BucketRenderer {
           y,
           vy: 0,
         });
+
+        // Remove from pending list once executed
+        this.pendingTimeouts = this.pendingTimeouts.filter(id => id !== timeoutId);
       }, i * 40);
+
+      this.pendingTimeouts.push(timeoutId);
     }
   }
 
@@ -165,6 +180,10 @@ export class BucketRenderer {
   closeDoor(): void {
     this.doorOpen = false;
     this.isDoorAnimating = true;
+  }
+
+  isDoorFullyOpen(): boolean {
+    return this.doorOpen && this.doorProgress >= 1;
   }
 
   update(deltaMS: number): void {
@@ -238,6 +257,11 @@ export class BucketRenderer {
     this.labelText.text = 'DROP';
   }
 
+  private clearPendingTimeouts(): void {
+    this.pendingTimeouts.forEach(id => clearTimeout(id));
+    this.pendingTimeouts = [];
+  }
+
   private clearBalls(): void {
     this.balls.forEach((ball) => {
       ball.graphics.removeFromParent();
@@ -247,6 +271,13 @@ export class BucketRenderer {
   }
 
   destroy(): void {
+    // Clear pending timeouts
+    this.clearPendingTimeouts();
+
+    // Remove hover handlers
+    this.container.off('pointerover', this.pointerOverHandler);
+    this.container.off('pointerout', this.pointerOutHandler);
+
     if (this.clickCallback) {
       this.container.off('pointerdown', this.clickCallback);
     }
