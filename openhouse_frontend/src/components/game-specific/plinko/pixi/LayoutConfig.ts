@@ -29,6 +29,7 @@ export const LAYOUT = {
   SLOT_WIDTH: 45,
   SLOT_HEIGHT: 40,
   SLOT_GAP: 5,
+  SLOT_Y_OFFSET: 20, // Distance below last peg row
 
   // Animation timing (ms)
   MS_PER_ROW: 100,

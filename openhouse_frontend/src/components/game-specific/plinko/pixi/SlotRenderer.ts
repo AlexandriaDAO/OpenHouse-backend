@@ -21,7 +21,7 @@ export class SlotRenderer {
     this.slotGraphics = [];
     this.multiplierTexts = [];
 
-    const slotY = LAYOUT.DROP_ZONE_HEIGHT + this.rows * LAYOUT.PEG_SPACING_Y + 20;
+    const slotY = LAYOUT.DROP_ZONE_HEIGHT + this.rows * LAYOUT.PEG_SPACING_Y + LAYOUT.SLOT_Y_OFFSET;
     const numSlots = this.rows + 1;
 
     // Create text style
@@ -39,9 +39,13 @@ export class SlotRenderer {
 
       // Slot background
       const slotGraphic = new Graphics();
+      // Set position first
+      slotGraphic.position.set(x, slotY);
+      
+      // Draw relative to position
       slotGraphic.roundRect(
-        x - LAYOUT.SLOT_WIDTH / 2,
-        slotY,
+        -LAYOUT.SLOT_WIDTH / 2,
+        0,
         LAYOUT.SLOT_WIDTH,
         LAYOUT.SLOT_HEIGHT,
         4

@@ -86,7 +86,8 @@ export class BallRenderer {
 
           // Calculate final position
           const x = calculateBallX(ball.path, this.rows, 0, this.centerX);
-          const y = LAYOUT.DROP_ZONE_HEIGHT + this.rows * LAYOUT.PEG_SPACING_Y + LAYOUT.SLOT_HEIGHT / 2;
+          // Add offset to match SlotRenderer's positioning + half slot height for centering
+          const y = LAYOUT.DROP_ZONE_HEIGHT + this.rows * LAYOUT.PEG_SPACING_Y + LAYOUT.SLOT_Y_OFFSET + LAYOUT.SLOT_HEIGHT / 2;
           ball.container.position.set(x, y);
 
           // Callback

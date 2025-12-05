@@ -402,8 +402,10 @@ export const Plinko: React.FC = () => {
             disabled={!actor || gamePhase !== 'idle'}
             isWaitingForBackend={isWaitingForBackend}
           />
+        </div>
 
-          {/* Result overlay with Framer Motion */}
+        {/* Result overlay with Framer Motion - Below game board */}
+        <div className="min-h-[4rem] flex items-center justify-center">
           <ResultOverlay
             singleResult={currentResult ? {
               multiplier: currentResult.multiplier,

@@ -12,6 +12,7 @@ export interface PlinkoAppConfig {
   multipliers: number[];
   onBallLanded?: (ballId: number, slot: number) => void;
   onAllBallsLanded?: () => void;
+  onDrop?: () => void;
 }
 
 export class PlinkoPixiApp {
@@ -82,6 +83,9 @@ export class PlinkoPixiApp {
     await this.slotRenderer.init(this.mainContainer, this.centerX, this.config.rows);
     await this.ballRenderer.init(this.mainContainer, this.centerX);
     await this.bucketRenderer.init(this.mainContainer, this.centerX);
+    if (this.config.onDrop) {
+      this.bucketRenderer.setOnClick(this.config.onDrop);
+    }
 
     // Apply initial scale
     this.applyScale();
@@ -139,18 +143,23 @@ export class PlinkoPixiApp {
         this.ballRenderer.clear();
         this.bucketRenderer.reset();
         this.slotRenderer.clearHighlights();
+        this.bucketRenderer.setInteractive(true);
         break;
       case 'filling':
         // Bucket will handle filling via fillBucket()
+        this.bucketRenderer.setInteractive(false);
         break;
       case 'releasing':
         this.bucketRenderer.openDoor();
+        this.bucketRenderer.setInteractive(false);
         break;
       case 'animating':
         // Balls are dropped via dropBalls()
+        this.bucketRenderer.setInteractive(false);
         break;
       case 'complete':
         this.bucketRenderer.closeDoor();
+        this.bucketRenderer.setInteractive(false);
         break;
     }
   }

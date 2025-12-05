@@ -36,6 +36,17 @@ export const PlinkoCanvas: React.FC<PlinkoCanvasProps> = ({
   const prevGamePhaseRef = useRef<GamePhase>('idle');
   const animationCompleteCalledRef = useRef(false);
 
+  // Refs for stale closures
+  const gamePhaseRef = useRef(gamePhase);
+  const disabledRef = useRef(disabled);
+  const onDropRef = useRef(onDrop);
+
+  useEffect(() => {
+    gamePhaseRef.current = gamePhase;
+    disabledRef.current = disabled;
+    onDropRef.current = onDrop;
+  }, [gamePhase, disabled, onDrop]);
+
   // Handle all balls landed
   const handleAllBallsLanded = useCallback(() => {
     if (!animationCompleteCalledRef.current) {
@@ -67,6 +78,11 @@ export const PlinkoCanvas: React.FC<PlinkoCanvasProps> = ({
       multipliers,
       onBallLanded: handleBallLanded,
       onAllBallsLanded: handleAllBallsLanded,
+      onDrop: () => {
+        if (!disabledRef.current && gamePhaseRef.current === 'idle') {
+          onDropRef.current();
+        }
+      },
     });
 
     app.init(containerRef.current).then(() => {
@@ -141,52 +157,14 @@ export const PlinkoCanvas: React.FC<PlinkoCanvasProps> = ({
     }
   }, [doorOpen]);
 
-  // Handle drop click
-  const handleClick = useCallback(() => {
-    if (disabled || gamePhase !== 'idle') return;
-    onDrop();
-  }, [disabled, gamePhase, onDrop]);
-
-  // Get button label
-  const getLabel = () => {
-    if (isWaitingForBackend) return 'WAITING...';
-    switch (gamePhase) {
-      case 'filling':
-        return 'LOADING...';
-      case 'releasing':
-      case 'animating':
-        return 'DROPPING...';
-      default:
-        return ballCount > 1 ? `DROP ${ballCount}` : 'DROP';
-    }
-  };
-
   return (
-    <div className="relative w-full h-full flex flex-col items-center" style={{ minHeight: '400px' }}>
+    <div className="relative w-full h-full flex flex-col items-center">
       {/* Pixi.js canvas container */}
       <div
         ref={containerRef}
         className="flex-1 w-full"
-        style={{ touchAction: 'none', minHeight: '350px' }}
+        style={{ touchAction: 'none' }}
       />
-
-      {/* Drop button overlay (positioned at top center) */}
-      <button
-        onClick={handleClick}
-        disabled={disabled || gamePhase !== 'idle'}
-        className={`
-          absolute top-4 left-1/2 -translate-x-1/2 z-10
-          px-6 py-3 rounded-lg font-bold text-sm uppercase tracking-wide
-          transition-all duration-200
-          ${
-            disabled || gamePhase !== 'idle'
-              ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-              : 'bg-gradient-to-b from-yellow-500 to-yellow-600 text-black hover:from-yellow-400 hover:to-yellow-500 hover:scale-105 active:scale-95 cursor-pointer shadow-lg'
-          }
-        `}
-      >
-        {getLabel()}
-      </button>
     </div>
   );
 };

@@ -35,7 +35,7 @@ export const ResultOverlay: React.FC<ResultOverlayProps> = ({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -10, scale: 0.95 }}
           transition={{ duration: 0.3, ease: 'easeOut' }}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10"
+          className="flex justify-center"
         >
           {singleResult && (
             <SingleResultDisplay result={singleResult} />

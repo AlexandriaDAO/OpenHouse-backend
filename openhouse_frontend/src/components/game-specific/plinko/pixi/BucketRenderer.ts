@@ -16,6 +16,7 @@ export class BucketRenderer {
   private labelText: Text;
   private balls: BucketBall[] = [];
   private ballContainer: Container;
+  private clickCallback?: () => void;
 
   // Animation state
   private doorOpen = false;
@@ -89,6 +90,41 @@ export class BucketRenderer {
     this.container.addChild(this.labelText);
 
     parent.addChild(this.container);
+
+    // Make bucket interactive
+    this.setInteractive(false);
+    
+    // Add hover effects
+    this.container.on('pointerover', () => {
+      if (this.container.eventMode === 'static') {
+        this.container.scale.set(1.05);
+        this.bucketBody.tint = 0xddddff;
+      }
+    });
+    
+    this.container.on('pointerout', () => {
+      this.container.scale.set(1);
+      this.bucketBody.tint = 0xffffff;
+    });
+  }
+
+  setInteractive(enabled: boolean): void {
+    this.container.eventMode = enabled ? 'static' : 'none';
+    this.container.cursor = enabled ? 'pointer' : 'default';
+    this.container.alpha = enabled ? 1 : 0.8;
+    
+    if (!enabled) {
+      this.container.scale.set(1);
+      this.bucketBody.tint = 0xffffff;
+    }
+  }
+
+  setOnClick(callback: () => void): void {
+    if (this.clickCallback) {
+      this.container.off('pointerdown', this.clickCallback);
+    }
+    this.clickCallback = callback;
+    this.container.on('pointerdown', callback);
   }
 
   fillBucket(count: number): void {
@@ -211,6 +247,9 @@ export class BucketRenderer {
   }
 
   destroy(): void {
+    if (this.clickCallback) {
+      this.container.off('pointerdown', this.clickCallback);
+    }
     this.clearBalls();
     this.container.removeFromParent();
     this.container.destroy({ children: true });
