@@ -1,66 +1,54 @@
 // Plinko board layout constants
-// All values are in "design pixels" - scaled uniformly for responsive sizing
+// Fixed internal canvas with dense spacing for visibility
 
 export const LAYOUT = {
-  // Base design dimensions
-  BASE_WIDTH: 800,
-  BASE_HEIGHT: 700,
+  // Fixed internal canvas - compact for 8 rows
+  CANVAS_WIDTH: 400,
+  CANVAS_HEIGHT: 420,
 
-  // Peg grid
-  PEG_SPACING_X: 50,
-  PEG_SPACING_Y: 55,
-  PEG_RADIUS: 6,
+  // DENSE SPACING - key to fitting everything
+  PEG_SPACING_X: 38,   // Tighter: 9 slots * 38 = 342px (fits in 400w)
+  PEG_SPACING_Y: 36,   // Tighter: 8 rows * 36 = 288px for pegs
+  PEG_RADIUS: 8,       // LARGER pegs - visible
 
-  // Ball
-  BALL_RADIUS: 12,
-  BALL_COLOR: 0xffd700, // Gold
+  BALL_RADIUS: 10,     // Proportional to pegs
 
-  // Drop zone (space above first peg row)
-  DROP_ZONE_HEIGHT: 80,
+  DROP_ZONE_HEIGHT: 55,  // Compact bucket area
+  BUCKET_WIDTH: 100,
+  BUCKET_HEIGHT: 50,
 
-  // Bucket
-  BUCKET_WIDTH: 160,
-  BUCKET_HEIGHT: 80,
-  BUCKET_COLOR: 0x2a2a3e,
-  BUCKET_BORDER_COLOR: 0x4a4a6e,
-  TRAPDOOR_COLOR: 0x3a3a5e,
+  // Slots - readable
+  SLOT_WIDTH: 38,        // Match peg spacing
+  SLOT_HEIGHT: 32,
+  SLOT_GAP: 2,
+  SLOT_Y_OFFSET: 8,      // Small gap after pegs
 
-  // Slots
-  SLOT_WIDTH: 45,
-  SLOT_HEIGHT: 40,
-  SLOT_GAP: 5,
-  SLOT_Y_OFFSET: 20, // Distance below last peg row
-
-  // Animation timing (ms)
-  MS_PER_ROW: 100,
-  BALL_STAGGER_MS: 150,
+  // Timing
+  MS_PER_ROW: 80,        // Slightly faster for compact board
+  BALL_STAGGER_MS: 120,
   DOOR_OPEN_DURATION_MS: 300,
 
   // Colors
   PEG_COLOR: 0xe8e8e8,
-  WIN_COLOR: 0x22c55e, // Green
-  LOSE_COLOR: 0x6b7280, // Gray
-  HIGHLIGHT_COLOR: 0xffd700, // Gold
+  BALL_COLOR: 0xffd700,
+  WIN_COLOR: 0x22c55e,
+  LOSE_COLOR: 0x6b7280,
+  HIGHLIGHT_COLOR: 0xffd700,
+  BUCKET_COLOR: 0x2a2a3e,
+  BUCKET_BORDER_COLOR: 0x4a4a6e,
+  TRAPDOOR_COLOR: 0x3a3a5e,
 } as const;
 
-// Calculate responsive scale factor
-export function calculateScale(
-  containerWidth: number,
-  containerHeight: number,
-  rows: number
-): number {
-  const boardHeight = LAYOUT.DROP_ZONE_HEIGHT + rows * LAYOUT.PEG_SPACING_Y + LAYOUT.SLOT_HEIGHT + 100;
-  const scaleX = containerWidth / LAYOUT.BASE_WIDTH;
-  const scaleY = containerHeight / boardHeight;
-  return Math.min(scaleX, scaleY, 1.2); // Allow slight upscale, cap at 1.2
-}
+// Layout math (8 rows):
+// Bucket: 55px
+// Pegs: 8 * 36 = 288px
+// Gap + Slots: 8 + 32 = 40px
+// Total height: 55 + 288 + 40 = 383px (fits in 420px with margin)
+// Width: 9 slots * 38px = 342px centered in 400px
 
-// Calculate board dimensions for given rows
-export function getBoardDimensions(rows: number) {
-  const pegAreaWidth = rows * LAYOUT.PEG_SPACING_X;
-  const width = Math.max(LAYOUT.BASE_WIDTH, pegAreaWidth + 100);
-  const height = LAYOUT.DROP_ZONE_HEIGHT + rows * LAYOUT.PEG_SPACING_Y + LAYOUT.SLOT_HEIGHT + 80;
-  return { width, height };
+// Get center X position
+export function getCenterX(): number {
+  return LAYOUT.CANVAS_WIDTH / 2;  // 200
 }
 
 // Easing function for smooth animation

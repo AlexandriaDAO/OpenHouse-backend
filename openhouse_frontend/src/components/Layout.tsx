@@ -10,12 +10,15 @@ interface LayoutProps {
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
   const isHome = location.pathname === '/';
-  // Dice routes need full-screen layout without footer or back button
-  const isDiceRoute = location.pathname.startsWith('/dice');
+  // Game routes need full-screen layout without footer or back button
+  const isGameRoute = location.pathname.startsWith('/dice') ||
+                      location.pathname.startsWith('/plinko') ||
+                      location.pathname.startsWith('/crash') ||
+                      location.pathname.startsWith('/blackjack');
   const [showModal, setShowModal] = useState(false);
 
   return (
-    <div className={`${isDiceRoute ? 'h-screen' : 'min-h-screen'} flex flex-col bg-pure-black overflow-hidden`}>
+    <div className={`${isGameRoute ? 'h-screen' : 'min-h-screen'} flex flex-col bg-pure-black overflow-hidden`}>
       {/* Header - minimal and clean */}
       <header className="bg-pure-black border-b border-pure-white/10 flex-shrink-0">
         <div className="container mx-auto px-4 py-3">
@@ -58,8 +61,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       <WhyOpenHouseModal isOpen={showModal} onClose={() => setShowModal(false)} />
 
       {/* Main Content */}
-      <main className={`flex-1 ${isDiceRoute ? 'overflow-hidden' : ''} container mx-auto px-4 ${isDiceRoute ? 'py-2' : 'py-8'}`}>
-        {!isHome && !isDiceRoute && (
+      <main className={`flex-1 ${isGameRoute ? 'overflow-hidden' : ''} container mx-auto ${isGameRoute ? 'px-0 py-0' : 'px-4 py-8'}`}>
+        {!isHome && !isGameRoute && (
           <div className="mb-6">
             <Link to="/" className="inline-flex items-center gap-2 text-pure-white/60 hover:text-dfinity-turquoise transition-colors font-mono">
               <span>←</span>

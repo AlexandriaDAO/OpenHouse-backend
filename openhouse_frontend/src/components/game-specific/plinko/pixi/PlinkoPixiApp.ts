@@ -1,5 +1,5 @@
 import { Application, Container } from 'pixi.js';
-import { LAYOUT, calculateScale, getBoardDimensions } from './LayoutConfig';
+import { LAYOUT, getCenterX } from './LayoutConfig';
 import { PegRenderer } from './PegRenderer';
 import { SlotRenderer } from './SlotRenderer';
 import { BallRenderer } from './BallRenderer';
@@ -18,8 +18,7 @@ export interface PlinkoAppConfig {
 export class PlinkoPixiApp {
   private app: Application;
   private config: PlinkoAppConfig;
-  private scale: number = 1;
-  private centerX: number = 0;
+  private centerX: number;
 
   // Containers (z-order)
   private mainContainer: Container;
@@ -29,13 +28,12 @@ export class PlinkoPixiApp {
   private bucketRenderer: BucketRenderer;
 
   private isInitialized = false;
-  private containerWidth = 0;
-  private containerHeight = 0;
 
   constructor(config: PlinkoAppConfig) {
     this.config = config;
     this.app = new Application();
     this.mainContainer = new Container();
+    this.centerX = getCenterX();
 
     this.pegRenderer = new PegRenderer(config.rows);
     this.slotRenderer = new SlotRenderer(config.rows, config.multipliers);
@@ -44,41 +42,54 @@ export class PlinkoPixiApp {
   }
 
   async init(container: HTMLElement): Promise<void> {
-    const rect = container.getBoundingClientRect();
-    // Ensure minimum dimensions for valid WebGL context
-    this.containerWidth = Math.max(rect.width, 100);
-    this.containerHeight = Math.max(rect.height, 100);
-
     try {
+      // Fixed internal canvas size - no dynamic scaling
       await this.app.init({
-        width: this.containerWidth,
-        height: this.containerHeight,
+        width: LAYOUT.CANVAS_WIDTH,
+        height: LAYOUT.CANVAS_HEIGHT,
         backgroundColor: 0x0a0a14,
         antialias: true,
         resolution: Math.min(window.devicePixelRatio || 1, 2),
         autoDensity: true,
-        preference: 'webgl', // Prefer WebGL over WebGPU for better compatibility
+        preference: 'webgl',
+        powerPreference: 'default',
       });
     } catch (err) {
-      console.error('Pixi.js initialization failed:', err);
-      // Try again with canvas fallback
-      await this.app.init({
-        width: this.containerWidth,
-        height: this.containerHeight,
-        backgroundColor: 0x0a0a14,
-        antialias: false,
-        resolution: 1,
-        preference: 'webgl',
-      });
+      console.error('Pixi.js WebGL initialization failed, trying with lower settings:', err);
+      try {
+        await this.app.init({
+          width: LAYOUT.CANVAS_WIDTH,
+          height: LAYOUT.CANVAS_HEIGHT,
+          backgroundColor: 0x0a0a14,
+          antialias: false,
+          resolution: 1,
+          autoDensity: false,
+          preference: 'webgl',
+        });
+      } catch (err2) {
+        console.error('Pixi.js fallback also failed:', err2);
+        throw err2;
+      }
     }
 
-    container.appendChild(this.app.canvas);
+    // Handle WebGL context loss
+    const canvas = this.app.canvas as HTMLCanvasElement;
+    canvas.addEventListener('webglcontextlost', (e) => {
+      console.warn('WebGL context lost, preventing default');
+      e.preventDefault();
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      console.log('WebGL context restored');
+    });
+
+    // CSS fills container - no need for programmatic resizing
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+
+    container.appendChild(canvas);
     this.app.stage.addChild(this.mainContainer);
 
-    // Calculate initial scale and center
-    this.updateLayout();
-
-    // Initialize renderers
+    // Initialize renderers with fixed centerX
     await this.pegRenderer.init(this.mainContainer, this.centerX);
     await this.slotRenderer.init(this.mainContainer, this.centerX, this.config.rows);
     await this.ballRenderer.init(this.mainContainer, this.centerX);
@@ -87,43 +98,13 @@ export class PlinkoPixiApp {
       this.bucketRenderer.setOnClick(this.config.onDrop);
     }
 
-    // Apply initial scale
-    this.applyScale();
-
     // Start render loop
     this.app.ticker.add(this.update.bind(this));
 
     this.isInitialized = true;
   }
 
-  private updateLayout(): void {
-    const { rows } = this.config;
-    const dims = getBoardDimensions(rows);
-    this.scale = calculateScale(this.containerWidth, this.containerHeight, rows);
-    this.centerX = dims.width / 2;
-  }
-
-  private applyScale(): void {
-    this.mainContainer.scale.set(this.scale);
-    // Center the scaled content
-    const dims = getBoardDimensions(this.config.rows);
-    const scaledWidth = dims.width * this.scale;
-    const scaledHeight = dims.height * this.scale;
-    this.mainContainer.position.set(
-      (this.containerWidth - scaledWidth) / 2,
-      (this.containerHeight - scaledHeight) / 2
-    );
-  }
-
-  resize(width: number, height: number): void {
-    if (!this.isInitialized) return;
-
-    this.containerWidth = width;
-    this.containerHeight = height;
-    this.app.renderer.resize(width, height);
-    this.updateLayout();
-    this.applyScale();
-  }
+  // No resize method needed - CSS handles display scaling
 
   private update(ticker: { deltaMS: number }): void {
     const delta = ticker.deltaMS;

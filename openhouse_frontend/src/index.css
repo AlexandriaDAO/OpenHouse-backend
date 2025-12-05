@@ -366,3 +366,148 @@
     opacity: 1;
   }
 }
+
+/* =============================================================================
+   PLINKO SLIDER STYLES
+   Thin track with styled thumb to match game theme
+   ============================================================================= */
+
+.plinko-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+
+/* WebKit (Chrome, Safari, Edge) */
+.plinko-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.08) 100%);
+  height: 4px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.plinko-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: radial-gradient(circle at 30% 30%, #FFD700, #FFA500);
+  border: 2px solid #FFFFFF;
+  cursor: pointer;
+  border-radius: 50%;
+  margin-top: -8px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.plinko-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 3px 10px rgba(255, 215, 0, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+}
+
+/* Firefox */
+.plinko-slider::-moz-range-track {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.08) 100%);
+  height: 4px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.plinko-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: radial-gradient(circle at 30% 30%, #FFD700, #FFA500);
+  border: 2px solid #FFFFFF;
+  cursor: pointer;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.plinko-slider::-moz-range-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 3px 10px rgba(255, 215, 0, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+}
+
+/* Disabled state */
+.plinko-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.plinko-slider:disabled::-webkit-slider-thumb {
+  cursor: not-allowed;
+}
+
+.plinko-slider:disabled::-moz-range-thumb {
+  cursor: not-allowed;
+}
+
+/* Vertical slider for Plinko side panel */
+.plinko-slider-vertical {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+
+/* WebKit vertical */
+.plinko-slider-vertical::-webkit-slider-runnable-track {
+  background: linear-gradient(180deg, rgba(255, 215, 0, 0.3) 0%, rgba(255, 255, 255, 0.1) 100%);
+  width: 6px;
+  height: 100%;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.plinko-slider-vertical::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  background: radial-gradient(circle at 30% 30%, #FFD700, #FFA500);
+  border: 2px solid #FFFFFF;
+  cursor: pointer;
+  border-radius: 50%;
+  margin-left: -8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.plinko-slider-vertical::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 3px 12px rgba(255, 215, 0, 0.6), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+}
+
+/* Firefox vertical */
+.plinko-slider-vertical::-moz-range-track {
+  background: linear-gradient(180deg, rgba(255, 215, 0, 0.3) 0%, rgba(255, 255, 255, 0.1) 100%);
+  width: 6px;
+  height: 100%;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.plinko-slider-vertical::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  background: radial-gradient(circle at 30% 30%, #FFD700, #FFA500);
+  border: 2px solid #FFFFFF;
+  cursor: pointer;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.plinko-slider-vertical::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 3px 12px rgba(255, 215, 0, 0.6), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+}
+
+.plinko-slider-vertical:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

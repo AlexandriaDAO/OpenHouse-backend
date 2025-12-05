@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import usePlinkoActor from '../../hooks/actors/usePlinkoActor';
 import { GameLayout } from '../../components/game-ui';
-import { PlinkoCanvas, ResultOverlay } from '../../components/game-specific/plinko';
+import { PlinkoCanvas } from '../../components/game-specific/plinko';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import { BettingRail } from '../../components/betting';
 import { useGameBalance } from '../../providers/GameBalanceProvider';
@@ -153,6 +153,9 @@ export const Plinko: React.FC = () => {
       timeoutId = setTimeout(() => {
         console.warn('Game animation timed out - forcing reset');
         setIsPlaying(false);
+        setGamePhase('idle'); // Reset to idle so balls get cleared
+        setDoorOpen(false);
+        setPendingPaths(null);
         setGameError('Game response timed out. Please refresh if stuck.');
       }, ANIMATION_SAFETY_TIMEOUT_MS);
     }
@@ -351,12 +354,126 @@ export const Plinko: React.FC = () => {
 
   return (
     <GameLayout hideFooter noScroll>
-      <div className="flex-1 flex flex-col max-w-3xl mx-auto px-4 overflow-hidden min-h-0 w-full">
+      {/* Unified Game Container - canvas + side panels as one unit */}
+      <div className="flex-1 flex flex-col items-center justify-center px-2 pb-40 overflow-hidden">
+        {/* Main game area with side panels */}
+        <div className="flex items-stretch gap-0 w-full max-w-3xl">
 
-        {/* Ball count slider - compact */}
-        <div className="flex-shrink-0 py-3">
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-500 uppercase tracking-wide">Balls</span>
+          {/* LEFT PANEL - Ball Count Slider */}
+          <div className="hidden sm:flex flex-col justify-center items-center w-20 bg-[#0a0a14] border-y border-l border-gray-800/50 rounded-l-xl px-3 py-4">
+            <span className="text-[10px] text-gray-500 uppercase tracking-wider mb-3">Balls</span>
+            <div className="flex-1 flex flex-col items-center justify-center relative w-full">
+              {/* Vertical slider track */}
+              <input
+                type="range"
+                min="1"
+                max="30"
+                value={ballCount}
+                onChange={(e) => setBallCount(Number(e.target.value))}
+                disabled={isPlaying || balance.game === 0n}
+                className="plinko-slider-vertical"
+                style={{
+                  writingMode: 'vertical-lr',
+                  direction: 'rtl',
+                  height: '180px',
+                  width: '24px'
+                }}
+              />
+            </div>
+            <span className="text-2xl text-white font-mono font-bold mt-3">{ballCount}</span>
+          </div>
+
+          {/* CENTER - Pixi Canvas */}
+          <div className="flex-1 flex flex-col min-w-0">
+            {/* Canvas container */}
+            <div
+              className="w-full bg-[#0a0a14]"
+              style={{ aspectRatio: '400/420' }}
+            >
+              <PlinkoCanvas
+                rows={ROWS}
+                multipliers={multipliers}
+                paths={pendingPaths}
+                gamePhase={gamePhase}
+                fillProgress={fillProgress}
+                doorOpen={doorOpen}
+                ballCount={ballCount}
+                finalPositions={
+                  ballCount === 1
+                    ? (currentResult ? [currentResult.final_position] : [])
+                    : (multiBallResult?.results.map(r => r.final_position) || [])
+                }
+                onAnimationComplete={handleAnimationComplete}
+                onDrop={dropBalls}
+                disabled={!actor || gamePhase !== 'idle'}
+                isWaitingForBackend={isWaitingForBackend}
+              />
+            </div>
+
+            {/* Result bar - integrated into canvas area */}
+            <div className="h-10 bg-[#0a0a14] flex items-center justify-center border-t border-gray-800/30">
+              {!isPlaying && gamePhase === 'idle' && currentResult && (
+                <div className={`text-center ${currentResult.win ? 'text-green-400' : 'text-red-400'}`}>
+                  <span className="font-bold text-lg">{currentResult.multiplier.toFixed(2)}x</span>
+                  <span className="ml-2 text-sm">
+                    {currentResult.profit && currentResult.profit >= 0 ? '+' : ''}{currentResult.profit?.toFixed(2)} USDT
+                  </span>
+                </div>
+              )}
+              {!isPlaying && gamePhase === 'idle' && multiBallResult && !currentResult && (
+                <div className={`text-center ${(multiBallResult.net_profit ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  <span className="font-bold text-lg">{multiBallResult.average_multiplier.toFixed(2)}x avg</span>
+                  <span className="ml-2 text-sm">
+                    {(multiBallResult.net_profit ?? 0) >= 0 ? '+' : ''}{multiBallResult.net_profit?.toFixed(2)} USDT
+                  </span>
+                </div>
+              )}
+              {gameError && (
+                <div className="text-red-400 text-xs px-3">{gameError}</div>
+              )}
+            </div>
+          </div>
+
+          {/* RIGHT PANEL - Bet Info */}
+          <div className="hidden sm:flex flex-col justify-center w-24 bg-[#0a0a14] border-y border-r border-gray-800/50 rounded-r-xl px-3 py-4">
+            {/* Per Ball */}
+            <div className="flex flex-col items-center mb-4">
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Per Ball</span>
+              <span className="text-lg text-white font-mono font-bold">${betAmount.toFixed(2)}</span>
+            </div>
+
+            {/* Divider */}
+            <div className="w-full h-px bg-gray-800/50 my-2"></div>
+
+            {/* Total Bet */}
+            <div className="flex flex-col items-center mb-4">
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total</span>
+              <span className="text-lg text-yellow-400 font-mono font-bold">${(betAmount * ballCount).toFixed(2)}</span>
+            </div>
+
+            {/* Divider */}
+            <div className="w-full h-px bg-gray-800/50 my-2"></div>
+
+            {/* House Edge / Info */}
+            <div className="flex flex-col items-center">
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Edge</span>
+              <span className="text-sm text-gray-400 font-mono">{houseEdge}%</span>
+            </div>
+
+            <button
+              onClick={() => setShowInfoModal(true)}
+              className="mt-4 text-gray-600 hover:text-gray-400 text-xs border border-gray-700 rounded px-2 py-1"
+            >
+              Info
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile controls - only show on small screens */}
+        <div className="sm:hidden w-full max-w-md mt-3 space-y-2 px-2">
+          {/* Ball slider - horizontal on mobile */}
+          <div className="flex items-center gap-3 bg-[#0a0a14] rounded-lg p-3 border border-gray-800/50">
+            <span className="text-xs text-gray-500 uppercase">Balls</span>
             <input
               type="range"
               min="1"
@@ -364,83 +481,30 @@ export const Plinko: React.FC = () => {
               value={ballCount}
               onChange={(e) => setBallCount(Number(e.target.value))}
               disabled={isPlaying || balance.game === 0n}
-              className="flex-1 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer
-                       disabled:opacity-50 disabled:cursor-not-allowed"
+              className="plinko-slider flex-1"
             />
-            <span className="text-sm text-white font-mono w-6 text-right">{ballCount}</span>
+            <span className="text-lg text-white font-mono font-bold w-8 text-center">{ballCount}</span>
           </div>
 
-          {/* Bet info - always show for clarity */}
-          <div className="flex justify-center items-center gap-4 py-1 text-xs text-gray-400">
-            <span>
-              Per ball: ${betAmount.toFixed(2)}
-              <span className="text-gray-600 ml-1">(max ${maxBet.toFixed(2)})</span>
-            </span>
-            {ballCount > 1 && (
-              <span className="text-white font-semibold">Total: ${(betAmount * ballCount).toFixed(2)}</span>
-            )}
+          {/* Bet info row */}
+          <div className="flex justify-between items-center bg-[#0a0a14] rounded-lg p-3 border border-gray-800/50">
+            <div className="text-center">
+              <div className="text-[10px] text-gray-500 uppercase">Per Ball</div>
+              <div className="text-white font-mono">${betAmount.toFixed(2)}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-[10px] text-gray-500 uppercase">Total</div>
+              <div className="text-yellow-400 font-mono">${(betAmount * ballCount).toFixed(2)}</div>
+            </div>
+            <button onClick={() => setShowInfoModal(true)} className="text-gray-600 hover:text-gray-400 border border-gray-700 rounded px-2 py-1 text-xs">
+              Info
+            </button>
           </div>
         </div>
+      </div>
 
-        {/* Game Board with Pixi.js canvas */}
-        <div className="flex-1 flex justify-center items-start py-2 min-h-0 relative">
-          <PlinkoCanvas
-            rows={ROWS}
-            multipliers={multipliers}
-            paths={pendingPaths}
-            gamePhase={gamePhase}
-            fillProgress={fillProgress}
-            doorOpen={doorOpen}
-            ballCount={ballCount}
-            finalPositions={
-              ballCount === 1
-                ? (currentResult ? [currentResult.final_position] : [])
-                : (multiBallResult?.results.map(r => r.final_position) || [])
-            }
-            onAnimationComplete={handleAnimationComplete}
-            onDrop={dropBalls}
-            disabled={!actor || gamePhase !== 'idle'}
-            isWaitingForBackend={isWaitingForBackend}
-          />
-        </div>
-
-        {/* Result overlay with Framer Motion - Below game board */}
-        <div className="min-h-[4rem] flex items-center justify-center">
-          <ResultOverlay
-            singleResult={currentResult ? {
-              multiplier: currentResult.multiplier,
-              win: currentResult.win,
-              profit: currentResult.profit,
-            } : null}
-            multiResult={multiBallResult ? {
-              total_balls: multiBallResult.total_balls,
-              total_wins: multiBallResult.total_wins,
-              average_multiplier: multiBallResult.average_multiplier,
-              net_profit: multiBallResult.net_profit,
-            } : null}
-            isVisible={!isPlaying && gamePhase === 'idle' && (!!currentResult || !!multiBallResult)}
-          />
-        </div>
-
-        {/* Error display */}
-        {gameError && (
-          <div className="text-red-400 text-xs text-center py-1 flex-shrink-0">
-            {gameError}
-          </div>
-        )}
-
-        {/* Info button */}
-        <div className="flex justify-end py-2 flex-shrink-0">
-          <button
-            onClick={() => setShowInfoModal(true)}
-            className="w-7 h-7 rounded-full bg-gray-800 hover:bg-gray-700
-                     text-gray-500 hover:text-white transition-colors text-xs"
-          >
-            ?
-          </button>
-        </div>
-        
-        {/* BettingRail */}
+      {/* BettingRail - stays at bottom */}
+      <div className="flex-shrink-0">
         <BettingRail
           betAmount={betAmount}
           onBetChange={setBetAmount}

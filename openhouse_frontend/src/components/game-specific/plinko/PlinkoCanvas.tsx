@@ -28,30 +28,32 @@ export const PlinkoCanvas: React.FC<PlinkoCanvasProps> = ({
   onAnimationComplete,
   onDrop,
   disabled,
-  isWaitingForBackend,
+  isWaitingForBackend: _isWaitingForBackend,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<PlinkoPixiApp | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const prevGamePhaseRef = useRef<GamePhase>('idle');
   const animationCompleteCalledRef = useRef(false);
+  const droppedBallsRef = useRef(false);
 
   // Refs for stale closures
   const gamePhaseRef = useRef(gamePhase);
   const disabledRef = useRef(disabled);
   const onDropRef = useRef(onDrop);
+  const finalPositionsRef = useRef(finalPositions);
 
   useEffect(() => {
     gamePhaseRef.current = gamePhase;
     disabledRef.current = disabled;
     onDropRef.current = onDrop;
-  }, [gamePhase, disabled, onDrop]);
+    finalPositionsRef.current = finalPositions;
+  }, [gamePhase, disabled, onDrop, finalPositions]);
 
   // Handle all balls landed
   const handleAllBallsLanded = useCallback(() => {
     if (!animationCompleteCalledRef.current) {
       animationCompleteCalledRef.current = true;
-      // Small delay before completing to let landing effect show
       setTimeout(() => {
         onAnimationComplete?.();
       }, 300);
@@ -61,17 +63,18 @@ export const PlinkoCanvas: React.FC<PlinkoCanvasProps> = ({
   // Handle individual ball landed
   const handleBallLanded = useCallback(
     (_ballId: number, _slot: number) => {
-      // Highlight the slot
-      if (appRef.current && finalPositions) {
-        appRef.current.highlightSlots(finalPositions);
+      if (appRef.current && finalPositionsRef.current) {
+        appRef.current.highlightSlots(finalPositionsRef.current);
       }
     },
-    [finalPositions]
+    []
   );
 
   // Initialize Pixi app
   useEffect(() => {
     if (!containerRef.current || appRef.current) return;
+
+    const container = containerRef.current;
 
     const app = new PlinkoPixiApp({
       rows,
@@ -85,33 +88,21 @@ export const PlinkoCanvas: React.FC<PlinkoCanvasProps> = ({
       },
     });
 
-    app.init(containerRef.current).then(() => {
+    app.init(container).then(() => {
       appRef.current = app;
       setIsInitialized(true);
+    }).catch((err) => {
+      console.error('Failed to initialize Plinko canvas:', err);
     });
 
     return () => {
-      app.destroy();
-      appRef.current = null;
-      setIsInitialized(false);
-    };
-  }, [rows]); // Only re-init if rows change
-
-  // Handle resize
-  useEffect(() => {
-    if (!containerRef.current || !appRef.current) return;
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      const { width, height } = entries[0].contentRect;
-      if (width > 0 && height > 0) {
-        appRef.current?.resize(width, height);
+      if (appRef.current) {
+        appRef.current.destroy();
+        appRef.current = null;
+        setIsInitialized(false);
       }
-    });
-
-    resizeObserver.observe(containerRef.current);
-
-    return () => resizeObserver.disconnect();
-  }, [isInitialized]);
+    };
+  }, [rows]);
 
   // Update multipliers when they change
   useEffect(() => {
@@ -127,9 +118,15 @@ export const PlinkoCanvas: React.FC<PlinkoCanvasProps> = ({
     const prevPhase = prevGamePhaseRef.current;
     prevGamePhaseRef.current = gamePhase;
 
-    // Reset animation complete flag on new game
+    // Reset flags on new game
     if (gamePhase === 'idle' && prevPhase !== 'idle') {
       animationCompleteCalledRef.current = false;
+      droppedBallsRef.current = false;
+    }
+
+    // Reset dropped flag when starting a new filling phase
+    if (gamePhase === 'filling' && prevPhase === 'idle') {
+      droppedBallsRef.current = false;
     }
 
     appRef.current.setGamePhase(gamePhase);
@@ -139,14 +136,16 @@ export const PlinkoCanvas: React.FC<PlinkoCanvasProps> = ({
       appRef.current.fillBucket(ballCount);
     }
 
-    if (gamePhase === 'animating' && paths && paths.length > 0) {
+    // Only drop balls ONCE per animation cycle
+    if (gamePhase === 'animating' && paths && paths.length > 0 && !droppedBallsRef.current) {
+      droppedBallsRef.current = true;
       appRef.current.dropBalls(paths);
     }
 
-    if (gamePhase === 'complete' && finalPositions) {
-      appRef.current.highlightSlots(finalPositions);
+    if (gamePhase === 'complete' && finalPositionsRef.current) {
+      appRef.current.highlightSlots(finalPositionsRef.current);
     }
-  }, [gamePhase, paths, ballCount, finalPositions]);
+  }, [gamePhase, paths, ballCount]);
 
   // Handle door state
   useEffect(() => {
@@ -158,13 +157,10 @@ export const PlinkoCanvas: React.FC<PlinkoCanvasProps> = ({
   }, [doorOpen]);
 
   return (
-    <div className="relative w-full h-full flex flex-col items-center">
-      {/* Pixi.js canvas container */}
-      <div
-        ref={containerRef}
-        className="flex-1 w-full"
-        style={{ touchAction: 'none' }}
-      />
-    </div>
+    <div
+      ref={containerRef}
+      className="w-full h-full"
+      style={{ touchAction: 'none' }}
+    />
   );
 };
