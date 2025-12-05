@@ -32,6 +32,9 @@ export interface BettingRailProps {
   multiplier: number;
   canisterId: string;
   gameRoute?: string;
+  // Balance loading state - prevents false deposit prompts during initialization
+  isBalanceLoading?: boolean;
+  isBalanceInitialized?: boolean;
 }
 
 // Betting state returned from useBettingState hook

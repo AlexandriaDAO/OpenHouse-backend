@@ -118,10 +118,10 @@ export function DiceGame() {
     updateOdds();
   }, [targetNumber, direction, diceCount, actor, betAmount]);
 
-  // Balance management
+  // Balance management - initial refresh is now handled by GameBalanceProvider
+  // Keep periodic refresh and focus handler for real-time balance updates
   useEffect(() => {
     if (actor) {
-      gameBalanceContext.refresh().catch(console.error);
       const intervalId = setInterval(() => {
         gameBalanceContext.refresh().catch(console.error);
       }, 30000);
@@ -376,6 +376,8 @@ export function DiceGame() {
         disabled={isPlaying}
         multiplier={multiplier}
         canisterId={DICE_BACKEND_CANISTER_ID}
+        isBalanceLoading={gameBalanceContext.isLoading}
+        isBalanceInitialized={gameBalanceContext.isInitialized}
       />
       </div>
 

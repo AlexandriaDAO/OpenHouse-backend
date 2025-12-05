@@ -16,6 +16,8 @@ export function useBettingState(props: BettingRailProps): BettingState {
     houseBalance,
     onBalanceRefresh,
     disabled = false,
+    isBalanceLoading = false,
+    isBalanceInitialized = true,  // Default true for backward compatibility
   } = props;
 
   // Rail style (persisted)
@@ -33,10 +35,20 @@ export function useBettingState(props: BettingRailProps): BettingState {
     localStorage.setItem('openhouse-rail-style', railStyle);
   }, [railStyle]);
 
-  // Trigger deposit animation when balance is zero
+  // Trigger deposit animation ONLY when:
+  // 1. Balance has been initialized (first load completed)
+  // 2. Not currently loading
+  // 3. Balance is actually zero
+  // 4. Component is not disabled
+  // This prevents false "deposit" prompts during auth/actor initialization
   useEffect(() => {
-    setShowDepositAnimation(gameBalance === 0n && !disabled);
-  }, [gameBalance, disabled]);
+    const shouldShowAnimation =
+      isBalanceInitialized &&
+      !isBalanceLoading &&
+      gameBalance === 0n &&
+      !disabled;
+    setShowDepositAnimation(shouldShowAnimation);
+  }, [gameBalance, disabled, isBalanceLoading, isBalanceInitialized]);
 
   // Convert game balance to USDT
   const gameBalanceUSDT = Number(gameBalance) / DECIMALS_PER_CKUSDT;

@@ -139,12 +139,8 @@ export const Plinko: React.FC = () => {
     updateMaxBet();
   }, [actor, ballCount]);
 
-  // Balance auto-refresh
-  useEffect(() => {
-    if (actor && isAuthenticated) {
-      refreshGameBalance().catch(console.error);
-    }
-  }, [actor, isAuthenticated, refreshGameBalance]);
+  // Note: Balance auto-refresh is now handled centrally by GameBalanceProvider
+  // when plinkoActor becomes available, so no duplicate refresh needed here
 
   // Safety timeout
   useEffect(() => {
@@ -519,6 +515,8 @@ export const Plinko: React.FC = () => {
           multiplier={multipliers[CENTER_BUCKET_INDEX] || 0.2}
           canisterId={PLINKO_BACKEND_CANISTER_ID}
           gameRoute="/plinko"
+          isBalanceLoading={gameBalanceContext.isLoading}
+          isBalanceInitialized={gameBalanceContext.isInitialized}
         />
       </div>
 

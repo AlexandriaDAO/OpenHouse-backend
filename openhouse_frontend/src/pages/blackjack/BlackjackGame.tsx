@@ -41,10 +41,9 @@ export function Blackjack() {
   const [isLoading, setIsLoading] = useState(false);
   const [maxBet] = useState(10); // Default max bet
 
-  // Update balances periodically
+  // Update balances periodically - initial refresh is now handled by GameBalanceProvider
   useEffect(() => {
     if (actor) {
-      gameBalanceContext.refresh().catch(console.error);
       const interval = setInterval(() => gameBalanceContext.refresh().catch(console.error), 30000);
       return () => clearInterval(interval);
     }
@@ -272,6 +271,8 @@ export function Blackjack() {
             disabled={gameActive || isLoading}
             multiplier={2} // Estimated
             canisterId={BLACKJACK_BACKEND_CANISTER_ID}
+            isBalanceLoading={gameBalanceContext.isLoading}
+            isBalanceInitialized={gameBalanceContext.isInitialized}
         />
       </div>
     </GameLayout>

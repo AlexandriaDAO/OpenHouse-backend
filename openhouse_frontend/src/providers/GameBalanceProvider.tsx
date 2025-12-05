@@ -29,6 +29,7 @@ const createInitialGameStatus = (): GameStatus => ({
   error: null,
   syncing: false,
   lastError: null,
+  initialized: false,
 });
 
 // Initial state for the provider
@@ -189,7 +190,7 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
         },
         status: {
           ...prev.status,
-          [game]: { ...prev.status[game], loading: false, error: null },
+          [game]: { ...prev.status[game], loading: false, error: null, initialized: true },
         },
         lastUpdated: {
           ...prev.lastUpdated,
@@ -339,7 +340,7 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
         },
         status: {
           ...prev.status,
-          [game]: { ...prev.status[game], syncing: false },
+          [game]: { ...prev.status[game], syncing: false, initialized: true },
         },
         lastUpdated: {
           ...prev.lastUpdated,
@@ -390,6 +391,7 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
   const isLoading = useCallback((game: GameType) => state.status[game].loading, [state.status]);
   const hasError = useCallback((game: GameType) => !!state.status[game].error, [state.status]);
   const isSyncing = useCallback((game: GameType) => state.status[game].syncing, [state.status]);
+  const isInitialized = useCallback((game: GameType) => state.status[game].initialized, [state.status]);
 
   const getBalance = useCallback((game: GameType): GameBalance => {
     // Return optimistic balance if available, otherwise actual balance
@@ -398,13 +400,22 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
 
   const getLastUpdated = useCallback((game: GameType) => state.lastUpdated[game], [state.lastUpdated]);
 
-  // Auto-refresh on mount and when actors are ready
+  // Auto-refresh on mount when actors are ready - centralized for all games
   useEffect(() => {
-    // Only refresh dice initially if the actor is available
-    if (diceActor) {
-      refreshBalances('dice').catch(console.error);
-    }
+    if (diceActor) refreshBalances('dice').catch(console.error);
   }, [diceActor]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (plinkoActor) refreshBalances('plinko').catch(console.error);
+  }, [plinkoActor]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (crashActor) refreshBalances('crash').catch(console.error);
+  }, [crashActor]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (blackjackActor) refreshBalances('blackjack').catch(console.error);
+  }, [blackjackActor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -424,6 +435,7 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
     isLoading,
     hasError,
     isSyncing,
+    isInitialized,
     refreshBalances,
     optimisticUpdate,
     verifyAndSync,
@@ -447,6 +459,7 @@ interface ScopedGameBalance {
   isLoading: boolean;
   hasError: boolean;
   isSyncing: boolean;
+  isInitialized: boolean;
   refresh: () => Promise<void>;
   optimisticUpdate: (update: OptimisticUpdate) => void;
   verifyAndSync: () => Promise<boolean>;
@@ -498,6 +511,7 @@ export function useGameBalance(game?: GameType): GameBalanceContextValue | Scope
       isLoading: context.isLoading(game),
       hasError: context.hasError(game),
       isSyncing: context.isSyncing(game),
+      isInitialized: context.isInitialized(game),
       refresh: scopedRefresh,
       optimisticUpdate: scopedOptimisticUpdate,
       verifyAndSync: scopedVerifyAndSync,
@@ -512,6 +526,7 @@ export function useGameBalance(game?: GameType): GameBalanceContextValue | Scope
     context.isLoading,
     context.hasError,
     context.isSyncing,
+    context.isInitialized,
     context.getLastUpdated,
     scopedRefresh,
     scopedOptimisticUpdate,

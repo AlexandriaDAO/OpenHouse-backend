@@ -14,6 +14,7 @@ export interface GameStatus {
   error: string | null;
   syncing: boolean;  // True when verifying after optimistic update
   lastError: Error | null;
+  initialized: boolean;  // True after first successful balance fetch
 }
 
 // Optimistic update payload
@@ -39,6 +40,7 @@ export interface GameBalanceContextValue {
   isLoading: (game: GameType) => boolean;
   hasError: (game: GameType) => boolean;
   isSyncing: (game: GameType) => boolean;
+  isInitialized: (game: GameType) => boolean;
 
   // Actions
   refreshBalances: (game: GameType) => Promise<void>;
