@@ -16,6 +16,7 @@ export class BucketRenderer {
   private labelText: Text;
   private balls: BucketBall[] = [];
   private ballContainer: Container;
+  private clickCallback?: () => void;
 
   // Animation state
   private doorOpen = false;
@@ -119,6 +120,10 @@ export class BucketRenderer {
   }
 
   setOnClick(callback: () => void): void {
+    if (this.clickCallback) {
+      this.container.off('pointerdown', this.clickCallback);
+    }
+    this.clickCallback = callback;
     this.container.on('pointerdown', callback);
   }
 
@@ -242,6 +247,9 @@ export class BucketRenderer {
   }
 
   destroy(): void {
+    if (this.clickCallback) {
+      this.container.off('pointerdown', this.clickCallback);
+    }
     this.clearBalls();
     this.container.removeFromParent();
     this.container.destroy({ children: true });
