@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import useDiceActor from '../../../../hooks/actors/useDiceActor';
 import type { DailySnapshot, ApyInfo } from '../../../../declarations/dice_backend/dice_backend.did';
+import { processChartData, calculateAccurateApy } from '../../../../utils/liquidityStats';
 
 export type Period = 7 | 30 | 90;
 
@@ -9,8 +10,12 @@ export interface ChartDataPoint {
   dateLabel: string;
   poolReserve: number;
   volume: number;
-  profit: number;
+  netFlow: number; // Renamed from profit
+  houseProfit: number;
+  houseProfitPercent: number;
   sharePrice: number;
+  sharePriceChange: number;
+  sharePriceChangePercent: number;
 }
 
 export const useStatsData = (isExpanded: boolean) => {
@@ -51,37 +56,20 @@ export const useStatsData = (isExpanded: boolean) => {
     }
   }, [isExpanded, fetchData]);
 
+  // Transform snapshots to chart data points using shared utility
   const chartData = useMemo(() => {
-    if (!snapshots) return [];
-    return snapshots.map(s => {
-      // Safe BigInt to Number conversion
-      // Timestamp is nanoseconds. Convert to milliseconds first using BigInt division to avoid precision loss.
-      const dateMs = Number(s.day_timestamp / 1_000_000n);
-
-      // Currency values (pool_reserve, volume, profit) use 6 decimals
-      const currencyDecimals = 1_000_000;
-
-      // Share price uses 8 decimals (per backend comment: "divide by 100_000_000 for USDT per share")
-      const sharePriceDecimals = 100_000_000;
-
-      // BUGFIX: Old snapshots from before 2025-11-29 were calculated with wrong formula (missing *100)
-      // Detect and fix: if share_price is suspiciously low (< 50), apply 100x correction
-      let sharePriceRaw = Number(s.share_price);
-      if (sharePriceRaw > 0 && sharePriceRaw < 50) {
-        // This is old buggy data - apply correction factor
-        sharePriceRaw = sharePriceRaw * 100;
-      }
-
-      return {
-        date: new Date(dateMs),
-        dateLabel: new Date(dateMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        poolReserve: Number(s.pool_reserve_end) / currencyDecimals,
-        volume: Number(s.daily_volume) / currencyDecimals,
-        profit: Number(s.daily_pool_profit) / currencyDecimals,
-        sharePrice: sharePriceRaw / sharePriceDecimals,
-      };
-    });
+    // Cast snapshots to any because the type from declarations might slightly differ 
+    // from the manually defined type in utils but the structure is compatible
+    return processChartData(snapshots as any);
   }, [snapshots]);
+
+  // NEW: Calculate accurate APY from share price returns using shared utility
+  const accurateApy = useMemo(() => {
+    return { 
+      apy7: calculateAccurateApy(chartData, 7), 
+      apy30: calculateAccurateApy(chartData, 30) 
+    };
+  }, [chartData]);
 
   return {
     period,
@@ -91,6 +79,7 @@ export const useStatsData = (isExpanded: boolean) => {
     chartData,
     apy7,
     apy30,
+    accurateApy,
     hasData: chartData.length >= 1,
     refetch: fetchData
   };

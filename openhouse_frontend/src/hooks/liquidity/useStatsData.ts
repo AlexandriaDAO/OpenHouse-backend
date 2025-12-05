@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { GameType } from '../../types/balance';
 import { DailySnapshot, ApyInfo, ChartDataPoint } from '../../types/liquidity';
 import { useGameActor } from '../actors/useGameActor';
+import { processChartData, calculateAccurateApy } from '../../utils/liquidityStats';
 
 export type Period = 7 | 30 | 90;
 
@@ -43,30 +44,18 @@ export function useStatsData(gameId: GameType, isExpanded: boolean) {
     }
   }, [isExpanded, fetchData]);
 
-  // Transform snapshots to chart data points
+  // Transform snapshots to chart data points using shared utility
   const chartData = useMemo((): ChartDataPoint[] => {
-    if (!snapshots) return [];
-    return snapshots.map(s => {
-      const dateMs = Number(s.day_timestamp / 1_000_000n);
-      const currencyDecimals = 1_000_000;
-      const sharePriceDecimals = 100_000_000;
-
-      // Apply bugfix for old data (share price stored incorrectly)
-      let sharePriceRaw = Number(s.share_price);
-      if (sharePriceRaw > 0 && sharePriceRaw < 50) {
-        sharePriceRaw = sharePriceRaw * 100;
-      }
-
-      return {
-        date: new Date(dateMs),
-        dateLabel: new Date(dateMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        poolReserve: Number(s.pool_reserve_end) / currencyDecimals,
-        volume: Number(s.daily_volume) / currencyDecimals,
-        profit: Number(s.daily_pool_profit) / currencyDecimals,
-        sharePrice: sharePriceRaw / sharePriceDecimals,
-      };
-    });
+    return processChartData(snapshots);
   }, [snapshots]);
+
+  // NEW: Calculate accurate APY from share price returns using shared utility
+  const accurateApy = useMemo(() => {
+    return { 
+      apy7: calculateAccurateApy(chartData, 7), 
+      apy30: calculateAccurateApy(chartData, 30) 
+    };
+  }, [chartData]);
 
   return {
     period,
@@ -76,6 +65,7 @@ export function useStatsData(gameId: GameType, isExpanded: boolean) {
     chartData,
     apy7,
     apy30,
+    accurateApy, // NEW: Use this for display
     hasData: chartData.length >= 1,
     refetch: fetchData
   };

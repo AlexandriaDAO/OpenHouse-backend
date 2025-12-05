@@ -86,12 +86,21 @@ export function isLiquidityActor(actor: unknown): actor is LiquidityActorInterfa
   );
 }
 
-// Chart data point (processed from DailySnapshot)
+// ChartDataPoint (processed from DailySnapshot)
 export interface ChartDataPoint {
   date: Date;
   dateLabel: string;
   poolReserve: number;
   volume: number;
-  profit: number;
+  
+  // Renamed: This is reserve change (including deposits/withdrawals), NOT profit
+  netFlow: number; // Was: profit
+
+  // NEW: True house profit from share price change
+  houseProfit: number;
+  houseProfitPercent: number; // For APY calculation
+
   sharePrice: number;
+  sharePriceChange: number; // NEW: Absolute change
+  sharePriceChangePercent: number; // NEW: Percentage change
 }

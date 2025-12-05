@@ -25,9 +25,9 @@ const CustomTooltip = ({ active, payload, label, valuePrefix = '', valueSuffix =
     maximumFractionDigits: decimals
   }).format(value);
 
-  // Determine color based on value for profit chart
-  const isProfit = payload[0].name === "Profit/Loss";
-  const valueColor = isProfit
+  // Determine color based on value for profit-related charts
+  const isProfitChart = ["House P&L", "Net Flow"].includes(payload[0].name);
+  const valueColor = isProfitChart
     ? (value >= 0 ? 'text-dfinity-green' : 'text-dfinity-red')
     : 'text-dfinity-turquoise';
 
@@ -173,9 +173,28 @@ export const VolumeChart: React.FC<ChartProps> = ({ data, height = 160 }) => (
   </div>
 );
 
-export const ProfitLossChart: React.FC<ChartProps> = ({ data, height = 160 }) => (
+export const NetFlowChart: React.FC<ChartProps> = ({ data, height = 160 }) => (
   <div className="bg-black/20 rounded-lg p-4 border border-white/5 hover:border-white/10 transition-all duration-300">
-    <div className="text-xs font-bold text-gray-400 mb-4 uppercase tracking-wider">Daily Profit/Loss</div>
+    <div className="flex items-center gap-2 mb-4">
+      <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+        Daily Net Flow
+      </div>
+      <InfoTooltip
+        variant="badge"
+        content="Net Flow = Pool Reserve Change
+
+This shows how much the pool's total reserves changed each day.
+
+INCLUDES:
++ LP deposits (new liquidity added)
++ House wins (players lost bets)
+- LP withdrawals (liquidity removed)
+- House losses (players won bets)
+
+NOTE: This is NOT the same as house profit!
+For actual house performance, see the Share Price chart."
+      />
+    </div>
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data}>
         <XAxis 
@@ -194,9 +213,56 @@ export const ProfitLossChart: React.FC<ChartProps> = ({ data, height = 160 }) =>
           tickFormatter={(val) => (val >= 1000 ? `${(val/1000).toFixed(0)}k` : val.toFixed(0))}
         />
         <Tooltip content={<CustomTooltip valueSuffix=" USDT" />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
-        <Bar dataKey="profit" name="Profit/Loss" radius={[2, 2, 2, 2]} animationDuration={1000}>
+        <Bar dataKey="netFlow" name="Net Flow" radius={[2, 2, 2, 2]} animationDuration={1000}>
           {data.map((entry, index) => (
-            <Cell key={`cell-${index}`} fill={entry.profit >= 0 ? COLORS.positive : COLORS.negative} />
+            <Cell key={`cell-${index}`} fill={entry.netFlow >= 0 ? COLORS.positive : COLORS.negative} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  </div>
+);
+
+export const HouseProfitChart: React.FC<ChartProps> = ({ data, height = 160 }) => (
+  <div className="bg-black/20 rounded-lg p-4 border border-white/5 hover:border-white/10 transition-all duration-300">
+    <div className="flex items-center gap-2 mb-4">
+      <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+        House Profit/Loss
+      </div>
+      <InfoTooltip
+        variant="badge"
+        content="True House Performance
+
+Calculated from share price changes.
+
+Share price ONLY changes from game outcomes:
+- Players lose bet = share price UP = house profit
+- Players win bet = share price DOWN = house loss
+
+LP deposits and withdrawals do NOT affect share price, so this shows pure gambling performance."
+      />
+    </div>
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data}>
+        <XAxis 
+          dataKey="dateLabel" 
+          tick={{ fill: COLORS.text, fontSize: 10 }} 
+          axisLine={false}
+          tickLine={false}
+          dy={10}
+          minTickGap={30}
+        />
+        <YAxis 
+          tick={{ fill: COLORS.text, fontSize: 10 }} 
+          axisLine={false}
+          tickLine={false}
+          width={35}
+          tickFormatter={(val) => (val >= 1000 ? `${(val/1000).toFixed(0)}k` : val.toFixed(0))}
+        />
+        <Tooltip content={<CustomTooltip valueSuffix=" USDT" />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
+        <Bar dataKey="houseProfit" name="House P&L" radius={[2, 2, 2, 2]} animationDuration={1000}>
+          {data.map((entry, index) => (
+            <Cell key={`cell-${index}`} fill={entry.houseProfit >= 0 ? COLORS.positive : COLORS.negative} />
           ))}
         </Bar>
       </BarChart>
