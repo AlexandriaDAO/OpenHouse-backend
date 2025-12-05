@@ -126,7 +126,7 @@ pub struct PoolStats {
 fn calculate_shares_for_deposit(amount_nat: &Nat) -> Result<Nat, String> {
     POOL_STATE.with(|state| {
         let pool_state = state.borrow().get().clone();
-        let current_reserve = pool_state.reserve.clone();
+        let current_reserve = pool_state.reserve;
         let total_shares = calculate_total_supply();
 
         if total_shares == 0u64 {
@@ -249,7 +249,7 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
         // if this is indeed the first deposit.
         let total_shares = shares.borrow()
             .iter()
-            .map(|entry| entry.value().0.clone())
+            .map(|entry| entry.value().0)
             .fold(Nat::from(0u64), |acc, amt| acc + amt);
 
         if total_shares == 0u64 {
@@ -258,7 +258,7 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
         }
 
         let mut shares_map = shares.borrow_mut();
-        let current = shares_map.get(&caller).map(|s| s.0.clone()).unwrap_or(Nat::from(0u64));
+        let current = shares_map.get(&caller).map_or(Nat::from(0u64), |s| s.0);
         let new_shares = current + shares_to_mint.clone();
         shares_map.insert(caller, StorableNat(new_shares));
     });
@@ -295,7 +295,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
         return Err("Cannot withdraw zero shares".to_string());
     }
 
-    let user_shares = LP_SHARES.with(|s| s.borrow().get(&caller).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64)));
+    let user_shares = LP_SHARES.with(|s| s.borrow().get(&caller).map_or(Nat::from(0u64), |sn| sn.0));
     if user_shares < shares_to_burn {
         return Err("Insufficient shares".to_string());
     }
@@ -303,7 +303,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     // Calculate payout
     let payout_nat = POOL_STATE.with(|state| {
         let pool_state = state.borrow().get().clone();
-        let current_reserve = pool_state.reserve.clone();
+        let current_reserve = pool_state.reserve;
         let total_shares = calculate_total_supply();
 
         if total_shares == 0u64 {
@@ -413,7 +413,7 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
 
 pub async fn withdraw_all_liquidity() -> Result<u64, String> {
     let caller = ic_cdk::api::msg_caller();
-    let shares = LP_SHARES.with(|s| s.borrow().get(&caller).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64)));
+    let shares = LP_SHARES.with(|s| s.borrow().get(&caller).map_or(Nat::from(0u64), |sn| sn.0));
 
     if shares == 0u64 {
         return Err("No liquidity to withdraw".to_string());
@@ -425,7 +425,7 @@ pub async fn withdraw_all_liquidity() -> Result<u64, String> {
 // Query functions
 
 pub(crate) fn get_lp_position_internal(user: Principal) -> LPPosition {
-    let user_shares = LP_SHARES.with(|s| s.borrow().get(&user).map(|sn| sn.0.clone()).unwrap_or(Nat::from(0u64)));
+    let user_shares = LP_SHARES.with(|s| s.borrow().get(&user).map_or(Nat::from(0u64), |sn| sn.0));
     let total_shares = calculate_total_supply();
     let pool_reserve = get_pool_reserve_nat();
 
@@ -440,7 +440,7 @@ pub(crate) fn get_lp_position_internal(user: Principal) -> LPPosition {
         // Normal case
         let ownership = (user_shares.0.to_f64().unwrap_or(0.0) /
                         total_shares.0.to_f64().unwrap_or(1.0)) * 100.0;
-        let numerator = user_shares.clone() * pool_reserve.clone();
+        let numerator = user_shares.clone() * pool_reserve;
         // SAFETY: total_shares checked for zero above (line 307)
         let redeemable = numerator / total_shares;
         (ownership, redeemable)
@@ -496,7 +496,7 @@ fn calculate_total_supply() -> Nat {
     LP_SHARES.with(|shares| {
         shares.borrow()
             .iter()
-            .map(|entry| entry.value().0.clone())
+            .map(|entry| entry.value().0)
             .fold(Nat::from(0u64), |acc, amt| acc + amt)
     })
 }
@@ -704,7 +704,7 @@ pub(crate) fn iter_lp_positions_internal(offset: usize, limit: usize) -> Vec<sup
             .take(limit)
             .map(|entry| super::types::LPPositionInfo {
                 user: *entry.key(),
-                shares: entry.value().0.clone(),
+                shares: entry.value().0,
             })
             .collect()
     })

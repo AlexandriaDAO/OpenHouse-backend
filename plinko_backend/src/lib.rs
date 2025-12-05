@@ -117,11 +117,7 @@ pub fn calculate_multiplier_bp(position: u8) -> Result<u64, String> {
     }
 
     // Distance from center (0-4 for 8-row board)
-    let distance = if position > CENTER_POSITION {
-        position - CENTER_POSITION
-    } else {
-        CENTER_POSITION - position
-    } as u64;
+    let distance = position.abs_diff(CENTER_POSITION) as u64;
 
     // Pure integer formula: no floating point
     // Use checked arithmetic to prevent overflow (though unlikely with current constants)
@@ -403,7 +399,7 @@ async fn drop_ball() -> Result<PlinkoResult, String> {
 ;
 
     // For 8 rows, use single byte (efficient)
-    let random_byte = random_bytes.get(0)
+    let random_byte = random_bytes.first()
         .ok_or("Insufficient randomness")?;
 
     // Generate path: 8 independent coin flips

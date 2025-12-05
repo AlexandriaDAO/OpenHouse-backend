@@ -98,17 +98,17 @@ pub fn get_apy_info(days: Option<u32>) -> ApyInfo {
         // Get starting pool reserve (from day before the period starts)
         let start_reserve = if start_idx > 0 {
             // Use the pool_reserve_end from the day before our period
-            snapshots.get(start_idx - 1).map(|s| s.pool_reserve_end).unwrap_or(0)
+            snapshots.get(start_idx - 1).map_or(0, |s| s.pool_reserve_end)
         } else {
             // For the first snapshot(s), estimate starting reserve
             // by subtracting the first day's profit from the first day's ending reserve
-            snapshots.get(0).map(|s| {
+            snapshots.get(0).map_or(0, |s| {
                 // If profit is positive, starting reserve was lower
                 // If profit is negative, starting reserve was higher
                 let end_reserve = s.pool_reserve_end as i64;
                 let start = end_reserve - s.daily_pool_profit;
                 start.max(0) as u64
-            }).unwrap_or(0)
+            })
         };
 
         if start_reserve == 0 {
