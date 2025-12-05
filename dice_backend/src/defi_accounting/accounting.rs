@@ -22,7 +22,6 @@ use super::memory_ids::{
 const MIN_DEPOSIT: u64 = 1_000_000; // 1 USDT
 const MIN_WITHDRAW: u64 = 1_000_000; // 1 USDT
 const MAX_AUDIT_ENTRIES: u64 = 1000; // Retention limit
-const MAX_RECENT_ABANDONMENTS: usize = 50; // Max entries for orphaned funds report
 /// Minimum balance before triggering automatic weekly withdrawal to parent canister.
 /// Set to 10 USDT to minimize gas costs while ensuring timely fee collection.
 const PARENT_AUTO_WITHDRAW_THRESHOLD: u64 = 10_000_000; // 10 USDT
@@ -534,27 +533,6 @@ pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
     Ok(())
 }
 
-/// Credits amount to user's balance (adds to existing balance).
-/// Used for slippage protection refunds.
-pub fn credit_balance(user: Principal, amount: u64) -> Result<(), String> {
-    if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
-        return Err("Cannot credit: withdrawal pending".to_string());
-    }
-
-    USER_BALANCES_STABLE.with(|balances| {
-        let mut balances = balances.borrow_mut();
-        let current = balances.get(&user).unwrap_or(0);
-        let new_balance = current.checked_add(amount)
-            .ok_or(format!("Balance overflow: current {} + amount {}", current, amount))?;
-
-        balances.insert(user, new_balance);
-
-        log_audit(AuditEvent::BalanceCredited { user, amount, new_balance });
-
-        Ok(())
-    })
-}
-
 /// Force credit balance for internal system refunds.
 ///
 /// # Safety
@@ -757,11 +735,9 @@ pub(crate) fn get_cached_canister_balance_internal() -> u64 {
 pub(crate) fn build_orphaned_funds_report_internal(recent_limit: Option<usize>)
     -> super::types::OrphanedFundsReport
 {
-    use std::collections::VecDeque;
     AUDIT_LOG_MAP.with(|log| {
         let mut total = 0u64;
         let mut count = 0u64;
-        let mut recent: VecDeque<super::types::AbandonedEntry> = VecDeque::new();
 
         // Collect all abandoned withdrawals
         let mut all_abandonments: Vec<super::types::AbandonedEntry> = log.borrow()

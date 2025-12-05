@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize, Principal};
 use ic_cdk::management_canister::raw_rand;
-use crate::types::{DECIMALS_PER_CKUSDT, MIN_BET};
+use crate::types::MIN_BET;
 use crate::defi_accounting::{self as accounting, liquidity_pool};
 use crate::{calculate_multiplier_bp, MULTIPLIER_SCALE, ROWS};
 use serde::Serialize;
