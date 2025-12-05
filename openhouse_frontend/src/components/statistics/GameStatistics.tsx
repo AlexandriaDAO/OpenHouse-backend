@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { GameType } from '../../types/balance';
 import { useStatsData, Period } from '../../hooks/liquidity/useStatsData';
 import { SharePriceChart, PoolReserveChart, VolumeChart, ProfitLossChart } from './StatsCharts';
@@ -14,6 +15,41 @@ export function GameStatistics({ gameId }: Props) {
     chartData, apy7, apy30,
     hasData
   } = useStatsData(gameId, true);
+
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyData = async () => {
+    const data = {
+      period,
+      apy7,
+      apy30,
+      chartData: chartData.map(d => ({
+        ...d,
+        date: d.date.toISOString()
+      }))
+    };
+    // BigInt can't be serialized directly, convert to string
+    const jsonStr = JSON.stringify(data, (_, v) => typeof v === 'bigint' ? v.toString() : v, 2);
+
+    try {
+      await navigator.clipboard.writeText(jsonStr);
+      setCopied(true);
+    } catch (err) {
+      // Fallback: create a temporary textarea and copy from it
+      const textarea = document.createElement('textarea');
+      textarea.value = jsonStr;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setCopied(true);
+      console.log('Chart data copied (fallback method)');
+    }
+
+    setTimeout(() => setCopied(false), 1500);
+  };
 
   // Render loading/error/empty states
   if (isLoading) {
@@ -50,9 +86,26 @@ export function GameStatistics({ gameId }: Props) {
     <div className="p-4 space-y-6">
       {/* Period selector */}
       <div className="flex justify-between items-center">
-        <h3 className="text-gray-400 text-xs uppercase tracking-widest font-bold">
-          Historical Performance
-        </h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-gray-400 text-xs uppercase tracking-widest font-bold">
+            Historical Performance
+          </h3>
+          <button
+            onClick={handleCopyData}
+            className="text-gray-600 hover:text-gray-400 transition-colors p-1 rounded"
+            title="Copy chart data as JSON"
+          >
+            {copied ? (
+              <svg className="w-3 h-3 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            )}
+          </button>
+        </div>
         <div className="flex bg-black/30 p-1 rounded-lg">
           {([7, 30, 90] as Period[]).map(p => (
             <button

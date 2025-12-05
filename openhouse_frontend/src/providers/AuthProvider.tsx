@@ -24,9 +24,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await clear();
   }, [clear]);
 
+  // Re-compute isAuthenticated when identity or status changes
+  // This ensures BalanceProvider and other consumers get updated values
+  const authenticated = status === 'success' && isAuthenticated();
+
   const value: AuthContextType = {
     identity,
-    isAuthenticated: isAuthenticated(),
+    isAuthenticated: authenticated,
     principal: identity?.getPrincipal().toString() ?? null,
     login,
     logout: handleLogout,

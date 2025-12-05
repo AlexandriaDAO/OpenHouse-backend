@@ -16,14 +16,16 @@ import useDiceActor from '../hooks/actors/useDiceActor';
 import useLedgerActor from '../hooks/actors/useLedgerActor';
 
 // Helper to check if an error indicates invalid/stale authentication
+// Be careful: error JSON dumps contain "ingress_expiry" as a field name in request details,
+// so we must check for actual error messages, not just field names
 const isAuthenticationError = (error: unknown): boolean => {
   const errorStr = String(error);
   return (
-    // Session expiry errors
+    // Session expiry errors - must match actual error messages
     errorStr.includes('Invalid request expiry') ||
-    errorStr.includes('ingress_expiry') ||
-    (errorStr.includes('delegation') && errorStr.includes('expired')) ||
     errorStr.includes('Specified ingress_expiry not within expected range') ||
+    errorStr.includes('request expired') ||
+    (errorStr.includes('delegation') && errorStr.includes('expired')) ||
     // Signature verification errors (stale/corrupted delegation)
     errorStr.includes('Invalid signature') ||
     errorStr.includes('signature could not be verified') ||
@@ -78,9 +80,11 @@ function AuthErrorModal() {
 
 // ActorProvider - returns null, sets up actors and interceptors as a side effect
 export function ActorProvider() {
-  const { identity, clear } = useIdentity();
+  const { identity, clear, status } = useIdentity();
   const [showAuthError, setShowAuthError] = useState(false);
   const isLoggingOut = useRef(false);
+  // Track if we've ever had a valid authenticated session this page load
+  const hadValidSession = useRef(false);
 
   // Initialize all actor hooks
   const crash = useCrashActor();
@@ -89,13 +93,26 @@ export function ActorProvider() {
   const dice = useDiceActor();
   const ledger = useLedgerActor();
 
+  // Track when we establish a valid authenticated session
+  useEffect(() => {
+    if (status === 'success' && identity && !identity.getPrincipal().isAnonymous()) {
+      hadValidSession.current = true;
+    }
+  }, [status, identity]);
+
   // Function to handle authentication errors - only runs once
+  // Only shows modal if we had a valid session that expired mid-use
   const handleAuthError = useCallback(() => {
     if (isLoggingOut.current) return;
     isLoggingOut.current = true;
 
     console.error('Authentication error detected - clearing session');
-    setShowAuthError(true);
+
+    // Only show the error modal if we had a valid session before
+    // This prevents infinite reload loop for already-expired sessions on page load
+    if (hadValidSession.current) {
+      setShowAuthError(true);
+    }
 
     // Clear the stored credentials immediately
     clear().catch(console.error);

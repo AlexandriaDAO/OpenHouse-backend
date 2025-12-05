@@ -183,16 +183,6 @@ export const Admin: React.FC = () => {
     ...plinkoData.pendingWithdrawals.map(w => ({ ...w, game: 'Plinko' })),
   ].sort((a, b) => Number(b.created_at - a.created_at)); // Most recent first
 
-  // Combine top balances (merge and re-sort)
-  const allUserBalances = [
-    ...diceData.userBalances,
-    ...plinkoData.userBalances,
-  ].sort((a, b) => Number(b.balance - a.balance)).slice(0, 10);
-
-  const allLpPositions = [
-    ...diceData.lpPositions,
-    ...plinkoData.lpPositions,
-  ].sort((a, b) => Number(b.shares - a.shares)).slice(0, 10);
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6">
@@ -369,71 +359,23 @@ export const Admin: React.FC = () => {
         </div>
       </div>
 
-      {/* SECTION 6: Top Balances & LP Positions */}
+      {/* SECTION 6: Per-Game User Balances & LP Positions */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Top User Balances (All Games) */}
-        <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
-          <div className="p-4 border-b border-gray-700">
-            <h2 className="text-lg font-semibold text-gray-300">Top User Balances</h2>
-            <p className="text-xs text-gray-500 mt-1">Combined across all games</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-xs text-gray-400 uppercase bg-gray-700/50">
-                <tr>
-                  <th className="px-4 py-3 text-left">User</th>
-                  <th className="px-4 py-3 text-right">Balance</th>
-                </tr>
-              </thead>
-              <tbody className="text-gray-400">
-                {allUserBalances.length === 0 ? (
-                  <tr><td colSpan={2} className="px-4 py-4 text-center">No balances</td></tr>
-                ) : allUserBalances.map((u, i) => (
-                  <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
-                    <td className="px-4 py-3 font-mono text-xs" title={u.user.toString()}>
-                      {truncatePrincipal(u.user.toString())}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-white">
-                      {formatUSDT(u.balance)} USDT
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        {/* Dice - User Balances & LP Positions */}
+        <GameBalancesCard
+          gameName="Dice"
+          color="blue"
+          userBalances={diceData.userBalances}
+          lpPositions={diceData.lpPositions}
+        />
 
-        {/* Top LP Positions (All Games) */}
-        <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
-          <div className="p-4 border-b border-gray-700">
-            <h2 className="text-lg font-semibold text-gray-300">Top LP Positions</h2>
-            <p className="text-xs text-gray-500 mt-1">Combined across all games</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-xs text-gray-400 uppercase bg-gray-700/50">
-                <tr>
-                  <th className="px-4 py-3 text-left">LP</th>
-                  <th className="px-4 py-3 text-right">Shares</th>
-                </tr>
-              </thead>
-              <tbody className="text-gray-400">
-                {allLpPositions.length === 0 ? (
-                  <tr><td colSpan={2} className="px-4 py-4 text-center">No LP positions</td></tr>
-                ) : allLpPositions.map((p, i) => (
-                  <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
-                    <td className="px-4 py-3 font-mono text-xs" title={p.user.toString()}>
-                      {truncatePrincipal(p.user.toString())}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-white">
-                      {formatUSDT(p.shares)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        {/* Plinko - User Balances & LP Positions */}
+        <GameBalancesCard
+          gameName="Plinko"
+          color="purple"
+          userBalances={plinkoData.userBalances}
+          lpPositions={plinkoData.lpPositions}
+        />
       </div>
     </div>
   );
@@ -671,6 +613,113 @@ const OrphanedFundsCard: React.FC<{
           )}
         </div>
       )}
+    </div>
+  );
+};
+
+// Per-game user balances and LP positions card
+const GameBalancesCard: React.FC<{
+  gameName: string;
+  color: 'blue' | 'purple' | 'green' | 'orange';
+  userBalances: UserBalance[];
+  lpPositions: LPPositionInfo[];
+}> = ({ gameName, color, userBalances, lpPositions }) => {
+  const colorClasses = {
+    blue: 'text-blue-400 bg-blue-900/30 border-blue-700',
+    purple: 'text-purple-400 bg-purple-900/30 border-purple-700',
+    green: 'text-green-400 bg-green-900/30 border-green-700',
+    orange: 'text-orange-400 bg-orange-900/30 border-orange-700',
+  };
+
+  const headerColor = colorClasses[color].split(' ')[0];
+  const bgColor = colorClasses[color].split(' ')[1];
+
+  // Sort and limit to top 10
+  const sortedBalances = [...userBalances]
+    .sort((a, b) => Number(b.balance - a.balance))
+    .slice(0, 10);
+
+  const sortedLPs = [...lpPositions]
+    .sort((a, b) => Number(b.shares - a.shares))
+    .slice(0, 10);
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+      {/* Header */}
+      <div className={`p-4 border-b border-gray-700 ${bgColor}`}>
+        <h2 className={`text-lg font-semibold ${headerColor}`}>{gameName}</h2>
+        <p className="text-xs text-gray-400 mt-1">Isolated canister balances</p>
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* User Balances Section */}
+        <div>
+          <h3 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
+            <span>User Balances</span>
+            <span className="text-xs text-gray-500 font-normal">({userBalances.length} users)</span>
+          </h3>
+          {sortedBalances.length === 0 ? (
+            <div className="text-gray-500 text-xs p-2 bg-gray-900/50 rounded">No user balances</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-gray-400 uppercase bg-gray-700/50">
+                  <tr>
+                    <th className="px-3 py-2 text-left">User</th>
+                    <th className="px-3 py-2 text-right">Balance</th>
+                  </tr>
+                </thead>
+                <tbody className="text-gray-400">
+                  {sortedBalances.map((u, i) => (
+                    <tr key={i} className="border-b border-gray-700/50 hover:bg-gray-700/30">
+                      <td className="px-3 py-2 font-mono" title={u.user.toString()}>
+                        {truncatePrincipal(u.user.toString())}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-white">
+                        {formatUSDT(u.balance)} USDT
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* LP Positions Section */}
+        <div>
+          <h3 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
+            <span>LP Positions</span>
+            <span className="text-xs text-gray-500 font-normal">({lpPositions.length} LPs)</span>
+          </h3>
+          {sortedLPs.length === 0 ? (
+            <div className="text-gray-500 text-xs p-2 bg-gray-900/50 rounded">No LP positions</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-gray-400 uppercase bg-gray-700/50">
+                  <tr>
+                    <th className="px-3 py-2 text-left">LP</th>
+                    <th className="px-3 py-2 text-right">Shares</th>
+                  </tr>
+                </thead>
+                <tbody className="text-gray-400">
+                  {sortedLPs.map((p, i) => (
+                    <tr key={i} className="border-b border-gray-700/50 hover:bg-gray-700/30">
+                      <td className="px-3 py-2 font-mono" title={p.user.toString()}>
+                        {truncatePrincipal(p.user.toString())}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-white">
+                        {formatUSDT(p.shares)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
