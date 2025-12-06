@@ -1,3 +1,3 @@
-export { PlinkoStage } from './PlinkoStage';
-export { PlinkoController } from './PlinkoController';
-export type { GameResult, PlinkoControllerConfig, GamePhase } from './PlinkoController';
+export { PlinkoBoard } from './PlinkoBoard';
+export { PlinkoBall } from './PlinkoBall';
+export * from './plinkoAnimations';
