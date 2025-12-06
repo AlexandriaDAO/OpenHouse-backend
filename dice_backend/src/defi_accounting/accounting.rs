@@ -614,6 +614,11 @@ pub fn get_withdrawal_status() -> Option<PendingWithdrawal> {
 /// # Arguments
 /// - `limit`: Maximum number of entries to return
 /// - `offset`: Number of entries to skip from the most recent
+///
+/// # Implementation Note
+/// StableBTreeMap doesn't implement DoubleEndedIterator, so we can't use `.rev()`.
+/// Instead, we calculate the exact window of entries needed, iterate forward through
+/// that window, and reverse the result. This avoids collecting all keys into memory.
 pub(crate) fn get_audit_entries(limit: u64, offset: u64) -> Vec<AuditEntry> {
     AUDIT_LOG_MAP.with(|log| {
         let log = log.borrow();
@@ -622,18 +627,18 @@ pub(crate) fn get_audit_entries(limit: u64, offset: u64) -> Vec<AuditEntry> {
             return vec![];
         }
 
-        // Collect keys in reverse order (most recent first)
-        // Since keys are sequential, higher keys = newer entries
-        let keys: Vec<u64> = log.iter()
-            .map(|entry| *entry.key())
-            .collect();
+        // Calculate the window of entries we need
+        let entries_to_fetch = limit.min(len - offset) as usize;
+        let skip_from_start = (len as usize).saturating_sub(offset as usize + entries_to_fetch);
 
-        // Reverse iterate, skip offset, take limit
-        keys.into_iter()
+        // Iterate forward through the window, then reverse for most-recent-first order
+        log.iter()
+            .skip(skip_from_start)
+            .take(entries_to_fetch)
+            .map(|entry| entry.value())
+            .collect::<Vec<_>>()
+            .into_iter()
             .rev()
-            .skip(offset as usize)
-            .take(limit as usize)
-            .filter_map(|k| log.get(&k))
             .collect()
     })
 }

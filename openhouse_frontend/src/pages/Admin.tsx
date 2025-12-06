@@ -896,6 +896,7 @@ const ALL_EVENT_TYPES = [
   'WithdrawalCompleted',
   'WithdrawalFailed',
   'WithdrawalAbandoned',
+  'WithdrawalExpired',
   'BalanceRestored',
   'LPRestored',
   'SystemError',
@@ -928,9 +929,11 @@ const AuditLogSection: React.FC<{
     ? allEntries
     : allEntries.filter(e => getEventTypeName(e.event) === filter);
 
-  const totalCount = diceAuditLog.totalCount + plinkoAuditLog.totalCount;
-  const hasMore = offset + pageSize < totalCount;
+  // Use the larger count for pagination (since we fetch same offset from each)
+  const maxGameCount = Math.max(diceAuditLog.totalCount, plinkoAuditLog.totalCount);
+  const hasMore = offset + pageSize < maxGameCount;
   const hasPrev = offset > 0;
+  const hasError = diceAuditLog.error || plinkoAuditLog.error;
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
@@ -970,7 +973,7 @@ const AuditLogSection: React.FC<{
               Prev
             </button>
             <span className="text-sm text-gray-400">
-              {offset + 1}-{Math.min(offset + pageSize, totalCount)} of {totalCount}
+              Page {Math.floor(offset / pageSize) + 1}
             </span>
             <button
               onClick={() => onOffsetChange(offset + pageSize)}
@@ -986,6 +989,14 @@ const AuditLogSection: React.FC<{
           </div>
         </div>
       </div>
+
+      {/* Error display */}
+      {hasError && (
+        <div className="p-4 bg-red-900/20 border-b border-red-700 text-red-400 text-sm">
+          {diceAuditLog.error && <div>Dice: {diceAuditLog.error}</div>}
+          {plinkoAuditLog.error && <div>Plinko: {plinkoAuditLog.error}</div>}
+        </div>
+      )}
 
       {/* Table */}
       {filteredEntries.length === 0 ? (
