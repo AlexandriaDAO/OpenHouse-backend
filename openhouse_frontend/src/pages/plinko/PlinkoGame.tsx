@@ -3,7 +3,7 @@ import usePlinkoActor from '../../hooks/actors/usePlinkoActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import { GameLayout } from '../../components/game-ui';
 import { BettingRail } from '../../components/betting';
-import { PlinkoBoard, PlinkoBall, PLINKO_LAYOUT } from '../../components/game-specific/plinko';
+import { PlinkoBoard, PlinkoBall, PlinkoBucket, PLINKO_LAYOUT } from '../../components/game-specific/plinko';
 import { useGameBalance } from '../../providers/GameBalanceProvider';
 import { useBalance } from '../../providers/BalanceProvider';
 import { useAuth } from '../../providers/AuthProvider';
@@ -64,6 +64,8 @@ export const Plinko: React.FC = () => {
 
   // Game state
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isWaiting, setIsWaiting] = useState(false);  // Waiting for IC response
+  const [bucketOpen, setBucketOpen] = useState(false); // Bucket door state
   const [ballCount, setBallCount] = useState(1);
   const [betAmount, setBetAmount] = useState(0.01);
   const [maxBet, setMaxBet] = useState(100);
@@ -128,19 +130,21 @@ export const Plinko: React.FC = () => {
 
   // Drop balls handler
   const dropBalls = async () => {
-    if (!actor || isPlaying) return;
+    if (!actor || isPlaying || isWaiting) return;
 
     if (!isAuthenticated) {
       setGameError('Please log in to play.');
       return;
     }
-    
+
     if (balance.game === 0n) {
       setGameError('No chips! Buy chips below.');
       return;
     }
 
-    setIsPlaying(true);
+    // Start waiting state - show bucket filling with balls
+    setIsWaiting(true);
+    setBucketOpen(false);
     setGameError('');
     setCurrentResult(null);
     setMultiBallResult(null);
@@ -151,20 +155,19 @@ export const Plinko: React.FC = () => {
 
       if (totalBetE8s > balance.game) {
         setGameError(`Insufficient balance. Total bet: $${(betAmount * ballCount).toFixed(2)}`);
-        // Note: For multi-tab race conditions, the backend handles the final check.
-        // Frontend "isPlaying" flag handles single-tab race conditions.
+        setIsWaiting(false);
         return;
       }
-      
+
       // Call backend based on ball count
       let results: { path: boolean[] }[] = [];
-      
+
       if (ballCount === 1) {
         const result = await actor.play_plinko(betAmountE8s);
         if ('Ok' in result) {
           const r = result.Ok;
           results = [{ path: r.path }];
-          
+
           setCurrentResult({
             path: r.path,
             final_position: r.final_position,
@@ -183,7 +186,7 @@ export const Plinko: React.FC = () => {
         if ('Ok' in result) {
           const r = result.Ok;
           results = r.results.map(res => ({ path: res.path }));
-          
+
           setMultiBallResult({
             results: r.results.map((res: BackendPlinkoResult) => ({
               path: res.path,
@@ -203,27 +206,35 @@ export const Plinko: React.FC = () => {
         }
       }
 
-      // Create animating balls from backend paths
-      const newBalls: AnimatingBall[] = results.map((r, i) => ({
-        id: nextBallId + i,
-        path: r.path,
-      }));
+      // IC responded - open the bucket door
+      setBucketOpen(true);
 
-      setAnimatingBalls(prev => [...prev, ...newBalls]);
-      setNextBallId(prev => prev + ballCount);
-      
-      // Calculate more precise duration for balance refresh
-      // Find the longest path length to be safe (though usually constant)
-      const maxPathLength = Math.max(...results.map(r => r.path.length));
-      const durationMs = (maxPathLength * PLINKO_LAYOUT.MS_PER_ROW) + (results.length * PLINKO_LAYOUT.BALL_STAGGER_MS);
-      
+      // Wait for bucket door animation, then start ball animations
       setTimeout(() => {
-        gameBalanceContext.refresh();
-      }, durationMs + 500);
+        // Create animating balls from backend paths
+        const newBalls: AnimatingBall[] = results.map((r, i) => ({
+          id: nextBallId + i,
+          path: r.path,
+        }));
+
+        setAnimatingBalls(prev => [...prev, ...newBalls]);
+        setNextBallId(prev => prev + ballCount);
+        setIsWaiting(false);
+        setIsPlaying(true);
+
+        // Calculate more precise duration for balance refresh
+        const maxPathLength = Math.max(...results.map(r => r.path.length));
+        const durationMs = (maxPathLength * PLINKO_LAYOUT.MS_PER_ROW) + (results.length * PLINKO_LAYOUT.BALL_STAGGER_MS);
+
+        setTimeout(() => {
+          gameBalanceContext.refresh();
+        }, durationMs + 500);
+      }, PLINKO_LAYOUT.BUCKET_OPEN_MS);
 
     } catch (err) {
       setGameError(err instanceof Error ? err.message : 'Failed to play');
-      setIsPlaying(false);
+      setIsWaiting(false);
+      setBucketOpen(false);
     }
   };
 
@@ -248,7 +259,11 @@ export const Plinko: React.FC = () => {
         
         {/* Game Stats Bar - New compact design */}
         <div className="w-full max-w-lg mx-auto mb-2 px-4 min-h-[40px] flex items-center justify-center">
-          {!isPlaying && currentResult ? (
+          {isWaiting ? (
+            <div className="text-yellow-400 text-xs font-mono tracking-widest uppercase animate-pulse">
+              Loading balls...
+            </div>
+          ) : !isPlaying && currentResult ? (
             <div className={`flex items-center gap-4 animate-in fade-in slide-in-from-bottom-2 ${currentResult.win ? 'text-green-400' : 'text-red-400'}`}>
               <div className="flex flex-col items-center">
                 <span className="text-[10px] uppercase text-gray-500 font-bold">Multiplier</span>
@@ -290,8 +305,8 @@ export const Plinko: React.FC = () => {
 
         {/* Game Board Area */}
         <div className="card max-w-4xl mx-auto relative p-0 overflow-hidden bg-transparent border-none shadow-none">
-          <div 
-            className={`cursor-pointer transition-transform duration-100 ${isPlaying ? 'cursor-default' : 'active:scale-95'}`}
+          <div
+            className={`cursor-pointer transition-transform duration-100 ${(isPlaying || isWaiting) ? 'cursor-default' : 'active:scale-95'}`}
             onClick={dropBalls}
             style={{ width: '400px', maxWidth: '100%' }}
           >
@@ -299,6 +314,13 @@ export const Plinko: React.FC = () => {
               <svg viewBox={`0 0 ${PLINKO_LAYOUT.BOARD_WIDTH} ${PLINKO_LAYOUT.BOARD_HEIGHT}`} className="w-full h-full overflow-visible">
                 {/* Static board */}
                 <PlinkoBoard rows={ROWS} multipliers={multipliers} />
+
+                {/* Ball bucket - shows while waiting for IC response */}
+                <PlinkoBucket
+                  ballCount={ballCount}
+                  isOpen={bucketOpen}
+                  isVisible={isWaiting}
+                />
 
                 {/* Animated balls */}
                 {animatingBalls.map((ball, index) => (
@@ -314,7 +336,7 @@ export const Plinko: React.FC = () => {
             </div>
 
             {/* Tap to Play Hint */}
-            {!isPlaying && isAuthenticated && balance.game > 0n && (
+            {!isPlaying && !isWaiting && isAuthenticated && balance.game > 0n && (
               <div className="absolute top-1/4 left-1/2 transform -translate-x-1/2 text-[10px] text-gray-500 font-mono tracking-widest opacity-60 pointer-events-none">
                 TAP TO DROP
               </div>
@@ -334,7 +356,7 @@ export const Plinko: React.FC = () => {
                 max={30}
                 value={ballCount}
                 onChange={(e) => setBallCount(Math.min(30, Math.max(1, Number(e.target.value))))}
-                disabled={isPlaying}
+                disabled={isPlaying || isWaiting}
                 className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-dfinity-turquoise"
               />
             </div>
@@ -379,7 +401,7 @@ export const Plinko: React.FC = () => {
           ledgerActor={ledgerActor}
           gameActor={actor}
           onBalanceRefresh={handleBalanceRefresh}
-          disabled={isPlaying}
+          disabled={isPlaying || isWaiting}
           multiplier={multipliers[Math.floor(multipliers.length / 2)] || DEFAULT_MULTIPLIER}
           canisterId={PLINKO_BACKEND_CANISTER_ID}
           isBalanceLoading={gameBalanceContext.isLoading}

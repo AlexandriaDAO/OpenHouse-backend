@@ -6,7 +6,7 @@ export const PLINKO_LAYOUT = {
   // Spacing (same as old LayoutConfig for consistency)
   PEG_SPACING_X: 38,
   PEG_SPACING_Y: 36,
-  PEG_RADIUS: 5, 
+  PEG_RADIUS: 5,
   BALL_RADIUS: 8,
 
   // Slot configuration
@@ -19,9 +19,19 @@ export const PLINKO_LAYOUT = {
   DROP_ZONE_Y: 70,    // Where the first peg row starts
   BALL_START_Y: 50,   // Where balls spawn
 
+  // Bucket configuration (sized to fit up to 30 balls)
+  BUCKET: {
+    WIDTH: 120,
+    HEIGHT: 55,
+    Y: -10,            // Position from top (negative to sit above board)
+    WALL_THICKNESS: 3,
+    DOOR_HEIGHT: 5,    // Bottom door that opens
+  },
+
   // Animation timing
-  MS_PER_ROW: 150,        
-  BALL_STAGGER_MS: 120,  // Delay between multi-ball drops
+  MS_PER_ROW: 100,       // Faster ball fall (was 150)
+  BALL_STAGGER_MS: 40,   // Rapid fire multi-ball drops (was 120)
+  BUCKET_OPEN_MS: 300,   // Time for bucket door to open
 
   // Colors (Tailwind-compatible)
   COLORS: {
@@ -30,6 +40,8 @@ export const PLINKO_LAYOUT = {
     win: '#22c55e',
     lose: '#6b7280',
     board: 'transparent',
+    bucket: '#4a5568',
+    bucketAccent: '#2d3748',
   }
 };
 
