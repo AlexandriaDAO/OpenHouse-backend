@@ -61,7 +61,7 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({ rows, multipliers }) =
                 fontWeight="bold"
                 style={{ pointerEvents: 'none' }}
               >
-                {safeMult.toFixed(1)}x
+                {safeMult.toFixed(2)}x
               </text>
             </g>
           );

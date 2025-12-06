@@ -10,8 +10,10 @@ import { useAuth } from '../../providers/AuthProvider';
 import { DECIMALS_PER_CKUSDT } from '../../types/balance';
 import type { PlinkoGameResult as BackendPlinkoResult } from '../../declarations/plinko_backend/plinko_backend.did';
 
-const ROWS = 8;
+// Constants
+const ROWS = 8; // Note: Backend currently supports fixed 8 rows. 
 const PLINKO_BACKEND_CANISTER_ID = 'weupr-2qaaa-aaaap-abl3q-cai';
+const DEFAULT_MULTIPLIER = 0.2;
 
 // --- Interfaces ---
 interface PlinkoGameResult {
@@ -96,6 +98,7 @@ export const Plinko: React.FC = () => {
         setExpectedValue(ev);
       } catch (err) {
         console.error("Failed to load game data", err);
+        setGameError('Failed to load game configuration. Please refresh.');
       }
     }
     loadGameData();
@@ -148,6 +151,8 @@ export const Plinko: React.FC = () => {
 
       if (totalBetE8s > balance.game) {
         setGameError(`Insufficient balance. Total bet: $${(betAmount * ballCount).toFixed(2)}`);
+        // Note: For multi-tab race conditions, the backend handles the final check.
+        // Frontend "isPlaying" flag handles single-tab race conditions.
         return;
       }
       
@@ -328,7 +333,7 @@ export const Plinko: React.FC = () => {
                 min={1}
                 max={30}
                 value={ballCount}
-                onChange={(e) => setBallCount(Number(e.target.value))}
+                onChange={(e) => setBallCount(Math.min(30, Math.max(1, Number(e.target.value))))}
                 disabled={isPlaying}
                 className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-dfinity-turquoise"
               />
@@ -375,7 +380,7 @@ export const Plinko: React.FC = () => {
           gameActor={actor}
           onBalanceRefresh={handleBalanceRefresh}
           disabled={isPlaying}
-          multiplier={multipliers[Math.floor(multipliers.length / 2)] || 0.2}
+          multiplier={multipliers[Math.floor(multipliers.length / 2)] || DEFAULT_MULTIPLIER}
           canisterId={PLINKO_BACKEND_CANISTER_ID}
           isBalanceLoading={gameBalanceContext.isLoading}
           isBalanceInitialized={gameBalanceContext.isInitialized}
