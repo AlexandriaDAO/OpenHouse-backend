@@ -1,11 +1,11 @@
 import React, { useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { generateBallKeyframes, PLINKO_LAYOUT } from './plinkoAnimations';
+import { generatePhysicsKeyframes, generatePhysicsTiming, PLINKO_LAYOUT } from './plinkoAnimations';
 
 interface PlinkoBallProps {
   id: number;
   path: boolean[];
-  onComplete: (id: number, finalSlot: number) => void;
+  onComplete: (id: number) => void;
   staggerDelay?: number;
 }
 
@@ -15,23 +15,20 @@ export const PlinkoBall: React.FC<PlinkoBallProps> = ({
   onComplete,
   staggerDelay = 0
 }) => {
-  // Generate animation keyframes from path
-  const keyframes = generateBallKeyframes(path);
+  // Generate physics keyframes
+  const keyframes = generatePhysicsKeyframes(path);
+  const timings = generatePhysicsTiming(keyframes.length);
 
-  // Calculate final slot (count of rights in path)
-  const finalSlot = path.filter(v => v).length;
+  // Duration based on path length (slightly longer for physics effect)
+  const duration = (path.length * PLINKO_LAYOUT.MS_PER_ROW * 1.3) / 1000;
 
-  // Calculate total animation duration
-  const duration = (path.length * PLINKO_LAYOUT.MS_PER_ROW) / 1000;
-
-  // Notify parent when animation completes
+  // Notify parent when complete
   useEffect(() => {
     const timer = setTimeout(() => {
-      onComplete(id, finalSlot);
-    }, (duration + staggerDelay) * 1000);
-
+      onComplete(id);
+    }, (duration + staggerDelay) * 1000 + 100);
     return () => clearTimeout(timer);
-  }, [id, finalSlot, duration, staggerDelay, onComplete]);
+  }, [id, duration, staggerDelay, onComplete]);
 
   return (
     <motion.g
@@ -39,29 +36,56 @@ export const PlinkoBall: React.FC<PlinkoBallProps> = ({
       animate={{
         x: keyframes.map(k => k.x),
         y: keyframes.map(k => k.y),
-        opacity: [0, 1, 1, 1, 0.5],
+        scaleX: keyframes.map(k => k.scaleX),
+        scaleY: keyframes.map(k => k.scaleY),
+        rotate: keyframes.map(k => k.rotation),
+        opacity: [0, 1, ...Array(Math.max(0, keyframes.length - 3)).fill(1), 0.8, 0.5],
       }}
       transition={{
         duration,
         delay: staggerDelay,
-        ease: "linear", // Using linear for predictable path movement, or easeInOut for bounces
-        times: keyframes.map((_, i) => i / (keyframes.length - 1)),
+        times: timings,
+        ease: "easeInOut",
       }}
+      style={{ transformOrigin: 'center center' }}
     >
-      {/* Ball circle */}
-      <circle
-        r={PLINKO_LAYOUT.BALL_RADIUS}
-        fill={PLINKO_LAYOUT.COLORS.ball}
-      />
+      {/* Ball with gradient and shadows - uses defs from PlinkoBoard */}
+      <g filter="url(#ballShadow)">
+        {/* Drop shadow */}
+        <ellipse
+          cx={2}
+          cy={PLINKO_LAYOUT.BALL_RADIUS + 2}
+          rx={PLINKO_LAYOUT.BALL_RADIUS * 0.7}
+          ry={PLINKO_LAYOUT.BALL_RADIUS * 0.25}
+          fill="black"
+          opacity={0.15}
+        />
 
-      {/* 3D highlight */}
-      <circle
-        cx={-PLINKO_LAYOUT.BALL_RADIUS * 0.3}
-        cy={-PLINKO_LAYOUT.BALL_RADIUS * 0.3}
-        r={PLINKO_LAYOUT.BALL_RADIUS * 0.3}
-        fill="white"
-        opacity={0.4}
-      />
+        {/* Main ball */}
+        <circle
+          r={PLINKO_LAYOUT.BALL_RADIUS}
+          fill="url(#ballGradient)"
+        />
+
+        {/* Specular highlight */}
+        <ellipse
+          cx={-PLINKO_LAYOUT.BALL_RADIUS * 0.3}
+          cy={-PLINKO_LAYOUT.BALL_RADIUS * 0.3}
+          rx={PLINKO_LAYOUT.BALL_RADIUS * 0.35}
+          ry={PLINKO_LAYOUT.BALL_RADIUS * 0.25}
+          fill="white"
+          opacity={0.6}
+        />
+
+        {/* Secondary highlight */}
+        <circle
+          cx={-PLINKO_LAYOUT.BALL_RADIUS * 0.15}
+          cy={-PLINKO_LAYOUT.BALL_RADIUS * 0.45}
+          r={PLINKO_LAYOUT.BALL_RADIUS * 0.1}
+          fill="white"
+          opacity={0.8}
+        />
+      </g>
     </motion.g>
   );
 };

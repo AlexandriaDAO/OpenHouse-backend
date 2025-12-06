@@ -1,4 +1,4 @@
 export { PlinkoBoard } from './PlinkoBoard';
 export { PlinkoBall } from './PlinkoBall';
-export { PlinkoBucket } from './PlinkoBucket';
+export { MultiplierSlot } from './MultiplierSlot';
 export * from './plinkoAnimations';

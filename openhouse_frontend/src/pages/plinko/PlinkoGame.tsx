@@ -71,6 +71,8 @@ export const Plinko: React.FC = () => {
   const [maxBet, setMaxBet] = useState(100);
   const [multipliers, setMultipliers] = useState<number[]>([]);
   const [gameError, setGameError] = useState('');
+  const [activeSlot, setActiveSlot] = useState<number | null>(null);
+  const activeSlotTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Stats & Info
   const [currentResult, setCurrentResult] = useState<PlinkoGameResult | null>(null);
@@ -240,7 +242,33 @@ export const Plinko: React.FC = () => {
 
   // Handle ball animation complete
   const handleBallComplete = useCallback((ballId: number) => {
+    // Find the ball's path to determine final slot
+    const ball = animatingBalls.find(b => b.id === ballId);
+    if (ball) {
+      const finalSlot = ball.path.filter(v => v).length;
+
+      // Trigger slot animation
+      setActiveSlot(finalSlot);
+
+      // Clear after animation
+      if (activeSlotTimeoutRef.current) {
+        clearTimeout(activeSlotTimeoutRef.current);
+      }
+      activeSlotTimeoutRef.current = setTimeout(() => {
+        setActiveSlot(null);
+      }, 600);
+    }
+
     setAnimatingBalls(prev => prev.filter(b => b.id !== ballId));
+  }, [animatingBalls]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (activeSlotTimeoutRef.current) {
+        clearTimeout(activeSlotTimeoutRef.current);
+      }
+    };
   }, []);
 
   // Monitor playing state based on animating balls
@@ -313,7 +341,7 @@ export const Plinko: React.FC = () => {
             <div style={{ aspectRatio: '400/440' }}>
               <svg viewBox={`0 0 ${PLINKO_LAYOUT.BOARD_WIDTH} ${PLINKO_LAYOUT.BOARD_HEIGHT}`} className="w-full h-full overflow-visible">
                 {/* Static board */}
-                <PlinkoBoard rows={ROWS} multipliers={multipliers} />
+                <PlinkoBoard rows={ROWS} multipliers={multipliers} activeSlot={activeSlot} />
 
                 {/* Ball bucket - shows while waiting for IC response */}
                 <PlinkoBucket

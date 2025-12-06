@@ -45,6 +45,56 @@ export const PLINKO_LAYOUT = {
   }
 };
 
+// Stake-style bucket colors
+export const BUCKET_COLORS = {
+  // High multiplier (edges) - Red
+  high: {
+    bg: { r: 255, g: 0, b: 63 },
+    shadow: { r: 166, g: 0, b: 4 },
+  },
+  // Low multiplier (center) - Yellow
+  low: {
+    bg: { r: 255, g: 192, b: 0 },
+    shadow: { r: 171, g: 121, b: 0 },
+  },
+};
+
+// Linear interpolation between two RGB colors
+function lerpColor(
+  color1: { r: number; g: number; b: number },
+  color2: { r: number; g: number; b: number },
+  t: number
+): string {
+  const r = Math.round(color1.r + (color2.r - color1.r) * t);
+  const g = Math.round(color1.g + (color2.g - color1.g) * t);
+  const b = Math.round(color1.b + (color2.b - color1.b) * t);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+// Get bucket colors based on position (edges=red, center=yellow)
+export function getBucketColors(index: number, totalBuckets: number): {
+  background: string;
+  shadow: string;
+  glow: string;
+} {
+  const center = (totalBuckets - 1) / 2;
+  const distanceFromCenter = Math.abs(index - center);
+  const maxDistance = center;
+
+  // t = 0 at center (yellow), t = 1 at edges (red)
+  const t = maxDistance > 0 ? distanceFromCenter / maxDistance : 0;
+
+  return {
+    background: lerpColor(BUCKET_COLORS.low.bg, BUCKET_COLORS.high.bg, t),
+    shadow: lerpColor(BUCKET_COLORS.low.shadow, BUCKET_COLORS.high.shadow, t),
+    glow: lerpColor(
+      { r: 255, g: 200, b: 50 },
+      { r: 255, g: 50, b: 100 },
+      t
+    ),
+  };
+}
+
 // Calculate ball position at a given path step
 export function calculateBallPosition(
   path: boolean[],
@@ -95,4 +145,110 @@ export function generateBallKeyframes(path: boolean[]) {
   }
 
   return keyframes;
+}
+
+// Physics keyframe with optional transform properties
+interface PhysicsKeyframe {
+  x: number;
+  y: number;
+  scaleX: number;
+  scaleY: number;
+  rotation: number;
+}
+
+// Generate physics-enhanced keyframes from path
+export function generatePhysicsKeyframes(path: boolean[]): PhysicsKeyframe[] {
+  const keyframes: PhysicsKeyframe[] = [];
+  const { BOARD_WIDTH, DROP_ZONE_Y, PEG_SPACING_X, PEG_SPACING_Y, BALL_START_Y } = PLINKO_LAYOUT;
+
+  // Start position
+  keyframes.push({
+    x: BOARD_WIDTH / 2,
+    y: BALL_START_Y,
+    scaleX: 1,
+    scaleY: 1,
+    rotation: 0
+  });
+
+  for (let row = 0; row < path.length; row++) {
+    const goesRight = path[row];
+    const rightsSoFar = path.slice(0, row + 1).filter(v => v).length;
+
+    // Calculate positions
+    const pinX = BOARD_WIDTH / 2 + (rightsSoFar - row / 2 - 0.5) * PEG_SPACING_X;
+    const pinY = DROP_ZONE_Y + row * PEG_SPACING_Y;
+    const landX = BOARD_WIDTH / 2 + (rightsSoFar - (row + 1) / 2) * PEG_SPACING_X;
+    const landY = DROP_ZONE_Y + (row + 1) * PEG_SPACING_Y;
+
+    // Approach pin (slight vertical stretch from falling)
+    keyframes.push({
+      x: pinX,
+      y: pinY - 2,
+      scaleX: 0.95,
+      scaleY: 1.05,
+      rotation: goesRight ? 5 : -5
+    });
+
+    // Impact (squash)
+    keyframes.push({
+      x: pinX + (goesRight ? 2 : -2),
+      y: pinY,
+      scaleX: 1.12,
+      scaleY: 0.88,
+      rotation: goesRight ? 10 : -10
+    });
+
+    // Bounce away (stretch)
+    const bounceX = pinX + (goesRight ? PEG_SPACING_X * 0.3 : -PEG_SPACING_X * 0.3);
+    const bounceY = pinY + PEG_SPACING_Y * 0.3;
+    keyframes.push({
+      x: bounceX,
+      y: bounceY,
+      scaleX: 0.92,
+      scaleY: 1.08,
+      rotation: goesRight ? 12 : -12
+    });
+
+    // Land (normalize)
+    keyframes.push({
+      x: landX,
+      y: landY,
+      scaleX: 1,
+      scaleY: 1,
+      rotation: 0
+    });
+  }
+
+  return keyframes;
+}
+
+// Generate timing array with gravity acceleration feel
+export function generatePhysicsTiming(keyframeCount: number): number[] {
+  const times: number[] = [];
+  let accumulated = 0;
+
+  for (let i = 0; i < keyframeCount; i++) {
+    times.push(accumulated);
+
+    // Vary timing based on keyframe type (4 per row after initial)
+    const segmentType = i === 0 ? -1 : (i - 1) % 4;
+    let segmentDuration: number;
+
+    switch (segmentType) {
+      case -1: segmentDuration = 0.1; break;  // Initial drop
+      case 0: segmentDuration = 0.12; break;  // Approach
+      case 1: segmentDuration = 0.04; break;  // Impact (quick)
+      case 2: segmentDuration = 0.10; break;  // Bounce
+      case 3: segmentDuration = 0.08; break;  // Land
+      default: segmentDuration = 0.08;
+    }
+
+    // Gradually speed up (gravity effect) - max 30% faster at bottom
+    const progress = i / keyframeCount;
+    const gravityMultiplier = 1 - progress * 0.3;
+    accumulated += segmentDuration * gravityMultiplier;
+  }
+
+  // Normalize to 0-1
+  return times.map(t => t / accumulated);
 }
