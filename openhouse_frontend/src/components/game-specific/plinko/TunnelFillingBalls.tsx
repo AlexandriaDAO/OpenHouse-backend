@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import { PLINKO_LAYOUT } from './plinkoAnimations';
 import { TunnelPhysicsEngine, TunnelBallState } from './TunnelPhysicsEngine';
 
 interface TunnelFillingBallsProps {
   ballCount: number;
   isFilling: boolean;
+  isReleasing?: boolean;
   onFillingComplete?: () => void;
+  onRelease?: (states: TunnelBallState[]) => void;
   staggerMs?: number;
 }
 
@@ -16,7 +19,9 @@ interface TunnelFillingBallsProps {
 export const TunnelFillingBalls: React.FC<TunnelFillingBallsProps> = ({
   ballCount,
   isFilling,
+  isReleasing,
   onFillingComplete,
+  onRelease,
   staggerMs = 60,
 }) => {
   const engineRef = useRef<TunnelPhysicsEngine | null>(null);
@@ -47,6 +52,17 @@ export const TunnelFillingBalls: React.FC<TunnelFillingBallsProps> = ({
     };
   }, [centerX, onFillingComplete]);
 
+  // Handle release
+  useEffect(() => {
+    if (isReleasing && engineRef.current) {
+      // Get ball states with velocity before they fall
+      const states = Array.from(engineRef.current.getBallStates().values());
+      onRelease?.(states);
+      // Remove gate so balls fall through
+      engineRef.current.removeGate();
+    }
+  }, [isReleasing, onRelease]);
+
   // Start dropping balls when filling begins
   useEffect(() => {
     if (isFilling && engineRef.current && !hasStartedRef.current) {
@@ -55,9 +71,9 @@ export const TunnelFillingBalls: React.FC<TunnelFillingBallsProps> = ({
     }
   }, [isFilling, ballCount, staggerMs]);
 
-  // Reset when not filling
+  // Reset when not filling AND not releasing
   useEffect(() => {
-    if (!isFilling) {
+    if (!isFilling && !isReleasing) {
       hasStartedRef.current = false;
       setBallStates(new Map());
       // Recreate engine for next fill
@@ -76,9 +92,9 @@ export const TunnelFillingBalls: React.FC<TunnelFillingBallsProps> = ({
         engine.start();
       }
     }
-  }, [isFilling, centerX, onFillingComplete]);
+  }, [isFilling, isReleasing, centerX, onFillingComplete]);
 
-  if (!isFilling || ballStates.size === 0) return null;
+  if ((!isFilling && !isReleasing) || ballStates.size === 0) return null;
 
   // Tunnel dimensions (must match TunnelPhysicsEngine and ReleaseTunnel)
   const BUCKET_WIDTH = 140;
@@ -114,9 +130,14 @@ export const TunnelFillingBalls: React.FC<TunnelFillingBallsProps> = ({
       </defs>
 
       <g clipPath="url(#tunnelFillClip)">
-        {Array.from(ballStates.entries()).map(([id, state]) => (
-          <TunnelBall key={id} state={state} />
-        ))}
+        <motion.g
+          animate={{ opacity: isReleasing ? 0 : 1 }}
+          transition={{ duration: 0.15, ease: 'easeOut' }}
+        >
+          {Array.from(ballStates.entries()).map(([id, state]) => (
+            <TunnelBall key={id} state={state} />
+          ))}
+        </motion.g>
       </g>
     </g>
   );

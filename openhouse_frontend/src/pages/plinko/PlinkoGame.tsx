@@ -87,6 +87,10 @@ export const Plinko: React.FC = () => {
   const [isFilling, setIsFilling] = useState(false);
   const fillingCompleteRef = useRef(false);
   const backendResultsRef = useRef<{ path: boolean[] }[] | null>(null);
+  
+  // Smooth transition state
+  const [tunnelBallStates, setTunnelBallStates] = useState<Map<number, { x: number; y: number; vx: number; vy: number }>>(new Map());
+  const [isReleasing, setIsReleasing] = useState(false);
 
   // Track recently landed slots for highlighting
   const [activeSlots, setActiveSlots] = useState<Set<number>>(new Set());
@@ -136,33 +140,59 @@ export const Plinko: React.FC = () => {
     updateMaxBet();
   }, [actor, ballCount, betAmount]);
 
+  // Callback to capture tunnel ball states just before release
+  const handleTunnelRelease = useCallback((states: any[]) => {
+    // Create map indexed by position (we'll map to ball IDs when creating pending balls)
+    const stateMap = new Map<number, { x: number; y: number; vx: number; vy: number }>();
+    states.forEach((state, index) => {
+      stateMap.set(index, { x: state.x, y: state.y, vx: state.vx, vy: state.vy });
+    });
+    setTunnelBallStates(stateMap);
+  }, []);
+
   // Helper: Try to release balls when both backend and filling are ready
   const tryReleaseBalls = useCallback(() => {
     if (fillingCompleteRef.current && backendResultsRef.current) {
       const results = backendResultsRef.current;
 
-      // Open the bucket door
+      // Open the bucket door AND trigger release
       setBucketOpen(true);
+      setIsReleasing(true);
 
-      // Wait for door animation, then start physics ball drops
+      // Wait for door animation + position capture, then start board balls
       setTimeout(() => {
         const newBalls: PendingBall[] = results.map((r, i) => ({
           id: nextBallId + i,
           path: r.path,
         }));
 
+        // Map tunnel states to new ball IDs
+        const mappedStates = new Map<number, { x: number; y: number; vx: number; vy: number }>();
+        tunnelBallStates.forEach((state, index) => {
+          if (index < newBalls.length) {
+            mappedStates.set(nextBallId + index, state);
+          }
+        });
+        setTunnelBallStates(mappedStates);
+
         setPendingBalls(newBalls);
         setNextBallId(prev => prev + results.length);
         setIsWaiting(false);
-        setIsFilling(false);
         setIsPlaying(true);
+
+        // Delay hiding tunnel balls to allow fade-out
+        setTimeout(() => {
+          setIsFilling(false);
+          setIsReleasing(false);
+          setTunnelBallStates(new Map());
+        }, 150);  // Match fade-out duration
 
         // Clean up refs for next round
         fillingCompleteRef.current = false;
         backendResultsRef.current = null;
       }, PLINKO_LAYOUT.BUCKET_OPEN_MS);
     }
-  }, [nextBallId]);
+  }, [nextBallId, tunnelBallStates]);
 
   // Callback when tunnel filling animation settles
   const handleFillingComplete = useCallback(() => {
@@ -353,7 +383,9 @@ export const Plinko: React.FC = () => {
             <TunnelFillingBalls
               ballCount={ballCount}
               isFilling={isFilling}
+              isReleasing={isReleasing}
               onFillingComplete={handleFillingComplete}
+              onRelease={handleTunnelRelease}
               staggerMs={60}
             />
 
@@ -362,6 +394,7 @@ export const Plinko: React.FC = () => {
               <PlinkoPhysicsBalls
                 rows={ROWS}
                 pendingBalls={pendingBalls}
+                initialStates={tunnelBallStates}
                 onAllBallsLanded={handleAllBallsLanded}
                 onBallLanded={handleBallLanded}
                 staggerMs={PLINKO_LAYOUT.BALL_STAGGER_MS}

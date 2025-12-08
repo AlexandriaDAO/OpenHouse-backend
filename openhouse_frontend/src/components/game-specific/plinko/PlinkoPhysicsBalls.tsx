@@ -10,6 +10,7 @@ interface PendingBall {
 interface PlinkoPhysicsBallsProps {
   rows: number;
   pendingBalls: PendingBall[];
+  initialStates?: Map<number, { x: number; y: number; vx: number; vy: number }>;
   onAllBallsLanded: () => void;
   onBallLanded?: (slotIndex: number) => void;
   staggerMs?: number;
@@ -18,6 +19,7 @@ interface PlinkoPhysicsBallsProps {
 export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
   rows,
   pendingBalls,
+  initialStates,
   onAllBallsLanded,
   onBallLanded,
   staggerMs = PLINKO_LAYOUT.BALL_STAGGER_MS,
@@ -84,11 +86,13 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
       setTimeout(() => {
         if (engineRef.current && !droppedBallsRef.current.has(ball.id)) {
           droppedBallsRef.current.add(ball.id);
-          engineRef.current.dropBall(ball.id, ball.path);
+          // Get initial state if available
+          const initialState = initialStates?.get(ball.id);
+          engineRef.current.dropBall(ball.id, ball.path, initialState);
         }
       }, index * staggerMs);
     });
-  }, [pendingBalls, staggerMs]);
+  }, [pendingBalls, staggerMs, initialStates]);
 
   return (
     <g>

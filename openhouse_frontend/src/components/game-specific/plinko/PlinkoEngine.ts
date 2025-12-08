@@ -392,7 +392,11 @@ export class PlinkoPhysicsEngine {
     return null;
   }
 
-  public dropBall(id: number, path: boolean[]): void {
+  public dropBall(
+    id: number,
+    path: boolean[],
+    initialState?: { x: number; y: number; vx: number; vy: number }
+  ): void {
     const { rows, width } = this.options;
     const { BALL_START_Y } = PLINKO_LAYOUT;
 
@@ -400,19 +404,29 @@ export class PlinkoPhysicsEngine {
     const targetSlot = path.filter(v => v).length;
     this.ballTargets.set(id, targetSlot);
 
-    // Ball offset range (matching open source: pinDistanceX * 0.8)
-    const ballOffsetRangeX = this.pinDistanceX * 0.8;
     const ballRadius = this.pinRadius * 2;
-
-    // Random position within range (matching open source getRandomBetween)
-    const minX = width / 2 - ballOffsetRangeX;
-    const maxX = width / 2 + ballOffsetRangeX;
-    const startX = minX + Math.random() * (maxX - minX);
-
     const frictionAir = PlinkoPhysicsEngine.frictionAirByRowCount[rows] ?? 0.04;
 
-    // Start balls just below the release tunnel
-    const ball = Matter.Bodies.circle(startX, BALL_START_Y, ballRadius, {
+    // Determine start position
+    let startX: number;
+    let startY: number;
+    let initialVelocity = { x: 0, y: 0 };
+
+    if (initialState) {
+      // Use provided position and velocity from tunnel
+      startX = initialState.x;
+      startY = initialState.y;
+      initialVelocity = { x: initialState.vx, y: initialState.vy };
+    } else {
+      // Default behavior: random X at BALL_START_Y
+      const ballOffsetRangeX = this.pinDistanceX * 0.8;
+      const minX = width / 2 - ballOffsetRangeX;
+      const maxX = width / 2 + ballOffsetRangeX;
+      startX = minX + Math.random() * (maxX - minX);
+      startY = BALL_START_Y;
+    }
+
+    const ball = Matter.Bodies.circle(startX, startY, ballRadius, {
       restitution: 0.8,  // Bounciness (matching open source)
       friction: 0.5,     // Friction (matching open source)
       frictionAir: frictionAir,
@@ -422,6 +436,11 @@ export class PlinkoPhysicsEngine {
       },
       label: `ball_${id}`,
     });
+
+    // Apply initial velocity if provided
+    if (initialState) {
+      Matter.Body.setVelocity(ball, initialVelocity);
+    }
 
     Matter.Composite.add(this.engine.world, ball);
     this.balls.set(id, ball);

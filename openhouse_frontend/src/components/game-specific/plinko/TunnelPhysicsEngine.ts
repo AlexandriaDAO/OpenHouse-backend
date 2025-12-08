@@ -4,6 +4,8 @@ export interface TunnelBallState {
   x: number;
   y: number;
   rotation: number;
+  vx: number;
+  vy: number;
 }
 
 export interface TunnelPhysicsOptions {
@@ -21,6 +23,7 @@ export class TunnelPhysicsEngine {
   private runner: Matter.Runner;
   private balls: Map<number, Matter.Body> = new Map();
   private walls: Matter.Body[] = [];
+  private gate: Matter.Body | null = null;
   private options: TunnelPhysicsOptions;
   private animationFrame: number | null = null;
   private settleCheckInterval: number | null = null;
@@ -94,8 +97,16 @@ export class TunnelPhysicsEngine {
       }
     );
 
+    this.gate = bottomWall;
     this.walls = [leftWall, rightWall, bottomWall];
     Matter.Composite.add(this.engine.world, this.walls);
+  }
+
+  public removeGate(): void {
+    if (this.gate) {
+      Matter.Composite.remove(this.engine.world, this.gate);
+      this.gate = null;
+    }
   }
 
   /**
@@ -149,6 +160,8 @@ export class TunnelPhysicsEngine {
         x: ball.position.x,
         y: ball.position.y,
         rotation: ball.angle * (180 / Math.PI),
+        vx: ball.velocity.x,
+        vy: ball.velocity.y,
       });
     }
     return states;
