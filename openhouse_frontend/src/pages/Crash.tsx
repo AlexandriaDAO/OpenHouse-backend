@@ -191,6 +191,7 @@ export const Crash: React.FC = () => {
           <CrashCanvas
             rocketStates={rocketStates}
             targetMultiplier={targetCashout}
+            rocketsSucceeded={multiResult?.rockets_succeeded ?? 0}
           />
 
           {/* Milestone overlay when any rocket passes target */}

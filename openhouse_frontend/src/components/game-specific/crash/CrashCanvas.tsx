@@ -18,6 +18,7 @@ export const ROCKET_COLORS = [
 interface CrashCanvasProps {
   rocketStates: RocketState[];
   targetMultiplier?: number;
+  rocketsSucceeded?: number;
   width?: number;
   height?: number;
 }
@@ -25,6 +26,7 @@ interface CrashCanvasProps {
 export const CrashCanvas: React.FC<CrashCanvasProps> = ({
   rocketStates,
   targetMultiplier,
+  rocketsSucceeded = 0,
   width = 800,
   height = 400
 }) => {
@@ -146,30 +148,30 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
             key={rocket.index}
             className="absolute z-20 pointer-events-none transition-transform duration-75 ease-linear will-change-transform"
             style={{
-              transform: `translate(${pos.x}px, ${pos.y}px) translate(-50%, -50%) rotate(-45deg)`,
+              transform: `translate(${pos.x}px, ${pos.y}px) translate(-50%, -50%)${rocket.isCrashed ? '' : ' rotate(-45deg)'}`,
               left: 0,
               top: 0,
             }}
           >
-            <div className={`relative ${rocket.isCrashed ? 'animate-ping' : ''}`}>
-              {rocket.isCrashed ? (
-                <div className="text-3xl">💥</div>
-              ) : (
-                <RocketSVG color={color} size={30} />
-              )}
-            </div>
+            {rocket.isCrashed ? (
+              <div className="text-2xl">💥</div>
+            ) : (
+              <RocketSVG color={color} size={30} />
+            )}
           </div>
         );
       })}
 
       {/* Current Max Multiplier Display */}
       <div className="absolute top-8 left-1/2 -translate-x-1/2 text-center z-30">
-        <div className={`text-5xl font-bold font-mono ${allCrashed ? 'text-red-500' : 'text-white'} drop-shadow-lg`}>
+        <div className={`text-5xl font-bold font-mono ${allCrashed ? (rocketsSucceeded > 0 ? 'text-green-400' : 'text-red-500') : 'text-white'} drop-shadow-lg`}>
           {maxCurrentMultiplier.toFixed(2)}x
         </div>
         {allCrashed && (
-          <div className="text-red-400 font-bold text-xl mt-2 animate-bounce">
-            ALL CRASHED
+          <div className={`font-bold text-xl mt-2 ${rocketsSucceeded > 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {rocketsSucceeded > 0
+              ? `${rocketsSucceeded}/${rocketStates.length} REACHED TARGET!`
+              : 'ALL CRASHED'}
           </div>
         )}
       </div>
