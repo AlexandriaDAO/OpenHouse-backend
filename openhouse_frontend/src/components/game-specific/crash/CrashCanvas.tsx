@@ -31,7 +31,8 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
   height = 400
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [rocketPositions, setRocketPositions] = useState<Map<number, { x: number; y: number }>>(new Map());
+  // Store positions as percentages (0-100) so they scale with container
+  const [rocketPositions, setRocketPositions] = useState<Map<number, { xPercent: number; yPercent: number }>>(new Map());
 
   // Generate stars once
   const stars = useMemo(() => generateStars(50), []);
@@ -61,7 +62,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
     );
 
     // Draw each rocket's trajectory
-    const newPositions = new Map<number, { x: number; y: number }>();
+    const newPositions = new Map<number, { xPercent: number; yPercent: number }>();
 
     rocketStates.forEach((rocket) => {
       if (rocket.history.length === 0) return;
@@ -95,8 +96,11 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
 
       ctx.stroke();
 
-      // Store rocket position
-      newPositions.set(rocket.index, { x: lastX, y: lastY });
+      // Store rocket position as percentages so it scales with container
+      newPositions.set(rocket.index, {
+        xPercent: (lastX / width) * 100,
+        yPercent: (lastY / height) * 100
+      });
     });
 
     setRocketPositions(newPositions);
@@ -154,14 +158,14 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
             key={rocket.index}
             className="absolute pointer-events-none"
             style={{
-              transform: `translate(${pos.x}px, ${pos.y}px) translate(-50%, -50%)${rocket.isCrashed ? '' : ' rotate(-45deg)'}`,
-              left: 0,
-              top: 0,
+              left: `${pos.xPercent}%`,
+              top: `${pos.yPercent}%`,
+              transform: `translate(-50%, -50%)${rocket.isCrashed ? '' : ' rotate(-45deg)'}`,
               zIndex: rocket.isCrashed ? 25 : 20,
             }}
           >
             {rocket.isCrashed ? (
-              <div className="text-3xl" style={{ filter: 'drop-shadow(0 0 4px orange)' }}>💥</div>
+              <div className="text-3xl" style={{ filter: 'drop-shadow(0 0 6px orange)' }}>💥</div>
             ) : (
               <RocketSVG color={color} size={30} />
             )}
