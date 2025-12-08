@@ -103,12 +103,18 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
 
   }, [rocketStates, targetMultiplier, width, height]);
 
-  // Find the highest current multiplier for display
+  // Find the highest current multiplier for live display
   const maxCurrentMultiplier = Math.max(
     ...rocketStates.map(r => r.currentMultiplier),
     1.0
   );
   const allCrashed = rocketStates.length > 0 && rocketStates.every(r => r.isCrashed);
+
+  // Calculate actual net return: (winners * target) / total rockets
+  const netReturn = rocketStates.length > 0 && targetMultiplier
+    ? (rocketsSucceeded * targetMultiplier) / rocketStates.length
+    : 0;
+  const isProfit = netReturn >= 1.0;
 
   return (
     <div className="relative bg-gradient-to-b from-pure-black to-dfinity-navy rounded-lg overflow-hidden border border-pure-white/20 shadow-2xl">
@@ -146,15 +152,16 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
         return (
           <div
             key={rocket.index}
-            className="absolute z-20 pointer-events-none transition-transform duration-75 ease-linear will-change-transform"
+            className="absolute pointer-events-none"
             style={{
               transform: `translate(${pos.x}px, ${pos.y}px) translate(-50%, -50%)${rocket.isCrashed ? '' : ' rotate(-45deg)'}`,
               left: 0,
               top: 0,
+              zIndex: rocket.isCrashed ? 25 : 20,
             }}
           >
             {rocket.isCrashed ? (
-              <div className="text-2xl">💥</div>
+              <div className="text-3xl" style={{ filter: 'drop-shadow(0 0 4px orange)' }}>💥</div>
             ) : (
               <RocketSVG color={color} size={30} />
             )}
@@ -162,17 +169,28 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
         );
       })}
 
-      {/* Current Max Multiplier Display */}
+      {/* Current Multiplier Display */}
       <div className="absolute top-8 left-1/2 -translate-x-1/2 text-center z-30">
-        <div className={`text-5xl font-bold font-mono ${allCrashed ? (rocketsSucceeded > 0 ? 'text-green-400' : 'text-red-500') : 'text-white'} drop-shadow-lg`}>
-          {maxCurrentMultiplier.toFixed(2)}x
-        </div>
-        {allCrashed && (
-          <div className={`font-bold text-xl mt-2 ${rocketsSucceeded > 0 ? 'text-green-400' : 'text-red-400'}`}>
-            {rocketsSucceeded > 0
-              ? `${rocketsSucceeded}/${rocketStates.length} REACHED TARGET!`
-              : 'ALL CRASHED'}
-          </div>
+        {allCrashed ? (
+          <>
+            {/* Show net return when game ends */}
+            <div className={`text-5xl font-bold font-mono ${isProfit ? 'text-green-400' : 'text-red-500'} drop-shadow-lg`}>
+              {netReturn.toFixed(2)}x
+            </div>
+            <div className={`font-bold text-lg mt-1 ${isProfit ? 'text-green-300' : 'text-red-300'}`}>
+              NET RETURN
+            </div>
+            <div className={`font-bold text-xl mt-2 ${rocketsSucceeded > 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {rocketsSucceeded}/{rocketStates.length} reached {targetMultiplier?.toFixed(2)}x
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Show live max multiplier during flight */}
+            <div className="text-5xl font-bold font-mono text-white drop-shadow-lg">
+              {maxCurrentMultiplier.toFixed(2)}x
+            </div>
+          </>
         )}
       </div>
 
