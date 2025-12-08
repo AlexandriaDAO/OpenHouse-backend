@@ -11,9 +11,28 @@ type PlayCrashResult = record {
   randomness_hash: text;
 };
 
+type SingleRocketResult = record {
+  rocket_index: nat8;
+  crash_point: float64;
+  reached_target: bool;
+  payout: nat64;
+};
+
+type MultiCrashResult = record {
+  rockets: vec SingleRocketResult;
+  target_multiplier: float64;
+  rocket_count: nat8;
+  rockets_succeeded: nat8;
+  total_payout: nat64;
+  master_randomness_hash: text;
+};
+
 service : {
   // NEW: Secure pre-commitment method
   play_crash: (float64) -> (variant { Ok: PlayCrashResult; Err: text });
+
+  // NEW: Multi-rocket mode - launch 1-10 rockets with independent crash points
+  play_crash_multi: (float64, nat8) -> (variant { Ok: MultiCrashResult; Err: text });
 
   // DEPRECATED: Old method (kept for compatibility)
   simulate_crash: () -> (variant { Ok: CrashResult; Err: text });

@@ -6,6 +6,20 @@ export const idlFactory = ({ IDL }) => {
     'crash_point' : IDL.Float64,
     'payout' : IDL.Nat64,
   });
+  const SingleRocketResult = IDL.Record({
+    'reached_target' : IDL.Bool,
+    'crash_point' : IDL.Float64,
+    'rocket_index' : IDL.Nat8,
+    'payout' : IDL.Nat64,
+  });
+  const MultiCrashResult = IDL.Record({
+    'master_randomness_hash' : IDL.Text,
+    'rockets' : IDL.Vec(SingleRocketResult),
+    'rockets_succeeded' : IDL.Nat8,
+    'total_payout' : IDL.Nat64,
+    'rocket_count' : IDL.Nat8,
+    'target_multiplier' : IDL.Float64,
+  });
   const CrashResult = IDL.Record({
     'randomness_hash' : IDL.Text,
     'crash_point' : IDL.Float64,
@@ -27,6 +41,11 @@ export const idlFactory = ({ IDL }) => {
     'play_crash' : IDL.Func(
         [IDL.Float64],
         [IDL.Variant({ 'Ok' : PlayCrashResult, 'Err' : IDL.Text })],
+        [],
+      ),
+    'play_crash_multi' : IDL.Func(
+        [IDL.Float64, IDL.Nat8],
+        [IDL.Variant({ 'Ok' : MultiCrashResult, 'Err' : IDL.Text })],
         [],
       ),
     'simulate_crash' : IDL.Func(

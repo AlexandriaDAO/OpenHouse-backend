@@ -6,11 +6,25 @@ export interface CrashResult {
   'randomness_hash' : string,
   'crash_point' : number,
 }
+export interface MultiCrashResult {
+  'master_randomness_hash' : string,
+  'rockets' : Array<SingleRocketResult>,
+  'rockets_succeeded' : number,
+  'total_payout' : bigint,
+  'rocket_count' : number,
+  'target_multiplier' : number,
+}
 export interface PlayCrashResult {
   'won' : boolean,
   'randomness_hash' : string,
   'target_multiplier' : number,
   'crash_point' : number,
+  'payout' : bigint,
+}
+export interface SingleRocketResult {
+  'reached_target' : boolean,
+  'crash_point' : number,
+  'rocket_index' : number,
   'payout' : bigint,
 }
 export interface _SERVICE {
@@ -26,6 +40,11 @@ export interface _SERVICE {
   'play_crash' : ActorMethod<
     [number],
     { 'Ok' : PlayCrashResult } |
+      { 'Err' : string }
+  >,
+  'play_crash_multi' : ActorMethod<
+    [number, number],
+    { 'Ok' : MultiCrashResult } |
       { 'Err' : string }
   >,
   'simulate_crash' : ActorMethod<
