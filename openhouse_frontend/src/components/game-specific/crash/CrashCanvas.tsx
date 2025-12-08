@@ -31,8 +31,8 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
   height = 400
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // Store positions as percentages (0-100) so they scale with container
-  const [rocketPositions, setRocketPositions] = useState<Map<number, { xPercent: number; yPercent: number }>>(new Map());
+  // Store positions as percentages (0-100) and angle in degrees
+  const [rocketPositions, setRocketPositions] = useState<Map<number, { xPercent: number; yPercent: number; angle: number }>>(new Map());
 
   // Generate stars once
   const stars = useMemo(() => generateStars(50), []);
@@ -62,7 +62,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
     );
 
     // Draw each rocket's trajectory
-    const newPositions = new Map<number, { xPercent: number; yPercent: number }>();
+    const newPositions = new Map<number, { xPercent: number; yPercent: number; angle: number }>();
 
     rocketStates.forEach((rocket) => {
       if (rocket.history.length === 0) return;
@@ -77,6 +77,8 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
 
       let lastX = 0;
       let lastY = height;
+      let prevX = 0;
+      let prevY = height;
 
       rocket.history.forEach((point, i) => {
         const x = (i / maxHistoryLength) * width;
@@ -90,16 +92,31 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
           ctx.lineTo(x, y);
         }
 
+        prevX = lastX;
+        prevY = lastY;
         lastX = x;
         lastY = y;
       });
 
       ctx.stroke();
 
+      // Calculate angle from the last segment of the trajectory
+      // atan2 gives angle in radians, convert to degrees
+      // Negative because canvas Y increases downward
+      const dx = lastX - prevX;
+      const dy = lastY - prevY;
+      const angleRad = Math.atan2(-dy, dx); // negative dy because Y is inverted
+      const angleDeg = (angleRad * 180) / Math.PI;
+
+      // Rocket emoji points right by default, so we rotate relative to that
+      // When going up-right at 45°, angleDeg will be ~45°
+      const rocketAngle = angleDeg - 90; // Adjust so rocket points along trajectory
+
       // Store rocket position as percentages so it scales with container
       newPositions.set(rocket.index, {
         xPercent: (lastX / width) * 100,
-        yPercent: (lastY / height) * 100
+        yPercent: (lastY / height) * 100,
+        angle: rocketAngle
       });
     });
 
@@ -160,7 +177,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
             style={{
               left: `${pos.xPercent}%`,
               top: `${pos.yPercent}%`,
-              transform: `translate(-50%, -50%)${rocket.isCrashed ? '' : ' rotate(-45deg)'}`,
+              transform: `translate(-50%, -50%)${rocket.isCrashed ? '' : ` rotate(${pos.angle}deg)`}`,
               zIndex: rocket.isCrashed ? 25 : 20,
             }}
           >
