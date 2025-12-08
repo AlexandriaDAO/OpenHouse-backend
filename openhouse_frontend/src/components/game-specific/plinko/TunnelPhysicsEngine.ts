@@ -27,11 +27,12 @@ export class TunnelPhysicsEngine {
   private hasNotifiedSettled = false;
 
   // Tunnel dimensions (matching ReleaseTunnel.tsx)
+  // Widened for 8px radius balls (was designed for 5px)
   private static BUCKET = {
     TOP_Y: 15,
     BOTTOM_Y: 70,
-    TOP_WIDTH: 24,
-    BOTTOM_WIDTH: 80,
+    TOP_WIDTH: 40,      // Was 24, widened for 8px balls
+    BOTTOM_WIDTH: 100,  // Was 80, widened proportionally
     GATE_HEIGHT: 4,
   };
 

@@ -22,12 +22,12 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
   const { BOARD_WIDTH } = PLINKO_LAYOUT;
   const centerX = BOARD_WIDTH / 2;
 
-  // Pyramid bucket dimensions
+  // Pyramid bucket dimensions - widened for 8px radius balls
   const BUCKET = {
     TOP_Y: 15,           // Where pyramid starts (narrow)
     BOTTOM_Y: 70,        // Where pyramid ends (wide) - gate location
-    TOP_WIDTH: 24,       // Narrow opening at top
-    BOTTOM_WIDTH: 80,    // Wide opening at bottom (matches first row spread)
+    TOP_WIDTH: 40,       // Widened from 24 for 8px balls
+    BOTTOM_WIDTH: 100,   // Widened from 80 for 8px balls
     GATE_HEIGHT: 4,
     TUBE_TOP: -100,      // Tube extends off-screen
   };
