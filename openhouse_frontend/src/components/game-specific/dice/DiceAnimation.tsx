@@ -180,9 +180,11 @@ export const DiceAnimation: React.FC<DiceAnimationProps> = ({
       });
 
       // Call onAnimationComplete after all dice are revealed
+      // Add 50ms buffer to ensure all final reveals complete before completion fires
+      // This prevents a race condition where completion and last dice's reveal fire simultaneously
       const totalDuration = (results.length - 1) * ANIMATION_CONFIG.STAGGER_DELAY +
         ANIMATION_CONFIG.SLOWDOWN_DELAYS.reduce((a, b) => a + b, 0) +
-        ANIMATION_CONFIG.FINAL_REVEAL_PAUSE;
+        ANIMATION_CONFIG.FINAL_REVEAL_PAUSE + 50;
 
       const completeTimeout = setTimeout(() => {
         setAllRevealed(true);

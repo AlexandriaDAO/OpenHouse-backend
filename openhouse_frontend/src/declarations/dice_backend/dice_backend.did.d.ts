@@ -14,6 +14,40 @@ export interface ApyInfo {
   'actual_apy_percent' : number,
   'total_profit' : bigint,
 }
+export interface AuditEntry { 'event' : AuditEvent, 'timestamp' : bigint }
+export type AuditEvent = {
+    'BalanceCredited' : {
+      'user' : Principal,
+      'new_balance' : bigint,
+      'amount' : bigint,
+    }
+  } |
+  { 'WithdrawalInitiated' : { 'user' : Principal, 'amount' : bigint } } |
+  {
+    'SlippageProtectionTriggered' : {
+      'deposit_amount' : bigint,
+      'user' : Principal,
+      'actual_shares' : bigint,
+      'expected_min_shares' : bigint,
+    }
+  } |
+  { 'BalanceRestored' : { 'user' : Principal, 'amount' : bigint } } |
+  { 'WithdrawalCompleted' : { 'user' : Principal, 'amount' : bigint } } |
+  { 'ParentFeeCredited' : { 'amount' : bigint } } |
+  { 'SystemError' : { 'error' : string } } |
+  { 'WithdrawalAbandoned' : { 'user' : Principal, 'amount' : bigint } } |
+  { 'WithdrawalExpired' : { 'user' : Principal, 'amount' : bigint } } |
+  { 'ParentFeeFallback' : { 'amount' : bigint, 'reason' : string } } |
+  { 'WithdrawalFailed' : { 'user' : Principal, 'amount' : bigint } } |
+  { 'LPRestored' : { 'user' : Principal, 'amount' : bigint } } |
+  { 'SystemInfo' : { 'message' : string } } |
+  {
+    'SystemRefundCredited' : {
+      'user' : Principal,
+      'new_balance' : bigint,
+      'amount' : bigint,
+    }
+  };
 export interface DailySnapshot {
   'day_timestamp' : bigint,
   'daily_volume' : bigint,
@@ -131,6 +165,16 @@ export interface _SERVICE {
   'admin_get_all_pending_withdrawals' : ActorMethod<
     [],
     { 'Ok' : Array<PendingWithdrawalInfo> } |
+      { 'Err' : string }
+  >,
+  'admin_get_audit_log' : ActorMethod<
+    [bigint, bigint],
+    { 'Ok' : Array<AuditEntry> } |
+      { 'Err' : string }
+  >,
+  'admin_get_audit_log_count' : ActorMethod<
+    [],
+    { 'Ok' : bigint } |
       { 'Err' : string }
   >,
   'admin_get_orphaned_funds_report' : ActorMethod<

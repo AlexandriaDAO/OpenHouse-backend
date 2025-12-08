@@ -85,16 +85,18 @@ export const Admin: React.FC = () => {
     userBalances: [], lpPositions: [], error: null
   });
 
-  // Audit log state
+  // Audit log state (per-game)
   const [diceAuditLog, setDiceAuditLog] = useState<AuditLogData>({
     entries: [], totalCount: 0, error: null
   });
   const [plinkoAuditLog, setPlinkoAuditLog] = useState<AuditLogData>({
     entries: [], totalCount: 0, error: null
   });
-  const [auditLogOffset, setAuditLogOffset] = useState(0);
-  const [auditLogFilter, setAuditLogFilter] = useState<string>('all');
-  const AUDIT_LOG_PAGE_SIZE = 50;
+  const [diceAuditOffset, setDiceAuditOffset] = useState(0);
+  const [plinkoAuditOffset, setPlinkoAuditOffset] = useState(0);
+  const [diceAuditFilter, setDiceAuditFilter] = useState<string>('all');
+  const [plinkoAuditFilter, setPlinkoAuditFilter] = useState<string>('all');
+  const AUDIT_LOG_PAGE_SIZE = 25;
 
   const isAdmin = principal === ADMIN_PRINCIPAL;
 
@@ -186,15 +188,16 @@ export const Admin: React.FC = () => {
     }
   };
 
-  // Fetch audit logs (can be called separately for pagination)
-  const fetchAuditLogs = useCallback(async (offset: number = 0) => {
-    if (!isAdmin || !isAuthenticated) return;
+  // Fetch audit logs for a specific game (for pagination)
+  const fetchDiceAuditLogs = useCallback(async (offset: number = 0) => {
+    if (!isAdmin || !isAuthenticated || !diceActor) return;
+    await fetchAuditLog(diceActor, setDiceAuditLog, 'Dice', AUDIT_LOG_PAGE_SIZE, offset);
+  }, [diceActor, isAdmin, isAuthenticated]);
 
-    await Promise.all([
-      fetchAuditLog(diceActor, setDiceAuditLog, 'Dice', AUDIT_LOG_PAGE_SIZE, offset),
-      fetchAuditLog(plinkoActor, setPlinkoAuditLog, 'Plinko', AUDIT_LOG_PAGE_SIZE, offset),
-    ]);
-  }, [diceActor, plinkoActor, isAdmin, isAuthenticated]);
+  const fetchPlinkoAuditLogs = useCallback(async (offset: number = 0) => {
+    if (!isAdmin || !isAuthenticated || !plinkoActor) return;
+    await fetchAuditLog(plinkoActor, setPlinkoAuditLog, 'Plinko', AUDIT_LOG_PAGE_SIZE, offset);
+  }, [plinkoActor, isAdmin, isAuthenticated]);
 
   // Fetch all game data in parallel
   const fetchAllData = useCallback(async () => {
@@ -208,7 +211,9 @@ export const Admin: React.FC = () => {
       fetchAuditLog(plinkoActor, setPlinkoAuditLog, 'Plinko', AUDIT_LOG_PAGE_SIZE, 0),
     ]);
 
-    setAuditLogOffset(0); // Reset offset on full refresh
+    // Reset offsets on full refresh
+    setDiceAuditOffset(0);
+    setPlinkoAuditOffset(0);
     setLastRefresh(new Date());
     setLoading(false);
   }, [diceActor, plinkoActor, isAdmin, isAuthenticated]);
@@ -449,19 +454,35 @@ export const Admin: React.FC = () => {
         />
       </div>
 
-      {/* SECTION 7: Audit Log Viewer */}
-      <AuditLogSection
-        diceAuditLog={diceAuditLog}
-        plinkoAuditLog={plinkoAuditLog}
-        offset={auditLogOffset}
-        filter={auditLogFilter}
-        pageSize={AUDIT_LOG_PAGE_SIZE}
-        onOffsetChange={(newOffset) => {
-          setAuditLogOffset(newOffset);
-          fetchAuditLogs(newOffset);
-        }}
-        onFilterChange={setAuditLogFilter}
-      />
+      {/* SECTION 7: Per-Game Audit Logs */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <GameAuditLogCard
+          gameName="Dice"
+          color="blue"
+          auditLog={diceAuditLog}
+          offset={diceAuditOffset}
+          filter={diceAuditFilter}
+          pageSize={AUDIT_LOG_PAGE_SIZE}
+          onOffsetChange={(newOffset) => {
+            setDiceAuditOffset(newOffset);
+            fetchDiceAuditLogs(newOffset);
+          }}
+          onFilterChange={setDiceAuditFilter}
+        />
+        <GameAuditLogCard
+          gameName="Plinko"
+          color="purple"
+          auditLog={plinkoAuditLog}
+          offset={plinkoAuditOffset}
+          filter={plinkoAuditFilter}
+          pageSize={AUDIT_LOG_PAGE_SIZE}
+          onOffsetChange={(newOffset) => {
+            setPlinkoAuditOffset(newOffset);
+            fetchPlinkoAuditLogs(newOffset);
+          }}
+          onFilterChange={setPlinkoAuditFilter}
+        />
+      </div>
     </div>
   );
 };
@@ -908,110 +929,107 @@ const ALL_EVENT_TYPES = [
   'SystemRefundCredited'
 ];
 
-// Audit Log Section Component
-const AuditLogSection: React.FC<{
-  diceAuditLog: AuditLogData;
-  plinkoAuditLog: AuditLogData;
+// Per-game Audit Log Card Component
+const GameAuditLogCard: React.FC<{
+  gameName: string;
+  color: 'blue' | 'purple';
+  auditLog: AuditLogData;
   offset: number;
   filter: string;
   pageSize: number;
   onOffsetChange: (newOffset: number) => void;
   onFilterChange: (filter: string) => void;
-}> = ({ diceAuditLog, plinkoAuditLog, offset, filter, pageSize, onOffsetChange, onFilterChange }) => {
-  // Combine entries from both games with game tag
-  const allEntries: (AuditEntry & { game: string })[] = [
-    ...diceAuditLog.entries.map(e => ({ ...e, game: 'Dice' })),
-    ...plinkoAuditLog.entries.map(e => ({ ...e, game: 'Plinko' })),
-  ].sort((a, b) => Number(b.timestamp - a.timestamp)); // Sort by timestamp descending
+}> = ({ gameName, color, auditLog, offset, filter, pageSize, onOffsetChange, onFilterChange }) => {
+  const colorClasses = {
+    blue: { header: 'text-blue-400', bg: 'bg-blue-900/30', border: 'border-blue-700' },
+    purple: { header: 'text-purple-400', bg: 'bg-purple-900/30', border: 'border-purple-700' },
+  };
+
+  const colors = colorClasses[color];
 
   // Apply filter
   const filteredEntries = filter === 'all'
-    ? allEntries
-    : allEntries.filter(e => getEventTypeName(e.event) === filter);
+    ? auditLog.entries
+    : auditLog.entries.filter(e => getEventTypeName(e.event) === filter);
 
-  // Use the larger count for pagination (since we fetch same offset from each)
-  const maxGameCount = Math.max(diceAuditLog.totalCount, plinkoAuditLog.totalCount);
-  const hasMore = offset + pageSize < maxGameCount;
+  const hasMore = offset + pageSize < auditLog.totalCount;
   const hasPrev = offset > 0;
-  const hasError = diceAuditLog.error || plinkoAuditLog.error;
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-gray-700 flex justify-between items-center flex-wrap gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-300">Audit Log</h2>
-          <p className="text-xs text-gray-500 mt-1">
-            Dice: {diceAuditLog.totalCount} entries • Plinko: {plinkoAuditLog.totalCount} entries
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* Filter dropdown */}
-          <select
-            value={filter}
-            onChange={(e) => onFilterChange(e.target.value)}
-            className="bg-gray-900 border border-gray-600 text-gray-300 text-sm rounded px-3 py-2"
-          >
-            {ALL_EVENT_TYPES.map(type => (
-              <option key={type} value={type}>
-                {type === 'all' ? 'All Events' : type}
-              </option>
-            ))}
-          </select>
-
-          {/* Pagination controls */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => onOffsetChange(Math.max(0, offset - pageSize))}
-              disabled={!hasPrev}
-              className={`px-3 py-2 rounded text-sm ${
-                hasPrev
-                  ? 'bg-gray-700 hover:bg-gray-600 text-white'
-                  : 'bg-gray-800 text-gray-500 cursor-not-allowed'
-              }`}
-            >
-              Prev
-            </button>
-            <span className="text-sm text-gray-400">
-              Page {Math.floor(offset / pageSize) + 1}
-            </span>
-            <button
-              onClick={() => onOffsetChange(offset + pageSize)}
-              disabled={!hasMore}
-              className={`px-3 py-2 rounded text-sm ${
-                hasMore
-                  ? 'bg-gray-700 hover:bg-gray-600 text-white'
-                  : 'bg-gray-800 text-gray-500 cursor-not-allowed'
-              }`}
-            >
-              Next
-            </button>
+      <div className={`p-4 border-b border-gray-700 ${colors.bg}`}>
+        <div className="flex justify-between items-start">
+          <div>
+            <h2 className={`text-lg font-semibold ${colors.header}`}>{gameName} Audit Log</h2>
+            <p className="text-xs text-gray-400 mt-1">{auditLog.totalCount} entries</p>
           </div>
         </div>
       </div>
 
+      {/* Controls */}
+      <div className="p-3 border-b border-gray-700 flex justify-between items-center flex-wrap gap-2 bg-gray-900/30">
+        {/* Filter dropdown */}
+        <select
+          value={filter}
+          onChange={(e) => onFilterChange(e.target.value)}
+          className="bg-gray-900 border border-gray-600 text-gray-300 text-xs rounded px-2 py-1"
+        >
+          {ALL_EVENT_TYPES.map(type => (
+            <option key={type} value={type}>
+              {type === 'all' ? 'All Events' : type}
+            </option>
+          ))}
+        </select>
+
+        {/* Pagination controls */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => onOffsetChange(Math.max(0, offset - pageSize))}
+            disabled={!hasPrev}
+            className={`px-2 py-1 rounded text-xs ${
+              hasPrev
+                ? 'bg-gray-700 hover:bg-gray-600 text-white'
+                : 'bg-gray-800 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            ←
+          </button>
+          <span className="text-xs text-gray-400 px-2">
+            {Math.floor(offset / pageSize) + 1}
+          </span>
+          <button
+            onClick={() => onOffsetChange(offset + pageSize)}
+            disabled={!hasMore}
+            className={`px-2 py-1 rounded text-xs ${
+              hasMore
+                ? 'bg-gray-700 hover:bg-gray-600 text-white'
+                : 'bg-gray-800 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            →
+          </button>
+        </div>
+      </div>
+
       {/* Error display */}
-      {hasError && (
-        <div className="p-4 bg-red-900/20 border-b border-red-700 text-red-400 text-sm">
-          {diceAuditLog.error && <div>Dice: {diceAuditLog.error}</div>}
-          {plinkoAuditLog.error && <div>Plinko: {plinkoAuditLog.error}</div>}
+      {auditLog.error && (
+        <div className="p-3 bg-red-900/20 border-b border-red-700 text-red-400 text-xs">
+          {auditLog.error}
         </div>
       )}
 
       {/* Table */}
       {filteredEntries.length === 0 ? (
-        <div className="p-8 text-center text-gray-500">No audit log entries</div>
+        <div className="p-6 text-center text-gray-500 text-sm">No audit log entries</div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-xs text-gray-400 uppercase bg-gray-700/50">
+        <div className="overflow-x-auto max-h-96">
+          <table className="w-full text-xs">
+            <thead className="text-xs text-gray-400 uppercase bg-gray-700/50 sticky top-0">
               <tr>
-                <th className="px-4 py-3 text-left">Time</th>
-                <th className="px-4 py-3 text-left">Game</th>
-                <th className="px-4 py-3 text-left">Event</th>
-                <th className="px-4 py-3 text-left">User</th>
-                <th className="px-4 py-3 text-right">Amount</th>
-                <th className="px-4 py-3 text-left">Details</th>
+                <th className="px-3 py-2 text-left">Time</th>
+                <th className="px-3 py-2 text-left">Event</th>
+                <th className="px-3 py-2 text-right">Amount</th>
               </tr>
             </thead>
             <tbody className="text-gray-400">
@@ -1019,30 +1037,17 @@ const AuditLogSection: React.FC<{
                 const eventType = getEventTypeName(entry.event);
                 const details = formatEventDetails(entry.event);
                 return (
-                  <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/30">
-                    <td className="px-4 py-3 text-xs">
+                  <tr key={i} className="border-b border-gray-700/50 hover:bg-gray-700/30">
+                    <td className="px-3 py-2 text-xs whitespace-nowrap">
                       {formatTimeAgo(entry.timestamp)}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                        entry.game === 'Dice' ? 'bg-blue-900/30 text-blue-400' : 'bg-purple-900/30 text-purple-400'
-                      }`}>
-                        {entry.game}
+                    <td className="px-3 py-2">
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${getEventColor(eventType)}`}>
+                        {eventType.replace('Withdrawal', 'W/D')}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded text-xs font-semibold ${getEventColor(eventType)}`}>
-                        {eventType}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs" title={details.user}>
-                      {details.user ? truncatePrincipal(details.user, 10) : '-'}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-white">
-                      {details.amount ? `${details.amount} USDT` : '-'}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500 max-w-xs truncate" title={details.message}>
-                      {details.message || '-'}
+                    <td className="px-3 py-2 text-right font-mono text-white whitespace-nowrap">
+                      {details.amount ? `${details.amount}` : '-'}
                     </td>
                   </tr>
                 );

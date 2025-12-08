@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import usePlinkoActor from '../../hooks/actors/usePlinkoActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import { GameLayout } from '../../components/game-ui';
 import { BettingRail } from '../../components/betting';
-import { PlinkoBoard, PlinkoBall, PlinkoBucket, PLINKO_LAYOUT } from '../../components/game-specific/plinko';
+import { PlinkoBoard, ReleaseTunnel, PlinkoPhysicsBalls, PLINKO_LAYOUT } from '../../components/game-specific/plinko';
 import { useGameBalance } from '../../providers/GameBalanceProvider';
 import { useBalance } from '../../providers/BalanceProvider';
 import { useAuth } from '../../providers/AuthProvider';
@@ -42,7 +42,7 @@ interface MultiBallBackendResult {
   net_profit?: number;
 }
 
-interface AnimatingBall {
+interface PendingBall {
   id: number;
   path: boolean[];
 }
@@ -71,8 +71,6 @@ export const Plinko: React.FC = () => {
   const [maxBet, setMaxBet] = useState(100);
   const [multipliers, setMultipliers] = useState<number[]>([]);
   const [gameError, setGameError] = useState('');
-  const [activeSlot, setActiveSlot] = useState<number | null>(null);
-  const activeSlotTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Stats & Info
   const [currentResult, setCurrentResult] = useState<PlinkoGameResult | null>(null);
@@ -81,9 +79,12 @@ export const Plinko: React.FC = () => {
   const [formula, setFormula] = useState<string>('');
   const [expectedValue, setExpectedValue] = useState<number>(0);
 
-  // Animation state
-  const [animatingBalls, setAnimatingBalls] = useState<AnimatingBall[]>([]);
+  // Animation state - balls waiting to be dropped by physics engine
+  const [pendingBalls, setPendingBalls] = useState<PendingBall[]>([]);
   const [nextBallId, setNextBallId] = useState(0);
+
+  // Track recently landed slots for highlighting
+  const [activeSlots, setActiveSlots] = useState<Set<number>>(new Set());
 
   // Load game data on mount
   useEffect(() => {
@@ -151,11 +152,19 @@ export const Plinko: React.FC = () => {
     setCurrentResult(null);
     setMultiBallResult(null);
 
+    // DEBUG: Log pre-play state
+    const prePlayTimestamp = Date.now();
+    console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] === PRE-PLAY STATE ===`);
+    console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] Game balance: ${balance.game.toString()} (${Number(balance.game) / DECIMALS_PER_CKUSDT} USDT)`);
+    console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] House balance: ${balance.house.toString()} (${Number(balance.house) / DECIMALS_PER_CKUSDT} USDT)`);
+    console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] Bet: ${betAmount} USDT x ${ballCount} balls = ${betAmount * ballCount} USDT total`);
+
     try {
       const betAmountE8s = BigInt(Math.floor(betAmount * DECIMALS_PER_CKUSDT));
       const totalBetE8s = betAmountE8s * BigInt(ballCount);
 
       if (totalBetE8s > balance.game) {
+        console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] FAILED: Insufficient balance (frontend check)`);
         setGameError(`Insufficient balance. Total bet: $${(betAmount * ballCount).toFixed(2)}`);
         setIsWaiting(false);
         return;
@@ -164,11 +173,17 @@ export const Plinko: React.FC = () => {
       // Call backend based on ball count
       let results: { path: boolean[] }[] = [];
 
+      console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] Calling backend...`);
+      const callStartTime = Date.now();
+
       if (ballCount === 1) {
         const result = await actor.play_plinko(betAmountE8s);
+        console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] Backend responded in ${Date.now() - callStartTime}ms`);
         if ('Ok' in result) {
           const r = result.Ok;
           results = [{ path: r.path }];
+
+          console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] SUCCESS: bet=${Number(r.bet_amount)/DECIMALS_PER_CKUSDT}, payout=${Number(r.payout)/DECIMALS_PER_CKUSDT}, profit=${Number(r.profit)/DECIMALS_PER_CKUSDT}, mult=${r.multiplier}`);
 
           setCurrentResult({
             path: r.path,
@@ -181,13 +196,17 @@ export const Plinko: React.FC = () => {
             profit: Number(r.profit) / DECIMALS_PER_CKUSDT,
           });
         } else {
+          console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] BACKEND ERROR: ${result.Err}`);
           throw new Error(result.Err);
         }
       } else {
         const result = await actor.play_multi_plinko(ballCount, betAmountE8s);
+        console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] Backend responded in ${Date.now() - callStartTime}ms`);
         if ('Ok' in result) {
           const r = result.Ok;
           results = r.results.map(res => ({ path: res.path }));
+
+          console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] MULTI SUCCESS: total_bet=${Number(r.total_bet)/DECIMALS_PER_CKUSDT}, total_payout=${Number(r.total_payout)/DECIMALS_PER_CKUSDT}, net_profit=${Number(r.net_profit)/DECIMALS_PER_CKUSDT}, avg_mult=${r.average_multiplier}`);
 
           setMultiBallResult({
             results: r.results.map((res: BackendPlinkoResult) => ({
@@ -204,6 +223,7 @@ export const Plinko: React.FC = () => {
             net_profit: Number(r.net_profit) / DECIMALS_PER_CKUSDT,
           });
         } else {
+          console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] MULTI BACKEND ERROR: ${result.Err}`);
           throw new Error(result.Err);
         }
       }
@@ -211,73 +231,62 @@ export const Plinko: React.FC = () => {
       // IC responded - open the bucket door
       setBucketOpen(true);
 
-      // Wait for bucket door animation, then start ball animations
+      // Wait for bucket door animation, then start physics ball drops
       setTimeout(() => {
-        // Create animating balls from backend paths
-        const newBalls: AnimatingBall[] = results.map((r, i) => ({
+        // Create pending balls for physics engine
+        const newBalls: PendingBall[] = results.map((r, i) => ({
           id: nextBallId + i,
           path: r.path,
         }));
 
-        setAnimatingBalls(prev => [...prev, ...newBalls]);
+        setPendingBalls(newBalls);
         setNextBallId(prev => prev + ballCount);
         setIsWaiting(false);
         setIsPlaying(true);
-
-        // Calculate more precise duration for balance refresh
-        const maxPathLength = Math.max(...results.map(r => r.path.length));
-        const durationMs = (maxPathLength * PLINKO_LAYOUT.MS_PER_ROW) + (results.length * PLINKO_LAYOUT.BALL_STAGGER_MS);
-
-        setTimeout(() => {
-          gameBalanceContext.refresh();
-        }, durationMs + 500);
       }, PLINKO_LAYOUT.BUCKET_OPEN_MS);
 
     } catch (err) {
-      setGameError(err instanceof Error ? err.message : 'Failed to play');
+      const errorMsg = err instanceof Error ? err.message : 'Failed to play';
+      console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] EXCEPTION: ${errorMsg}`);
+      console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] Full error:`, err);
+
+      // Refresh balance after error to check if state changed
+      setTimeout(async () => {
+        await gameBalanceContext.refresh();
+        console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] POST-ERROR balance refresh: game=${gameBalanceContext.balance?.game?.toString()}, house=${gameBalanceContext.balance?.house?.toString()}`);
+      }, 1000);
+
+      setGameError(errorMsg);
       setIsWaiting(false);
       setBucketOpen(false);
     }
   };
 
-  // Handle ball animation complete
-  const handleBallComplete = useCallback((ballId: number) => {
-    // Find the ball's path to determine final slot
-    const ball = animatingBalls.find(b => b.id === ballId);
-    if (ball) {
-      const finalSlot = ball.path.filter(v => v).length;
+  // Callback when a single ball lands in a slot
+  const handleBallLanded = useCallback((slotIndex: number) => {
+    // Add this slot to active set
+    setActiveSlots(prev => {
+      const next = new Set(prev);
+      next.add(slotIndex);
+      return next;
+    });
 
-      // Trigger slot animation
-      setActiveSlot(finalSlot);
-
-      // Clear after animation
-      if (activeSlotTimeoutRef.current) {
-        clearTimeout(activeSlotTimeoutRef.current);
-      }
-      activeSlotTimeoutRef.current = setTimeout(() => {
-        setActiveSlot(null);
-      }, 600);
-    }
-
-    setAnimatingBalls(prev => prev.filter(b => b.id !== ballId));
-  }, [animatingBalls]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (activeSlotTimeoutRef.current) {
-        clearTimeout(activeSlotTimeoutRef.current);
-      }
-    };
+    // Remove from active after animation (600ms matches MultiplierSlot animation)
+    setTimeout(() => {
+      setActiveSlots(prev => {
+        const next = new Set(prev);
+        next.delete(slotIndex);
+        return next;
+      });
+    }, 600);
   }, []);
 
-  // Monitor playing state based on animating balls
-  useEffect(() => {
-    // If we were playing, but now no balls are animating, stop playing
-    if (isPlaying && animatingBalls.length === 0) {
-      setIsPlaying(false);
-    }
-  }, [animatingBalls.length, isPlaying]);
+  // Callback when all balls have landed (from physics engine)
+  const handleAllBallsLanded = useCallback(() => {
+    setPendingBalls([]);
+    setIsPlaying(false);
+    gameBalanceContext.refresh();
+  }, [gameBalanceContext]);
 
   const houseEdge = ((1 - expectedValue) * 100).toFixed(2);
 
@@ -338,28 +347,28 @@ export const Plinko: React.FC = () => {
             onClick={dropBalls}
             style={{ width: '400px', maxWidth: '100%' }}
           >
-            <div style={{ aspectRatio: '400/440' }}>
+            <div style={{ aspectRatio: `${PLINKO_LAYOUT.BOARD_WIDTH}/${PLINKO_LAYOUT.BOARD_HEIGHT}` }}>
               <svg viewBox={`0 0 ${PLINKO_LAYOUT.BOARD_WIDTH} ${PLINKO_LAYOUT.BOARD_HEIGHT}`} className="w-full h-full overflow-visible">
                 {/* Static board */}
-                <PlinkoBoard rows={ROWS} multipliers={multipliers} activeSlot={activeSlot} />
+                <PlinkoBoard rows={ROWS} multipliers={multipliers} activeSlots={activeSlots} />
 
-                {/* Ball bucket - shows while waiting for IC response */}
-                <PlinkoBucket
+                {/* Release tunnel - shows balls loading while waiting for IC response */}
+                <ReleaseTunnel
                   ballCount={ballCount}
                   isOpen={bucketOpen}
                   isVisible={isWaiting}
                 />
 
-                {/* Animated balls */}
-                {animatingBalls.map((ball, index) => (
-                  <PlinkoBall
-                    key={ball.id}
-                    id={ball.id}
-                    path={ball.path}
-                    onComplete={handleBallComplete}
-                    staggerDelay={index * (PLINKO_LAYOUT.BALL_STAGGER_MS / 1000)}
+                {/* Physics-based animated balls */}
+                {pendingBalls.length > 0 && (
+                  <PlinkoPhysicsBalls
+                    rows={ROWS}
+                    pendingBalls={pendingBalls}
+                    onAllBallsLanded={handleAllBallsLanded}
+                    onBallLanded={handleBallLanded}
+                    staggerMs={PLINKO_LAYOUT.BALL_STAGGER_MS}
                   />
-                ))}
+                )}
               </svg>
             </div>
 

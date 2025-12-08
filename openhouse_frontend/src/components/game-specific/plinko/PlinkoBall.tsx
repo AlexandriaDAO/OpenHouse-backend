@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
 import { generatePhysicsKeyframes, generatePhysicsTiming, PLINKO_LAYOUT } from './plinkoAnimations';
 
@@ -10,9 +10,7 @@ interface PlinkoBallProps {
 }
 
 export const PlinkoBall: React.FC<PlinkoBallProps> = ({
-  id,
   path,
-  onComplete,
   staggerDelay = 0
 }) => {
   // Generate physics keyframes
@@ -21,14 +19,6 @@ export const PlinkoBall: React.FC<PlinkoBallProps> = ({
 
   // Duration based on path length (slightly longer for physics effect)
   const duration = (path.length * PLINKO_LAYOUT.MS_PER_ROW * 1.3) / 1000;
-
-  // Notify parent when complete
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      onComplete(id);
-    }, (duration + staggerDelay) * 1000 + 100);
-    return () => clearTimeout(timer);
-  }, [id, duration, staggerDelay, onComplete]);
 
   return (
     <motion.g
@@ -39,7 +29,7 @@ export const PlinkoBall: React.FC<PlinkoBallProps> = ({
         scaleX: keyframes.map(k => k.scaleX),
         scaleY: keyframes.map(k => k.scaleY),
         rotate: keyframes.map(k => k.rotation),
-        opacity: [0, 1, ...Array(Math.max(0, keyframes.length - 3)).fill(1), 0.8, 0.5],
+        opacity: [0, 1, ...Array(Math.max(0, keyframes.length - 2)).fill(1)],
       }}
       transition={{
         duration,

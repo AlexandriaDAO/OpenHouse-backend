@@ -13,6 +13,60 @@ export const idlFactory = ({ IDL }) => {
     'amount' : IDL.Nat64,
     'withdrawal_type' : IDL.Text,
   });
+  const AuditEvent = IDL.Variant({
+    'BalanceCredited' : IDL.Record({
+      'user' : IDL.Principal,
+      'new_balance' : IDL.Nat64,
+      'amount' : IDL.Nat64,
+    }),
+    'WithdrawalInitiated' : IDL.Record({
+      'user' : IDL.Principal,
+      'amount' : IDL.Nat64,
+    }),
+    'SlippageProtectionTriggered' : IDL.Record({
+      'deposit_amount' : IDL.Nat64,
+      'user' : IDL.Principal,
+      'actual_shares' : IDL.Nat,
+      'expected_min_shares' : IDL.Nat,
+    }),
+    'BalanceRestored' : IDL.Record({
+      'user' : IDL.Principal,
+      'amount' : IDL.Nat64,
+    }),
+    'WithdrawalCompleted' : IDL.Record({
+      'user' : IDL.Principal,
+      'amount' : IDL.Nat64,
+    }),
+    'ParentFeeCredited' : IDL.Record({ 'amount' : IDL.Nat64 }),
+    'SystemError' : IDL.Record({ 'error' : IDL.Text }),
+    'WithdrawalAbandoned' : IDL.Record({
+      'user' : IDL.Principal,
+      'amount' : IDL.Nat64,
+    }),
+    'WithdrawalExpired' : IDL.Record({
+      'user' : IDL.Principal,
+      'amount' : IDL.Nat64,
+    }),
+    'ParentFeeFallback' : IDL.Record({
+      'amount' : IDL.Nat64,
+      'reason' : IDL.Text,
+    }),
+    'WithdrawalFailed' : IDL.Record({
+      'user' : IDL.Principal,
+      'amount' : IDL.Nat64,
+    }),
+    'LPRestored' : IDL.Record({ 'user' : IDL.Principal, 'amount' : IDL.Nat64 }),
+    'SystemInfo' : IDL.Record({ 'message' : IDL.Text }),
+    'SystemRefundCredited' : IDL.Record({
+      'user' : IDL.Principal,
+      'new_balance' : IDL.Nat64,
+      'amount' : IDL.Nat64,
+    }),
+  });
+  const AuditEntry = IDL.Record({
+    'event' : AuditEvent,
+    'timestamp' : IDL.Nat64,
+  });
   const AbandonedEntry = IDL.Record({
     'user' : IDL.Principal,
     'timestamp' : IDL.Nat64,
@@ -142,6 +196,16 @@ export const idlFactory = ({ IDL }) => {
             'Err' : IDL.Text,
           }),
         ],
+        ['query'],
+      ),
+    'admin_get_audit_log' : IDL.Func(
+        [IDL.Nat64, IDL.Nat64],
+        [IDL.Variant({ 'Ok' : IDL.Vec(AuditEntry), 'Err' : IDL.Text })],
+        ['query'],
+      ),
+    'admin_get_audit_log_count' : IDL.Func(
+        [],
+        [IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text })],
         ['query'],
       ),
     'admin_get_orphaned_funds_report' : IDL.Func(

@@ -122,6 +122,28 @@ type LPPositionInfo = record {
   shares: nat;
 };
 
+type AuditEvent = variant {
+  WithdrawalInitiated: record { user: principal; amount: nat64 };
+  WithdrawalCompleted: record { user: principal; amount: nat64 };
+  WithdrawalFailed: record { user: principal; amount: nat64 };
+  WithdrawalAbandoned: record { user: principal; amount: nat64 };
+  WithdrawalExpired: record { user: principal; amount: nat64 };
+  BalanceRestored: record { user: principal; amount: nat64 };
+  LPRestored: record { user: principal; amount: nat64 };
+  SystemError: record { error: text };
+  ParentFeeCredited: record { amount: nat64 };
+  ParentFeeFallback: record { amount: nat64; reason: text };
+  SystemInfo: record { message: text };
+  BalanceCredited: record { user: principal; amount: nat64; new_balance: nat64 };
+  SlippageProtectionTriggered: record { user: principal; deposit_amount: nat64; expected_min_shares: nat; actual_shares: nat };
+  SystemRefundCredited: record { user: principal; amount: nat64; new_balance: nat64 };
+};
+
+type AuditEntry = record {
+  timestamp: nat64;
+  event: AuditEvent;
+};
+
 service : {
   // Play a game of dice - returns minimal result (3 fields)
   play_dice: (nat64, nat8, RollDirection, text) -> (variant { Ok: MinimalGameResult; Err: text });
@@ -163,6 +185,8 @@ service : {
   admin_get_all_balances_complete: () -> (variant { Ok: vec UserBalance; Err: text }) query;
   admin_get_all_lp_positions: (nat64, nat64) -> (variant { Ok: vec LPPositionInfo; Err: text }) query;
   admin_get_all_lp_positions_complete: () -> (variant { Ok: vec LPPositionInfo; Err: text }) query;
+  admin_get_audit_log: (nat64, nat64) -> (variant { Ok: vec AuditEntry; Err: text }) query;
+  admin_get_audit_log_count: () -> (variant { Ok: nat64; Err: text }) query;
 
   // Liquidity Pool Management
   // Deposit liquidity into the pool

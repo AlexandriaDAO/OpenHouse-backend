@@ -1,12 +1,18 @@
 export const PLINKO_LAYOUT = {
   // SVG viewBox dimensions (scales naturally)
   BOARD_WIDTH: 400,
-  BOARD_HEIGHT: 440,
+  BOARD_HEIGHT: 520,  // Extra height for release tunnel at top + multiplier slots
 
-  // Spacing (same as old LayoutConfig for consistency)
-  PEG_SPACING_X: 38,
-  PEG_SPACING_Y: 36,
-  PEG_RADIUS: 5,
+  // Padding - increased top padding for release tunnel
+  PADDING_X: 27,
+  PADDING_TOP: 75,    // Room for release tunnel above first row
+  PADDING_BOTTOM: 60,  // Bottom padding for slots
+
+  // Pin radius scales with row count: (24 - rows) / 2, scaled for 400px canvas
+  // For 8 rows: (24-8)/2 * 0.53 ≈ 4.2
+  PEG_RADIUS: 4,
+
+  // Ball radius = pin radius * 2
   BALL_RADIUS: 8,
 
   // Slot configuration
@@ -15,23 +21,34 @@ export const PLINKO_LAYOUT = {
   SLOT_GAP: 2,
   SLOT_OFFSET_Y: 16,
 
-  // Vertical layout constants
-  DROP_ZONE_Y: 70,    // Where the first peg row starts
-  BALL_START_Y: 50,   // Where balls spawn
+  // Legacy constants (kept for compatibility)
+  PEG_SPACING_X: 38,
+  PEG_SPACING_Y: 36,
+  DROP_ZONE_Y: 75,      // Same as PADDING_TOP - where balls enter pin grid
+  BALL_START_Y: 55,     // Balls start just above first row (below tunnel)
 
-  // Bucket configuration (sized to fit up to 30 balls)
+  // Release tunnel configuration (above first row of pins)
+  TUNNEL: {
+    WIDTH: 60,          // Narrow funnel
+    HEIGHT: 45,         // Height of tunnel
+    Y: 5,               // Top of tunnel
+    GATE_HEIGHT: 4,     // Height of release gate
+    BALL_RADIUS: 7,     // Slightly smaller balls in tunnel
+  },
+
+  // Legacy bucket config (deprecated, use TUNNEL)
   BUCKET: {
     WIDTH: 120,
     HEIGHT: 55,
-    Y: -10,            // Position from top (negative to sit above board)
+    Y: -10,
     WALL_THICKNESS: 3,
-    DOOR_HEIGHT: 5,    // Bottom door that opens
+    DOOR_HEIGHT: 5,
   },
 
   // Animation timing
-  MS_PER_ROW: 100,       // Faster ball fall (was 150)
-  BALL_STAGGER_MS: 40,   // Rapid fire multi-ball drops (was 120)
-  BUCKET_OPEN_MS: 300,   // Time for bucket door to open
+  MS_PER_ROW: 100,
+  BALL_STAGGER_MS: 40,
+  BUCKET_OPEN_MS: 300,
 
   // Colors (Tailwind-compatible)
   COLORS: {
@@ -42,6 +59,8 @@ export const PLINKO_LAYOUT = {
     board: 'transparent',
     bucket: '#4a5568',
     bucketAccent: '#2d3748',
+    tunnel: '#1a1a2e',
+    tunnelAccent: '#16213e',
   }
 };
 
