@@ -27,12 +27,11 @@ export class TunnelPhysicsEngine {
   private hasNotifiedSettled = false;
 
   // Tunnel dimensions (matching ReleaseTunnel.tsx)
-  // Widened for 8px radius balls (was designed for 5px)
+  // Box shape for more dynamic ball movement
   private static BUCKET = {
-    TOP_Y: 15,
+    TOP_Y: 5,           // Higher up for more space
     BOTTOM_Y: 70,
-    TOP_WIDTH: 40,      // Was 24, widened for 8px balls
-    BOTTOM_WIDTH: 100,  // Was 80, widened proportionally
+    WIDTH: 140,         // Wide box (same width top to bottom)
     GATE_HEIGHT: 4,
   };
 
@@ -53,44 +52,32 @@ export class TunnelPhysicsEngine {
   }
 
   private createTunnelWalls() {
-    const { BUCKET, BALL_RADIUS } = TunnelPhysicsEngine;
+    const { BUCKET } = TunnelPhysicsEngine;
     const { centerX } = this.options;
 
-    // Left wall of pyramid (angled)
-    const leftWallLength = Math.sqrt(
-      Math.pow(BUCKET.BOTTOM_WIDTH/2 - BUCKET.TOP_WIDTH/2, 2) +
-      Math.pow(BUCKET.BOTTOM_Y - BUCKET.TOP_Y, 2)
-    );
-    const leftWallAngle = Math.atan2(
-      BUCKET.BOTTOM_WIDTH/2 - BUCKET.TOP_WIDTH/2,
-      BUCKET.BOTTOM_Y - BUCKET.TOP_Y
-    );
-    const leftWallCenterX = centerX - (BUCKET.TOP_WIDTH/2 + BUCKET.BOTTOM_WIDTH/2) / 4;
-    const leftWallCenterY = (BUCKET.TOP_Y + BUCKET.BOTTOM_Y) / 2;
+    const boxHeight = BUCKET.BOTTOM_Y - BUCKET.TOP_Y;
+    const halfWidth = BUCKET.WIDTH / 2;
 
+    // Left wall (vertical)
     const leftWall = Matter.Bodies.rectangle(
-      leftWallCenterX - 15,
-      leftWallCenterY,
+      centerX - halfWidth - 4,
+      BUCKET.TOP_Y + boxHeight / 2,
       8,
-      leftWallLength + 20,
+      boxHeight + 40,  // Extra height to catch balls from above
       {
         isStatic: true,
-        angle: -leftWallAngle,
         render: { visible: false },
       }
     );
 
-    // Right wall of pyramid (angled, mirrored)
-    const rightWallCenterX = centerX + (BUCKET.TOP_WIDTH/2 + BUCKET.BOTTOM_WIDTH/2) / 4;
-
+    // Right wall (vertical)
     const rightWall = Matter.Bodies.rectangle(
-      rightWallCenterX + 15,
-      leftWallCenterY,
+      centerX + halfWidth + 4,
+      BUCKET.TOP_Y + boxHeight / 2,
       8,
-      leftWallLength + 20,
+      boxHeight + 40,
       {
         isStatic: true,
-        angle: leftWallAngle,
         render: { visible: false },
       }
     );
@@ -99,7 +86,7 @@ export class TunnelPhysicsEngine {
     const bottomWall = Matter.Bodies.rectangle(
       centerX,
       BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT / 2,
-      BUCKET.BOTTOM_WIDTH + 10,
+      BUCKET.WIDTH + 20,
       BUCKET.GATE_HEIGHT + 4,
       {
         isStatic: true,
@@ -107,30 +94,7 @@ export class TunnelPhysicsEngine {
       }
     );
 
-    // Narrow tube walls at top
-    const tubeLeftWall = Matter.Bodies.rectangle(
-      centerX - BUCKET.TOP_WIDTH/2 - 2,
-      BUCKET.TOP_Y / 2,
-      6,
-      BUCKET.TOP_Y + 20,
-      {
-        isStatic: true,
-        render: { visible: false },
-      }
-    );
-
-    const tubeRightWall = Matter.Bodies.rectangle(
-      centerX + BUCKET.TOP_WIDTH/2 + 2,
-      BUCKET.TOP_Y / 2,
-      6,
-      BUCKET.TOP_Y + 20,
-      {
-        isStatic: true,
-        render: { visible: false },
-      }
-    );
-
-    this.walls = [leftWall, rightWall, bottomWall, tubeLeftWall, tubeRightWall];
+    this.walls = [leftWall, rightWall, bottomWall];
     Matter.Composite.add(this.engine.world, this.walls);
   }
 
@@ -142,9 +106,9 @@ export class TunnelPhysicsEngine {
     const { centerX } = this.options;
 
     setTimeout(() => {
-      // Random starting X within the tube width
-      const tubeHalfWidth = BUCKET.TOP_WIDTH / 2 - BALL_RADIUS - 2;
-      const startX = centerX + (Math.random() * 2 - 1) * tubeHalfWidth;
+      // Random starting X within the box width (more spread for interesting entry)
+      const boxHalfWidth = BUCKET.WIDTH / 2 - BALL_RADIUS - 4;
+      const startX = centerX + (Math.random() * 2 - 1) * boxHalfWidth;
       const startY = -20 - Math.random() * 30; // Start above the visible area
 
       const ball = Matter.Bodies.circle(startX, startY, BALL_RADIUS, {

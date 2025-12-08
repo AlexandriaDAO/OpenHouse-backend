@@ -22,43 +22,37 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
   const { BOARD_WIDTH } = PLINKO_LAYOUT;
   const centerX = BOARD_WIDTH / 2;
 
-  // Pyramid bucket dimensions - widened for 8px radius balls
+  // Box bucket dimensions - wide rectangle for dynamic ball movement
   const BUCKET = {
-    TOP_Y: 15,           // Where pyramid starts (narrow)
-    BOTTOM_Y: 70,        // Where pyramid ends (wide) - gate location
-    TOP_WIDTH: 40,       // Widened from 24 for 8px balls
-    BOTTOM_WIDTH: 100,   // Widened from 80 for 8px balls
+    TOP_Y: 5,            // Higher up for more space
+    BOTTOM_Y: 70,        // Gate location
+    WIDTH: 140,          // Wide box (same width top to bottom)
     GATE_HEIGHT: 4,
-    TUBE_TOP: -100,      // Tube extends off-screen
   };
 
   const ballRadius = 8;  // Matches board balls for unified appearance
   const bucketHeight = BUCKET.BOTTOM_Y - BUCKET.TOP_Y;
 
-  // Calculate ball positions - pyramid is wide at bottom, narrow at top
-  // Overflow goes up the narrow tube off-screen
-  const { pyramidBalls, tubeBalls } = useMemo(() => {
-    const pyramid: { x: number; y: number; delay: number }[] = [];
-    const tube: { x: number; y: number; delay: number }[] = [];
+  // Calculate ball positions - box shape with consistent width
+  const boxBalls = useMemo(() => {
+    const balls: { x: number; y: number; delay: number }[] = [];
     const ballDiameter = ballRadius * 2;
-    const spacing = ballDiameter + 1.5;
+    const spacing = ballDiameter + 2;
 
-    // Stack balls from bottom (wide) to top (narrow) inside pyramid
+    // Calculate how many balls fit per row
+    const ballsPerRow = Math.floor((BUCKET.WIDTH - 8) / spacing);
+
+    // Stack balls from bottom up inside the box
     let currentY = BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT - ballRadius - 2;
     let ballIndex = 0;
 
     while (ballIndex < ballCount && currentY > BUCKET.TOP_Y + ballRadius) {
-      // Calculate width at this Y position (linear: wide at bottom, narrow at top)
-      const progress = (currentY - BUCKET.TOP_Y) / bucketHeight;
-      const widthAtY = BUCKET.TOP_WIDTH + (BUCKET.BOTTOM_WIDTH - BUCKET.TOP_WIDTH) * progress;
-      const ballsInRow = Math.max(1, Math.floor((widthAtY - 8) / spacing));
-
-      const actualBallsInRow = Math.min(ballsInRow, ballCount - ballIndex);
-      const rowWidth = actualBallsInRow * spacing - 1.5;
+      const actualBallsInRow = Math.min(ballsPerRow, ballCount - ballIndex);
+      const rowWidth = actualBallsInRow * spacing - 2;
       const startX = -rowWidth / 2 + ballRadius;
 
       for (let col = 0; col < actualBallsInRow && ballIndex < ballCount; col++) {
-        pyramid.push({
+        balls.push({
           x: startX + col * spacing,
           y: currentY,
           delay: ballIndex * 0.015,
@@ -66,36 +60,11 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
         ballIndex++;
       }
 
-      currentY -= spacing * 0.9;
+      currentY -= spacing * 0.85;
     }
 
-    // Overflow balls go up the narrow tube (off-screen)
-    const tubeWidth = BUCKET.TOP_WIDTH - 4;
-    const ballsPerTubeRow = Math.max(1, Math.floor(tubeWidth / spacing));
-    let tubeY = BUCKET.TOP_Y - ballRadius - 2;
-
-    while (ballIndex < ballCount) {
-      const tubeIndex = ballIndex - pyramid.length;
-      const col = tubeIndex % ballsPerTubeRow;
-
-      if (col === 0 && tubeIndex > 0) {
-        tubeY -= spacing * 0.9;
-      }
-
-      const rowBalls = Math.min(ballsPerTubeRow, ballCount - pyramid.length - Math.floor(tubeIndex / ballsPerTubeRow) * ballsPerTubeRow);
-      const rowWidth = rowBalls * spacing - 1.5;
-      const startX = -rowWidth / 2 + ballRadius;
-
-      tube.push({
-        x: startX + col * spacing,
-        y: tubeY,
-        delay: ballIndex * 0.015,
-      });
-      ballIndex++;
-    }
-
-    return { pyramidBalls: pyramid, tubeBalls: tube };
-  }, [ballCount, BUCKET, bucketHeight, ballRadius]);
+    return balls;
+  }, [ballCount, BUCKET, ballRadius]);
 
   if (!isVisible) return null;
 
@@ -110,9 +79,9 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
           <stop offset="100%" stopColor="#b8860b" />
         </radialGradient>
 
-        <linearGradient id="pyramidGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#1a202c" stopOpacity="0.3" />
-          <stop offset="100%" stopColor="#2d3748" stopOpacity="0.3" />
+        <linearGradient id="boxGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#1a202c" stopOpacity="0.2" />
+          <stop offset="100%" stopColor="#2d3748" stopOpacity="0.2" />
         </linearGradient>
 
         {/* Drop shadow filter to match board balls */}
@@ -120,84 +89,47 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
           <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000" floodOpacity="0.3" />
         </filter>
 
-        {/* Clip path for pyramid + tube shape */}
+        {/* Clip path for box shape */}
         <clipPath id="bucketClip">
-          <path d={`
-            M ${-BUCKET.TOP_WIDTH/2} ${BUCKET.TUBE_TOP}
-            L ${BUCKET.TOP_WIDTH/2} ${BUCKET.TUBE_TOP}
-            L ${BUCKET.TOP_WIDTH/2} ${BUCKET.TOP_Y}
-            L ${BUCKET.BOTTOM_WIDTH/2} ${BUCKET.BOTTOM_Y}
-            L ${-BUCKET.BOTTOM_WIDTH/2} ${BUCKET.BOTTOM_Y}
-            L ${-BUCKET.TOP_WIDTH/2} ${BUCKET.TOP_Y}
-            Z
-          `} />
+          <rect
+            x={-BUCKET.WIDTH/2}
+            y={BUCKET.TOP_Y}
+            width={BUCKET.WIDTH}
+            height={BUCKET.BOTTOM_Y - BUCKET.TOP_Y}
+          />
         </clipPath>
       </defs>
 
-      {/* Narrow tube extending up (only visible part) - subtle */}
+      {/* Box container - subtle/transparent */}
       <rect
-        x={-BUCKET.TOP_WIDTH/2}
-        y={0}
-        width={BUCKET.TOP_WIDTH}
-        height={BUCKET.TOP_Y}
-        fill="url(#pyramidGradient)"
-        opacity={0.3}
-      />
-
-      {/* Pyramid bucket body - subtle/transparent */}
-      <path
-        d={`
-          M ${-BUCKET.TOP_WIDTH/2} ${BUCKET.TOP_Y}
-          L ${BUCKET.TOP_WIDTH/2} ${BUCKET.TOP_Y}
-          L ${BUCKET.BOTTOM_WIDTH/2} ${BUCKET.BOTTOM_Y}
-          L ${-BUCKET.BOTTOM_WIDTH/2} ${BUCKET.BOTTOM_Y}
-          Z
-        `}
-        fill="url(#pyramidGradient)"
-        stroke="rgba(74, 85, 104, 0.2)"
+        x={-BUCKET.WIDTH/2}
+        y={BUCKET.TOP_Y}
+        width={BUCKET.WIDTH}
+        height={BUCKET.BOTTOM_Y - BUCKET.TOP_Y}
+        fill="url(#boxGradient)"
+        stroke="rgba(74, 85, 104, 0.15)"
         strokeWidth={1}
-        opacity={0.3}
+        rx={4}
       />
 
-      {/* Inner shadow for depth - more subtle */}
-      <path
-        d={`
-          M ${-BUCKET.TOP_WIDTH/2 + 3} ${BUCKET.TOP_Y + 2}
-          L ${BUCKET.TOP_WIDTH/2 - 3} ${BUCKET.TOP_Y + 2}
-          L ${BUCKET.BOTTOM_WIDTH/2 - 4} ${BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT - 1}
-          L ${-BUCKET.BOTTOM_WIDTH/2 + 4} ${BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT - 1}
-          Z
-        `}
+      {/* Inner shadow for depth */}
+      <rect
+        x={-BUCKET.WIDTH/2 + 3}
+        y={BUCKET.TOP_Y + 2}
+        width={BUCKET.WIDTH - 6}
+        height={BUCKET.BOTTOM_Y - BUCKET.TOP_Y - BUCKET.GATE_HEIGHT - 4}
         fill="#0a0a14"
-        opacity={0.15}
+        opacity={0.1}
+        rx={2}
       />
 
-      {/* Tube balls (overflow, clipped) - only shown when showBalls is true */}
+      {/* Box balls (clipped) - only shown when showBalls is true */}
       {showBalls && (
         <g clipPath="url(#bucketClip)">
           <AnimatePresence>
-            {tubeBalls.map((pos, i) => (
+            {boxBalls.map((pos, i) => (
               <TunnelBall
-                key={`tube-${i}`}
-                x={pos.x}
-                y={pos.y}
-                radius={ballRadius}
-                delay={pos.delay}
-                isReleasing={isOpen}
-                releaseDelay={(pyramidBalls.length + i) * 0.025}
-              />
-            ))}
-          </AnimatePresence>
-        </g>
-      )}
-
-      {/* Pyramid balls (clipped) - only shown when showBalls is true */}
-      {showBalls && (
-        <g clipPath="url(#bucketClip)">
-          <AnimatePresence>
-            {pyramidBalls.map((pos, i) => (
-              <TunnelBall
-                key={`pyramid-${i}`}
+                key={`box-${i}`}
                 x={pos.x}
                 y={pos.y}
                 radius={ballRadius}
@@ -216,20 +148,20 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
         transition={{ duration: 0.15, ease: 'easeOut' }}
       >
         <rect
-          x={-BUCKET.BOTTOM_WIDTH/2}
+          x={-BUCKET.WIDTH/2}
           y={BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT}
-          width={BUCKET.BOTTOM_WIDTH}
+          width={BUCKET.WIDTH}
           height={BUCKET.GATE_HEIGHT}
           fill="#4a5568"
-          rx={1}
+          rx={2}
         />
       </motion.g>
 
       {/* Bottom edge decoration */}
       <rect
-        x={-BUCKET.BOTTOM_WIDTH/2 - 2}
+        x={-BUCKET.WIDTH/2 - 2}
         y={BUCKET.BOTTOM_Y - 1}
-        width={BUCKET.BOTTOM_WIDTH + 4}
+        width={BUCKET.WIDTH + 4}
         height={2}
         fill="#4a5568"
         rx={1}

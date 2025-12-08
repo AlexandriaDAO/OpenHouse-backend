@@ -81,8 +81,9 @@ export const TunnelFillingBalls: React.FC<TunnelFillingBallsProps> = ({
   if (!isFilling || ballStates.size === 0) return null;
 
   // Tunnel dimensions (must match TunnelPhysicsEngine and ReleaseTunnel)
-  const TUNNEL_TOP_WIDTH = 40;
-  const TUNNEL_BOTTOM_WIDTH = 100;
+  const BUCKET_WIDTH = 140;
+  const BUCKET_TOP_Y = 5;
+  const BUCKET_BOTTOM_Y = 70;
 
   return (
     <g>
@@ -101,17 +102,14 @@ export const TunnelFillingBalls: React.FC<TunnelFillingBallsProps> = ({
           <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000" floodOpacity="0.3" />
         </filter>
 
-        {/* Clip to tunnel shape - updated for widened dimensions */}
+        {/* Clip to box shape */}
         <clipPath id="tunnelFillClip">
-          <path d={`
-            M ${centerX - TUNNEL_TOP_WIDTH/2} -50
-            L ${centerX + TUNNEL_TOP_WIDTH/2} -50
-            L ${centerX + TUNNEL_TOP_WIDTH/2} 15
-            L ${centerX + TUNNEL_BOTTOM_WIDTH/2} 70
-            L ${centerX - TUNNEL_BOTTOM_WIDTH/2} 70
-            L ${centerX - TUNNEL_TOP_WIDTH/2} 15
-            Z
-          `} />
+          <rect
+            x={centerX - BUCKET_WIDTH/2}
+            y={BUCKET_TOP_Y}
+            width={BUCKET_WIDTH}
+            height={BUCKET_BOTTOM_Y - BUCKET_TOP_Y}
+          />
         </clipPath>
       </defs>
 
