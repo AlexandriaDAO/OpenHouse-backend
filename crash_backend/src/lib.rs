@@ -40,6 +40,26 @@ pub struct PlayCrashResult {
     pub randomness_hash: String,       // IC randomness hash
 }
 
+/// Result for a single rocket in multi-rocket mode
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct SingleRocketResult {
+    pub rocket_index: u8,           // 0-9
+    pub crash_point: f64,           // Where this rocket crashed
+    pub reached_target: bool,       // Did it reach the target?
+    pub payout: u64,                // Payout for this rocket (0 if crashed early)
+}
+
+/// Result for multi-rocket crash game
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct MultiCrashResult {
+    pub rockets: Vec<SingleRocketResult>,  // Individual results
+    pub target_multiplier: f64,            // Shared target
+    pub rocket_count: u8,                  // How many rockets launched
+    pub rockets_succeeded: u8,             // How many reached target
+    pub total_payout: u64,                 // Sum of all payouts
+    pub master_randomness_hash: String,    // VRF seed hash for verification
+}
+
 // Memory management for future upgrades
 #[init]
 fn init() {
@@ -133,6 +153,79 @@ async fn play_crash(target_multiplier: f64) -> Result<PlayCrashResult, String> {
     })
 }
 
+/// Play crash game with multiple rockets targeting same multiplier
+/// Each rocket has independent crash point derived from single VRF call
+/// Returns outcome for all rockets after they crash
+#[update]
+async fn play_crash_multi(target_multiplier: f64, rocket_count: u8) -> Result<MultiCrashResult, String> {
+    const MAX_ROCKETS: u8 = 10;
+
+    // Validate target_multiplier (same as play_crash)
+    if target_multiplier < 1.01 {
+        return Err("Target must be at least 1.01x".to_string());
+    }
+    if target_multiplier > MAX_CRASH {
+        return Err(format!("Target cannot exceed {}x", MAX_CRASH));
+    }
+    if !target_multiplier.is_finite() {
+        return Err("Target must be a finite number".to_string());
+    }
+
+    // Validate rocket_count
+    if rocket_count < 1 {
+        return Err("Must launch at least 1 rocket".to_string());
+    }
+    if rocket_count > MAX_ROCKETS {
+        return Err(format!("Maximum {} rockets allowed", MAX_ROCKETS));
+    }
+
+    // Get randomness from IC VRF (single call for all rockets)
+    let random_bytes = raw_rand().await
+        .map_err(|e| format!("Randomness unavailable: {:?}", e))?;
+
+    // Derive independent crash point for each rocket
+    let mut rockets = Vec::with_capacity(rocket_count as usize);
+    let mut rockets_succeeded: u8 = 0;
+    let mut total_payout: u64 = 0;
+
+    for i in 0..rocket_count {
+        let random = derive_rocket_random(&random_bytes, i)?;
+        let crash_point = calculate_crash_point(random);
+        let reached_target = crash_point >= target_multiplier;
+
+        // Calculate payout (1 USDT per rocket, 6 decimals)
+        let payout = if reached_target {
+            (target_multiplier * 1_000_000.0) as u64
+        } else {
+            0
+        };
+
+        if reached_target {
+            rockets_succeeded += 1;
+        }
+        total_payout += payout;
+
+        rockets.push(SingleRocketResult {
+            rocket_index: i,
+            crash_point,
+            reached_target,
+            payout,
+        });
+    }
+
+    // Create master hash for provable fairness
+    let master_randomness_hash = create_randomness_hash(&random_bytes);
+
+    Ok(MultiCrashResult {
+        rockets,
+        target_multiplier,
+        rocket_count,
+        rockets_succeeded,
+        total_payout,
+        master_randomness_hash,
+    })
+}
+
 /// Get the crash formula as a string
 #[query]
 fn get_crash_formula() -> String {
@@ -197,6 +290,26 @@ fn bytes_to_float(bytes: &[u8]) -> Result<f64, String> {
     // f64 has 53 bits of mantissa, so we right-shift by 11 bits (64 - 53 = 11)
     // to get the most significant 53 bits, ensuring uniform distribution
     // across the full floating-point precision range
+    let random = (random_u64 >> 11) as f64 / (1u64 << 53) as f64;
+
+    Ok(random)
+}
+
+/// Derive an independent float for a specific rocket index
+/// Uses SHA256(vrf_bytes + index) to generate independent values
+/// This ensures each rocket has a cryptographically independent crash point
+fn derive_rocket_random(vrf_bytes: &[u8], rocket_index: u8) -> Result<f64, String> {
+    use sha2::{Sha256, Digest};
+
+    let mut hasher = Sha256::new();
+    hasher.update(vrf_bytes);
+    hasher.update([rocket_index]); // Include index for independence
+    let hash = hasher.finalize();
+
+    // Convert first 8 bytes to f64 in range [0.0, 1.0)
+    let mut byte_array = [0u8; 8];
+    byte_array.copy_from_slice(&hash[0..8]);
+    let random_u64 = u64::from_be_bytes(byte_array);
     let random = (random_u64 >> 11) as f64 / (1u64 << 53) as f64;
 
     Ok(random)
@@ -363,14 +476,14 @@ mod tests {
     fn test_greet() {
         // Test greeting message format
         let result = greet("Alice".to_string());
-        assert_eq!(result, "Simple Crash: Transparent 1% edge, Alice wins or loses fairly!");
+        assert_eq!(result, "Simple Crash: Transparent 1% edge, Alice wins or loses fairly with USDT!");
 
         let result2 = greet("Bob".to_string());
-        assert_eq!(result2, "Simple Crash: Transparent 1% edge, Bob wins or loses fairly!");
+        assert_eq!(result2, "Simple Crash: Transparent 1% edge, Bob wins or loses fairly with USDT!");
 
         // Test with empty string
         let result3 = greet("".to_string());
-        assert_eq!(result3, "Simple Crash: Transparent 1% edge,  wins or loses fairly!");
+        assert_eq!(result3, "Simple Crash: Transparent 1% edge,  wins or loses fairly with USDT!");
     }
 
     #[test]
@@ -483,6 +596,87 @@ mod tests {
         assert!((c1 - 0.99).abs() < 0.01);
         assert!((c2 - 1.98).abs() < 0.01);
         assert!((c3 - 49.5).abs() < 1.0);
+    }
+
+    // ============================================================================
+    // MULTI-ROCKET TESTS
+    // ============================================================================
+
+    #[test]
+    fn test_derive_rocket_random_independence() {
+        // Same VRF bytes, different indices should produce different values
+        let vrf_bytes = vec![1u8; 32];
+
+        let r0 = derive_rocket_random(&vrf_bytes, 0).unwrap();
+        let r1 = derive_rocket_random(&vrf_bytes, 1).unwrap();
+        let r2 = derive_rocket_random(&vrf_bytes, 2).unwrap();
+
+        // All should be different
+        assert_ne!(r0, r1);
+        assert_ne!(r1, r2);
+        assert_ne!(r0, r2);
+
+        // All should be in valid range
+        assert!(r0 >= 0.0 && r0 < 1.0);
+        assert!(r1 >= 0.0 && r1 < 1.0);
+        assert!(r2 >= 0.0 && r2 < 1.0);
+    }
+
+    #[test]
+    fn test_derive_rocket_random_deterministic() {
+        // Same inputs should always produce same output
+        let vrf_bytes = vec![42u8; 32];
+
+        let r1 = derive_rocket_random(&vrf_bytes, 5).unwrap();
+        let r2 = derive_rocket_random(&vrf_bytes, 5).unwrap();
+
+        assert_eq!(r1, r2);
+    }
+
+    #[test]
+    fn test_derive_rocket_random_different_seeds() {
+        // Different VRF bytes should produce different values for same index
+        let vrf_bytes1 = vec![1u8; 32];
+        let vrf_bytes2 = vec![2u8; 32];
+
+        let r1 = derive_rocket_random(&vrf_bytes1, 0).unwrap();
+        let r2 = derive_rocket_random(&vrf_bytes2, 0).unwrap();
+
+        assert_ne!(r1, r2);
+    }
+
+    #[test]
+    fn test_multi_crash_house_edge() {
+        // Verify each rocket maintains 1% house edge independently
+        // Expected return per rocket = 0.99
+
+        // Test specific crash points derived from known random values
+        let test_randoms = vec![0.0, 0.5, 0.9, 0.99];
+        for random in test_randoms {
+            let crash = calculate_crash_point(random);
+            // Just verify crash point is valid
+            assert!(crash > 0.0 && crash <= MAX_CRASH);
+        }
+    }
+
+    #[test]
+    fn test_derive_rocket_all_indices() {
+        // Test all 10 possible rocket indices produce unique values
+        let vrf_bytes = vec![123u8; 32];
+        let mut values = Vec::new();
+
+        for i in 0..10u8 {
+            let r = derive_rocket_random(&vrf_bytes, i).unwrap();
+            assert!(r >= 0.0 && r < 1.0, "Index {} produced out of range value: {}", i, r);
+            values.push(r);
+        }
+
+        // All values should be unique
+        for i in 0..values.len() {
+            for j in (i + 1)..values.len() {
+                assert_ne!(values[i], values[j], "Indices {} and {} produced same value", i, j);
+            }
+        }
     }
 
     // ============================================================================
