@@ -139,7 +139,15 @@ pub fn calculate_multiplier_bp(position: u8) -> Result<u64, String> {
 fn init() {
     ic_cdk::println!("Plinko Backend Initialized with DeFi Accounting");
     defi_accounting::accounting::start_parent_withdrawal_timer();
+    defi_accounting::accounting::start_balance_reconciliation_timer();
     defi_accounting::start_stats_timer();
+
+    // Initialize cached balance on fresh install using a one-shot timer
+    // (spawn not allowed in init mode)
+    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
+        defi_accounting::accounting::refresh_canister_balance().await;
+        ic_cdk::println!("Init: balance cache initialized");
+    });
 }
 
 #[pre_upgrade]
@@ -151,7 +159,17 @@ fn pre_upgrade() {
 #[post_upgrade]
 fn post_upgrade() {
     defi_accounting::accounting::start_parent_withdrawal_timer();
+    defi_accounting::accounting::start_balance_reconciliation_timer();
     defi_accounting::start_stats_timer();
+
+    // Initialize cached balance immediately after upgrade using a one-shot timer
+    // This prevents games being blocked until hourly reconciliation
+    // (spawn not allowed in post_upgrade mode)
+    ic_cdk_timers::set_timer(std::time::Duration::ZERO, async {
+        defi_accounting::accounting::refresh_canister_balance().await;
+        ic_cdk::println!("Post-upgrade: balance cache initialized");
+    });
+
     ic_cdk::println!("Post-upgrade: timers restarted");
 }
 
@@ -182,8 +200,8 @@ fn is_canister_solvent() -> bool {
 
 #[update]
 async fn play_plinko(bet_amount: u64) -> Result<PlinkoGameResult, String> {
-    // Refresh balance cache before solvency check
-    defi_accounting::accounting::refresh_canister_balance().await;
+    // Solvency check uses cached balance (no ledger query needed)
+    // Balance is tracked internally on deposit/withdraw and reconciled hourly
     if !is_canister_solvent() {
         return Err("Game temporarily paused - insufficient funds.".to_string());
     }
@@ -192,8 +210,8 @@ async fn play_plinko(bet_amount: u64) -> Result<PlinkoGameResult, String> {
 
 #[update]
 async fn play_multi_plinko(ball_count: u8, bet_per_ball: u64) -> Result<MultiBallGameResult, String> {
-    // Refresh balance cache before solvency check
-    defi_accounting::accounting::refresh_canister_balance().await;
+    // Solvency check uses cached balance (no ledger query needed)
+    // Balance is tracked internally on deposit/withdraw and reconciled hourly
     if !is_canister_solvent() {
         return Err("Game temporarily paused - insufficient funds.".to_string());
     }

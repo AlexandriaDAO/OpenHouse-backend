@@ -267,6 +267,9 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
         state.borrow_mut().set(pool_state);
     });
 
+    // Update cached canister balance (canister received `amount`)
+    accounting::increment_cached_balance(amount);
+
     Ok(shares_to_mint)
 }
 
@@ -390,6 +393,8 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
                 }
             }
             accounting::complete_withdrawal(caller, lp_amount);
+            // Update cached canister balance (canister sent `lp_amount`)
+            accounting::decrement_cached_balance(lp_amount);
             Ok(lp_amount)
         }
         accounting::TransferResult::DefiniteError(err) => {

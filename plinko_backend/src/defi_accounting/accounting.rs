@@ -56,6 +56,29 @@ thread_local! {
 
     static CACHED_CANISTER_BALANCE: RefCell<u64> = const { RefCell::new(0) };
     static PARENT_TIMER: RefCell<Option<ic_cdk_timers::TimerId>> = const { RefCell::new(None) };
+    static RECONCILIATION_TIMER: RefCell<Option<ic_cdk_timers::TimerId>> = const { RefCell::new(None) };
+}
+
+// =============================================================================
+// CACHED BALANCE TRACKING
+// =============================================================================
+
+/// Increment cached balance after successful deposit.
+/// Called when ckUSDT is received by the canister.
+pub(crate) fn increment_cached_balance(amount: u64) {
+    CACHED_CANISTER_BALANCE.with(|cache| {
+        let mut c = cache.borrow_mut();
+        *c = c.saturating_add(amount);
+    });
+}
+
+/// Decrement cached balance after successful withdrawal.
+/// Called when ckUSDT is sent from the canister.
+pub(crate) fn decrement_cached_balance(amount: u64) {
+    CACHED_CANISTER_BALANCE.with(|cache| {
+        let mut c = cache.borrow_mut();
+        *c = c.saturating_sub(amount);
+    });
 }
 
 pub(crate) enum TransferResult {
@@ -167,6 +190,9 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
                 new_bal
             });
 
+            // Update cached canister balance (canister received `amount`)
+            increment_cached_balance(amount);
+
             Ok(new_balance)
         }
         Err(e) => Err(format!("Transfer failed: {:?}", e)),
@@ -223,6 +249,8 @@ pub(crate) async fn withdraw_internal(user: Principal) -> Result<u64, String> {
         TransferResult::Success(_block) => {
             PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&user));
             log_audit(AuditEvent::WithdrawalCompleted { user, amount: balance });
+            // Update cached canister balance (canister sent `balance`)
+            decrement_cached_balance(balance);
             Ok(balance)
         }
         TransferResult::DefiniteError(err) => {
@@ -386,6 +414,26 @@ async fn auto_withdraw_parent() {
 }
 
 // =============================================================================
+// BALANCE RECONCILIATION TIMER
+// =============================================================================
+
+/// Start hourly timer to reconcile cached balance with actual ledger balance.
+/// This is a safety mechanism to detect any drift between cached and actual balance.
+pub fn start_balance_reconciliation_timer() {
+    RECONCILIATION_TIMER.with(|t| {
+        if t.borrow().is_some() { return; }
+
+        // Run every hour (3600 seconds)
+        let timer_id = ic_cdk_timers::set_timer_interval(Duration::from_secs(3600), || async {
+            // refresh_canister_balance() queries the ledger and updates the cache
+            // This automatically corrects any drift
+            let _ = refresh_canister_balance().await;
+        });
+        *t.borrow_mut() = Some(timer_id);
+    });
+}
+
+// =============================================================================
 // USER-INITIATED RETRY & ABANDON
 // =============================================================================
 
@@ -438,6 +486,8 @@ pub async fn retry_withdrawal() -> Result<u64, String> {
             }
             PENDING_WITHDRAWALS.with(|p| p.borrow_mut().remove(&caller));
             log_audit(AuditEvent::WithdrawalCompleted { user: caller, amount });
+            // Update cached canister balance (canister sent `amount`)
+            decrement_cached_balance(amount);
             Ok(amount)
         }
         TransferResult::DefiniteError(e) => {
