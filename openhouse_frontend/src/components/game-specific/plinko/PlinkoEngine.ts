@@ -293,7 +293,9 @@ export class PlinkoPhysicsEngine {
     setTimeout(() => {
       const boxHalfWidth = bucketWidth / 2 - this.pinRadius * 2 - 4;
       const startX = centerX + (Math.random() * 2 - 1) * boxHalfWidth;
-      const startY = -20 - Math.random() * 30; // Start above visible area
+      // Start balls at top of visible bucket area (y=0 to y=20)
+      // They'll fall down and pile up on the gate
+      const startY = 0 + Math.random() * 20;
 
       console.log(`[PlinkoEngine] Creating ball ${id} at (${startX.toFixed(1)}, ${startY.toFixed(1)})`);
 
@@ -304,15 +306,16 @@ export class PlinkoPhysicsEngine {
         density: 0.001,
         collisionFilter: {
           category: PlinkoPhysicsEngine.BALL_CATEGORY,
-          mask: PlinkoPhysicsEngine.PIN_CATEGORY,
+          // Collide with pins AND other balls (so they stack properly in bucket)
+          mask: PlinkoPhysicsEngine.PIN_CATEGORY | PlinkoPhysicsEngine.BALL_CATEGORY,
         },
         label: `ball_${id}`,
       });
 
-      // Give slight random initial velocity
+      // Give slight random initial velocity - more horizontal spread
       Matter.Body.setVelocity(ball, {
-        x: (Math.random() - 0.5) * 2,
-        y: 2 + Math.random() * 2,
+        x: (Math.random() - 0.5) * 4,  // More horizontal variance
+        y: 1 + Math.random() * 2,
       });
 
       Matter.Composite.add(this.engine.world, ball);

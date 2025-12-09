@@ -194,8 +194,8 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
   const bucketWidth = Math.min(140, firstRowSpan - 20);
 
   const BUCKET = {
-    TOP_Y: 5,
-    BOTTOM_Y: 70,
+    TOP_Y: -5,   // Extended up to show balls as they spawn
+    BOTTOM_Y: 72,  // Slightly extended to show full bucket
     WIDTH: bucketWidth,
   };
 
