@@ -3,7 +3,7 @@ import usePlinkoActor from '../../hooks/actors/usePlinkoActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import { GameLayout } from '../../components/game-ui';
 import { BettingRail } from '../../components/betting';
-import { PlinkoBoard, ReleaseTunnel, PlinkoPhysicsBalls, TunnelFillingBalls, PLINKO_LAYOUT } from '../../components/game-specific/plinko';
+import { PlinkoBoard, ReleaseTunnel, PlinkoPhysicsBalls, PLINKO_LAYOUT } from '../../components/game-specific/plinko';
 import { useGameBalance } from '../../providers/GameBalanceProvider';
 import { useBalance } from '../../providers/BalanceProvider';
 import { useAuth } from '../../providers/AuthProvider';
@@ -11,7 +11,7 @@ import { DECIMALS_PER_CKUSDT } from '../../types/balance';
 import type { PlinkoGameResult as BackendPlinkoResult } from '../../declarations/plinko_backend/plinko_backend.did';
 
 // Constants
-const ROWS = 8; // Note: Backend currently supports fixed 8 rows. 
+const ROWS = 8; // Note: Backend currently supports fixed 8 rows.
 const PLINKO_BACKEND_CANISTER_ID = 'weupr-2qaaa-aaaap-abl3q-cai';
 const DEFAULT_MULTIPLIER = 0.2;
 
@@ -51,7 +51,7 @@ export const Plinko: React.FC = () => {
   const { actor } = usePlinkoActor();
   const { actor: ledgerActor } = useLedgerActor();
   const { isAuthenticated } = useAuth();
-  
+
   // Balance State
   const { balance: walletBalance, refreshBalance: refreshWalletBalance } = useBalance();
   const gameBalanceContext = useGameBalance('plinko');
@@ -71,7 +71,7 @@ export const Plinko: React.FC = () => {
   const [maxBet, setMaxBet] = useState(100);
   const [multipliers, setMultipliers] = useState<number[]>([]);
   const [gameError, setGameError] = useState('');
-  
+
   // Stats & Info
   const [currentResult, setCurrentResult] = useState<PlinkoGameResult | null>(null);
   const [multiBallResult, setMultiBallResult] = useState<MultiBallBackendResult | null>(null);
@@ -79,18 +79,15 @@ export const Plinko: React.FC = () => {
   const [formula, setFormula] = useState<string>('');
   const [expectedValue, setExpectedValue] = useState<number>(0);
 
-  // Animation state - balls waiting to be dropped by physics engine
+  // Unified physics state
+  const [isFilling, setIsFilling] = useState(false);
+  const [isReleasing, setIsReleasing] = useState(false);
   const [pendingBalls, setPendingBalls] = useState<PendingBall[]>([]);
   const [nextBallId, setNextBallId] = useState(0);
 
-  // Tunnel filling animation state
-  const [isFilling, setIsFilling] = useState(false);
+  // Sync between backend response and filling animation
   const fillingCompleteRef = useRef(false);
   const backendResultsRef = useRef<{ path: boolean[] }[] | null>(null);
-  
-  // Smooth transition state
-  const [tunnelBallStates, setTunnelBallStates] = useState<Map<number, { x: number; y: number; vx: number; vy: number }>>(new Map());
-  const [isReleasing, setIsReleasing] = useState(false);
 
   // Track recently landed slots for highlighting
   const [activeSlots, setActiveSlots] = useState<Set<number>>(new Set());
@@ -140,61 +137,35 @@ export const Plinko: React.FC = () => {
     updateMaxBet();
   }, [actor, ballCount, betAmount]);
 
-  // Callback to capture tunnel ball states just before release
-  const handleTunnelRelease = useCallback((states: any[]) => {
-    // Create map indexed by position (we'll map to ball IDs when creating pending balls)
-    const stateMap = new Map<number, { x: number; y: number; vx: number; vy: number }>();
-    states.forEach((state, index) => {
-      stateMap.set(index, { x: state.x, y: state.y, vx: state.vx, vy: state.vy });
-    });
-    setTunnelBallStates(stateMap);
-  }, []);
-
-  // Helper: Try to release balls when both backend and filling are ready
+  // Try to release balls when both backend and filling are ready
   const tryReleaseBalls = useCallback(() => {
     if (fillingCompleteRef.current && backendResultsRef.current) {
       const results = backendResultsRef.current;
 
-      // Open the bucket door AND trigger release
+      // Open the bucket door
       setBucketOpen(true);
-      setIsReleasing(true);
 
-      // Wait for door animation + position capture, then start board balls
+      // Wait for door animation, then trigger release
       setTimeout(() => {
         const newBalls: PendingBall[] = results.map((r, i) => ({
           id: nextBallId + i,
           path: r.path,
         }));
 
-        // Map tunnel states to new ball IDs
-        const mappedStates = new Map<number, { x: number; y: number; vx: number; vy: number }>();
-        tunnelBallStates.forEach((state, index) => {
-          if (index < newBalls.length) {
-            mappedStates.set(nextBallId + index, state);
-          }
-        });
-        setTunnelBallStates(mappedStates);
-
         setPendingBalls(newBalls);
         setNextBallId(prev => prev + results.length);
         setIsWaiting(false);
         setIsPlaying(true);
-
-        // Delay hiding tunnel balls to allow fade-out
-        setTimeout(() => {
-          setIsFilling(false);
-          setIsReleasing(false);
-          setTunnelBallStates(new Map());
-        }, 150);  // Match fade-out duration
+        setIsReleasing(true);
 
         // Clean up refs for next round
         fillingCompleteRef.current = false;
         backendResultsRef.current = null;
       }, PLINKO_LAYOUT.BUCKET_OPEN_MS);
     }
-  }, [nextBallId, tunnelBallStates]);
+  }, [nextBallId]);
 
-  // Callback when tunnel filling animation settles
+  // Callback when filling animation settles
   const handleFillingComplete = useCallback(() => {
     fillingCompleteRef.current = true;
     tryReleaseBalls();
@@ -219,6 +190,7 @@ export const Plinko: React.FC = () => {
     setCurrentResult(null);
     setMultiBallResult(null);
     setBucketOpen(false);
+    setPendingBalls([]);
     fillingCompleteRef.current = false;
     backendResultsRef.current = null;
 
@@ -348,6 +320,8 @@ export const Plinko: React.FC = () => {
   const handleAllBallsLanded = useCallback(() => {
     setPendingBalls([]);
     setIsPlaying(false);
+    setIsFilling(false);
+    setIsReleasing(false);
     gameBalanceContext.refresh();
   }, [gameBalanceContext]);
 
@@ -371,7 +345,7 @@ export const Plinko: React.FC = () => {
             {/* Static board */}
             <PlinkoBoard rows={ROWS} multipliers={multipliers} activeSlots={activeSlots} />
 
-            {/* Release tunnel - structure always visible, static balls hidden when filling with physics */}
+            {/* Release tunnel - structure always visible */}
             <ReleaseTunnel
               ballCount={ballCount}
               isOpen={bucketOpen}
@@ -379,27 +353,18 @@ export const Plinko: React.FC = () => {
               showBalls={false}
             />
 
-            {/* Physics-based tunnel filling animation */}
-            <TunnelFillingBalls
-              ballCount={ballCount}
+            {/* Unified physics balls - handles both filling and board animation */}
+            <PlinkoPhysicsBalls
+              rows={ROWS}
               isFilling={isFilling}
-              isReleasing={isReleasing}
+              fillBallCount={ballCount}
               onFillingComplete={handleFillingComplete}
-              onRelease={handleTunnelRelease}
+              isReleasing={isReleasing}
+              pendingBalls={pendingBalls}
+              onAllBallsLanded={handleAllBallsLanded}
+              onBallLanded={handleBallLanded}
               staggerMs={60}
             />
-
-            {/* Physics-based animated balls on the board */}
-            {pendingBalls.length > 0 && (
-              <PlinkoPhysicsBalls
-                rows={ROWS}
-                pendingBalls={pendingBalls}
-                initialStates={tunnelBallStates}
-                onAllBallsLanded={handleAllBallsLanded}
-                onBallLanded={handleBallLanded}
-                staggerMs={PLINKO_LAYOUT.BALL_STAGGER_MS}
-              />
-            )}
 
             {/* LEFT SIDE - Total bet, info & result */}
             <foreignObject x="40" y="20" width="50" height="200">

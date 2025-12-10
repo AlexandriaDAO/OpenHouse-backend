@@ -44,6 +44,25 @@ export class PlinkoPhysicsEngine {
   private static PIN_CATEGORY = 0x0001;
   private static BALL_CATEGORY = 0x0002;
 
+  // Bucket geometry for unified physics
+  private bucketWalls: Matter.Body[] = [];
+  private bucketGate: Matter.Body | null = null;
+  private isBucketOpen = false;
+
+  // Bucket dimensions (matching TunnelPhysicsEngine for consistency)
+  private static BUCKET = {
+    TOP_Y: -50, // Extended up to accommodate tall stacks of balls
+    BOTTOM_Y: 70,
+    WIDTH: 140,
+    GATE_HEIGHT: 4,
+  };
+
+  // Track expected number of balls for filling phase
+  private expectedBallCount: number = 0;
+
+  // Track pending ball creation timeouts to cancel them if needed
+  private pendingBallTimeouts: number[] = [];
+
   // Ball friction by row count (from open source, tuned for expected payout)
   private static frictionAirByRowCount: Record<number, number> = {
     8: 0.0395,
@@ -67,6 +86,7 @@ export class PlinkoPhysicsEngine {
     this.runner = Matter.Runner.create();
 
     this.placePinsAndWalls();
+    this.createBucket();
     this.createSensor();
     this.setupCollisionHandling();
   }
@@ -171,6 +191,254 @@ export class PlinkoPhysicsEngine {
 
     this.walls = [leftWall, rightWall];
     Matter.Composite.add(this.engine.world, this.walls);
+  }
+
+  /**
+   * Create bucket geometry (walls + gate) for ball filling phase.
+   * Balls drop into this bucket and are released when gate opens.
+   * Bucket width is calculated to fit within the first row of pins.
+   */
+  private createBucket() {
+    const { BUCKET, PIN_CATEGORY } = PlinkoPhysicsEngine;
+    const { rows, width } = this.options;
+    const { PADDING_X, PADDING_TOP } = PLINKO_LAYOUT;
+    const centerX = width / 2;
+    const boxHeight = BUCKET.BOTTOM_Y - BUCKET.TOP_Y;
+
+    // Calculate first row pin positions to size bucket appropriately
+    // First row has 3 pins, we want bucket to fit between them
+    const rowPaddingX = PADDING_X + ((rows - 1) * this.pinDistanceX) / 2;
+    const firstRowFirstPinX = rowPaddingX;
+    const firstRowLastPinX = width - rowPaddingX;
+
+    // Make bucket slightly narrower than first row span (with padding for ball radius)
+    const bucketWidth = Math.min(BUCKET.WIDTH, (firstRowLastPinX - firstRowFirstPinX) - 20);
+    const halfWidth = bucketWidth / 2;
+
+    // Left wall (vertical)
+    const leftWall = Matter.Bodies.rectangle(
+      centerX - halfWidth - 4,
+      BUCKET.TOP_Y + boxHeight / 2,
+      8,
+      boxHeight + 40, // Extra height to catch balls from above
+      {
+        isStatic: true,
+        collisionFilter: {
+          category: PIN_CATEGORY,
+          mask: PlinkoPhysicsEngine.BALL_CATEGORY,
+        },
+        label: 'bucket_left_wall',
+      }
+    );
+
+    // Right wall (vertical)
+    const rightWall = Matter.Bodies.rectangle(
+      centerX + halfWidth + 4,
+      BUCKET.TOP_Y + boxHeight / 2,
+      8,
+      boxHeight + 40,
+      {
+        isStatic: true,
+        collisionFilter: {
+          category: PIN_CATEGORY,
+          mask: PlinkoPhysicsEngine.BALL_CATEGORY,
+        },
+        label: 'bucket_right_wall',
+      }
+    );
+
+    // Bottom gate (closed initially)
+    const gate = Matter.Bodies.rectangle(
+      centerX,
+      BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT / 2,
+      bucketWidth + 20,
+      BUCKET.GATE_HEIGHT + 4,
+      {
+        isStatic: true,
+        collisionFilter: {
+          category: PIN_CATEGORY,
+          mask: PlinkoPhysicsEngine.BALL_CATEGORY,
+        },
+        label: 'bucket_gate',
+      }
+    );
+
+    // Note: Funnel walls removed - they were causing balls to get stuck
+    // The angled board walls already guide balls toward the peg area
+
+    this.bucketWalls = [leftWall, rightWall];
+    this.bucketGate = gate;
+    Matter.Composite.add(this.engine.world, [...this.bucketWalls, gate]);
+  }
+
+  /**
+   * Calculate the actual bucket width based on first row pin positions.
+   */
+  private getBucketWidth(): number {
+    const { rows, width } = this.options;
+    const { PADDING_X } = PLINKO_LAYOUT;
+    const { BUCKET } = PlinkoPhysicsEngine;
+
+    const rowPaddingX = PADDING_X + ((rows - 1) * this.pinDistanceX) / 2;
+    const firstRowFirstPinX = rowPaddingX;
+    const firstRowLastPinX = width - rowPaddingX;
+
+    return Math.min(BUCKET.WIDTH, (firstRowLastPinX - firstRowFirstPinX) - 20);
+  }
+
+  /**
+   * Drop a ball into the bucket from above.
+   * Ball will bounce around in bucket until gate opens.
+   */
+  public dropBallIntoBucket(id: number, delay: number = 0): void {
+    const centerX = this.options.width / 2;
+    const bucketWidth = this.getBucketWidth();
+
+    console.log(`[PlinkoEngine] Scheduling ball ${id} to drop in ${delay}ms (bucket width: ${bucketWidth})`);
+
+    const timeoutId = window.setTimeout(() => {
+      const boxHalfWidth = bucketWidth / 2 - this.pinRadius * 2 - 4;
+      const startX = centerX + (Math.random() * 2 - 1) * boxHalfWidth;
+      // Start balls at top of visible bucket area (y=0 to y=20)
+      // They'll fall down and pile up on the gate
+      const startY = 0 + Math.random() * 20;
+
+      console.log(`[PlinkoEngine] Creating ball ${id} at (${startX.toFixed(1)}, ${startY.toFixed(1)})`);
+
+      const ball = Matter.Bodies.circle(startX, startY, this.pinRadius * 2, {
+        restitution: 0.4, // Less bouncy in bucket
+        friction: 0.3,
+        frictionAir: 0.02,
+        density: 0.001,
+        collisionFilter: {
+          category: PlinkoPhysicsEngine.BALL_CATEGORY,
+          // Collide with pins AND other balls (so they stack properly in bucket)
+          mask: PlinkoPhysicsEngine.PIN_CATEGORY | PlinkoPhysicsEngine.BALL_CATEGORY,
+        },
+        label: `ball_${id}`,
+      });
+
+      // Give slight random initial velocity - more horizontal spread
+      Matter.Body.setVelocity(ball, {
+        x: (Math.random() - 0.5) * 4,  // More horizontal variance
+        y: 1 + Math.random() * 2,
+      });
+
+      Matter.Composite.add(this.engine.world, ball);
+      this.balls.set(id, ball);
+      console.log(`[PlinkoEngine] Ball ${id} added. Total balls in world: ${this.balls.size}`);
+    }, delay);
+
+    this.pendingBallTimeouts.push(timeoutId);
+  }
+
+  /**
+   * Open the bucket gate to release all balls onto the peg board.
+   */
+  public openBucket(): void {
+    console.log(`[PlinkoEngine] openBucket called. Gate exists: ${!!this.bucketGate}, already open: ${this.isBucketOpen}, balls in world: ${this.balls.size}`);
+    if (this.bucketGate && !this.isBucketOpen) {
+      Matter.Composite.remove(this.engine.world, this.bucketGate);
+      this.bucketGate = null;
+      this.isBucketOpen = true;
+
+      // Reset stuck detection timers for all balls so they don't get deleted immediately
+      const now = Date.now();
+      for (const [id, ball] of this.balls) {
+        this.ballLastPositions.set(id, {
+          x: ball.position.x,
+          y: ball.position.y,
+          time: now
+        });
+      }
+
+      console.log('[PlinkoEngine] Bucket gate opened');
+    }
+  }
+
+  /**
+   * Clear all balls from the world and reset tracking.
+   * Cancels any pending ball creations.
+   */
+  public clearAllBalls(): void {
+    console.log('[PlinkoEngine] clearAllBalls called');
+    
+    // Cancel pending timeouts
+    this.pendingBallTimeouts.forEach(id => clearTimeout(id));
+    this.pendingBallTimeouts = [];
+
+    // Remove all balls from world
+    for (const ball of this.balls.values()) {
+      Matter.Composite.remove(this.engine.world, ball);
+    }
+    
+    this.balls.clear();
+    this.ballTargets.clear();
+    this.ballLastPositions.clear();
+  }
+
+  /**
+   * Reset bucket for next round (recreate gate and walls).
+   */
+  public resetBucket(): void {
+    console.log('[PlinkoEngine] resetBucket called');
+    // Ensure no leftover balls
+    this.clearAllBalls();
+
+    // Remove old walls if exist
+    if (this.bucketWalls.length > 0) {
+      Matter.Composite.remove(this.engine.world, this.bucketWalls);
+    }
+    if (this.bucketGate) {
+      Matter.Composite.remove(this.engine.world, this.bucketGate);
+    }
+    this.bucketWalls = [];
+    this.bucketGate = null;
+    this.isBucketOpen = false;
+    this.expectedBallCount = 0; // Reset for next round
+
+    // Recreate bucket for next round
+    this.createBucket();
+  }
+
+  /**
+   * Assign a predetermined path to a ball for steering.
+   * Called when backend returns paths, before bucket opens.
+   */
+  public assignPathToBall(id: number, path: boolean[]): void {
+    const targetSlot = path.filter(v => v).length;
+    this.ballTargets.set(id, targetSlot);
+  }
+
+  /**
+   * Set the expected number of balls for the filling phase.
+   * Must be called before dropBallIntoBucket to ensure areBallsSettled works correctly.
+   */
+  public setExpectedBallCount(count: number): void {
+    this.expectedBallCount = count;
+    console.log(`[PlinkoEngine] Expected ball count set to ${count}`);
+  }
+
+  /**
+   * Check if all balls in bucket have settled (low velocity).
+   * Returns false until ALL expected balls have been created AND settled.
+   */
+  public areBallsSettled(): boolean {
+    // Don't settle until all expected balls have been created
+    if (this.balls.size < this.expectedBallCount) {
+      console.log(`[PlinkoEngine] areBallsSettled: false (only ${this.balls.size}/${this.expectedBallCount} balls created)`);
+      return false;
+    }
+
+    const velocityThreshold = 0.3;
+    for (const ball of this.balls.values()) {
+      const speed = Math.sqrt(ball.velocity.x ** 2 + ball.velocity.y ** 2);
+      if (speed > velocityThreshold) {
+        return false;
+      }
+    }
+    console.log(`[PlinkoEngine] areBallsSettled: true (all ${this.balls.size} balls settled)`);
+    return this.balls.size > 0;
   }
 
   private createSensor() {
@@ -289,6 +557,11 @@ export class PlinkoPhysicsEngine {
    * A ball is considered stuck if it hasn't moved significantly for STUCK_THRESHOLD_MS.
    */
   private checkForStuckBalls() {
+    // Don't check for stuck balls while they are in the bucket (filling phase)
+    if (!this.isBucketOpen && this.bucketGate) {
+      return;
+    }
+
     const now = Date.now();
     const { height } = this.options;
     const { PADDING_BOTTOM } = PLINKO_LAYOUT;
@@ -503,6 +776,9 @@ export class PlinkoPhysicsEngine {
     this.ballLastPositions.clear();
     this.pins = [];
     this.walls = [];
+    this.bucketWalls = [];
+    this.bucketGate = null;
+    this.isBucketOpen = false;
     this.pinsLastRowXCoords = [];
   }
 

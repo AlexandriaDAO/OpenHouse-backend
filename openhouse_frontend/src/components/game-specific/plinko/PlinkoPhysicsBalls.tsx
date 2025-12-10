@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { PLINKO_LAYOUT } from './plinkoAnimations';
 import { PlinkoPhysicsEngine, BallState } from './PlinkoEngine';
 
@@ -9,8 +9,13 @@ interface PendingBall {
 
 interface PlinkoPhysicsBallsProps {
   rows: number;
-  pendingBalls: PendingBall[];
-  initialStates?: Map<number, { x: number; y: number; vx: number; vy: number }>;
+  // Filling phase props
+  isFilling?: boolean;
+  fillBallCount?: number;
+  onFillingComplete?: () => void;
+  // Releasing/playing phase props
+  isReleasing?: boolean;
+  pendingBalls?: PendingBall[];
   onAllBallsLanded: () => void;
   onBallLanded?: (slotIndex: number) => void;
   staggerMs?: number;
@@ -18,19 +23,42 @@ interface PlinkoPhysicsBallsProps {
 
 export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
   rows,
-  pendingBalls,
-  initialStates,
+  isFilling = false,
+  fillBallCount = 0,
+  onFillingComplete,
+  isReleasing = false,
+  pendingBalls = [],
   onAllBallsLanded,
   onBallLanded,
   staggerMs = PLINKO_LAYOUT.BALL_STAGGER_MS,
 }) => {
   const engineRef = useRef<PlinkoPhysicsEngine | null>(null);
   const [ballStates, setBallStates] = useState<Map<number, BallState>>(new Map());
-  const droppedBallsRef = useRef<Set<number>>(new Set());
   const landedBallsRef = useRef<Set<number>>(new Set());
   const totalBallsRef = useRef<number>(0);
+  const hasStartedFillingRef = useRef(false);
+  const settleCheckIntervalRef = useRef<number | null>(null);
+  const hasNotifiedSettledRef = useRef(false);
 
-  // Initialize physics engine
+  // Use refs for callbacks to avoid engine recreation
+  const onBallLandedRef = useRef(onBallLanded);
+  const onAllBallsLandedRef = useRef(onAllBallsLanded);
+  const onFillingCompleteRef = useRef(onFillingComplete);
+
+  // Keep refs in sync with props
+  useEffect(() => {
+    onBallLandedRef.current = onBallLanded;
+  }, [onBallLanded]);
+
+  useEffect(() => {
+    onAllBallsLandedRef.current = onAllBallsLanded;
+  }, [onAllBallsLanded]);
+
+  useEffect(() => {
+    onFillingCompleteRef.current = onFillingComplete;
+  }, [onFillingComplete]);
+
+  // Initialize physics engine - ONLY depends on rows
   useEffect(() => {
     const engine = new PlinkoPhysicsEngine({
       rows,
@@ -51,13 +79,13 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
           return next;
         });
 
-        // Notify parent of the slot where ball landed
-        onBallLanded?.(slotIndex);
+        // Notify parent of the slot where ball landed (use ref)
+        onBallLandedRef.current?.(slotIndex);
 
         // Check if all balls have landed
         if (landedBallsRef.current.size === totalBallsRef.current && totalBallsRef.current > 0) {
           setTimeout(() => {
-            onAllBallsLanded();
+            onAllBallsLandedRef.current();
           }, 100);
         }
       },
@@ -69,30 +97,123 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
     return () => {
       engine.destroy();
       engineRef.current = null;
+      if (settleCheckIntervalRef.current) {
+        clearInterval(settleCheckIntervalRef.current);
+        settleCheckIntervalRef.current = null;
+      }
     };
-  }, [rows, onAllBallsLanded, onBallLanded]);
+  }, [rows]); // ONLY rows - callbacks via refs
 
-  // Drop balls with stagger
+  // Track previous filling state to detect when filling starts fresh
+  const prevFillingRef = useRef(false);
+
+  // Handle filling phase - drop balls into bucket
   useEffect(() => {
-    if (!engineRef.current || pendingBalls.length === 0) return;
+    // Detect when isFilling transitions from false to true (new game starting)
+    const justStartedFilling = isFilling && !prevFillingRef.current;
+    prevFillingRef.current = isFilling;
 
-    // Reset tracking for new batch
-    droppedBallsRef.current = new Set();
-    landedBallsRef.current = new Set();
-    totalBallsRef.current = pendingBalls.length;
+    // If just started filling, reset the flag to allow ball creation
+    if (justStartedFilling) {
+      hasStartedFillingRef.current = false;
+      console.log('[PlinkoPhysicsBalls] Filling started fresh, resetting hasStartedFillingRef');
 
-    // Drop each ball with stagger delay
-    pendingBalls.forEach((ball, index) => {
-      setTimeout(() => {
-        if (engineRef.current && !droppedBallsRef.current.has(ball.id)) {
-          droppedBallsRef.current.add(ball.id);
-          // Get initial state if available
-          const initialState = initialStates?.get(ball.id);
-          engineRef.current.dropBall(ball.id, ball.path, initialState);
+      // Clear any previous state from engine and React
+      if (engineRef.current) {
+        engineRef.current.clearAllBalls();
+        setBallStates(new Map());
+      }
+    }
+
+    if (isFilling && fillBallCount > 0 && engineRef.current && !hasStartedFillingRef.current) {
+      hasStartedFillingRef.current = true;
+      hasNotifiedSettledRef.current = false;
+      totalBallsRef.current = fillBallCount;
+      landedBallsRef.current = new Set();
+
+      console.log(`[PlinkoPhysicsBalls] Creating ${fillBallCount} balls with stagger ${staggerMs}ms`);
+
+      // IMPORTANT: Set expected ball count BEFORE creating balls
+      // This ensures areBallsSettled() won't return true until all balls are created
+      engineRef.current.setExpectedBallCount(fillBallCount);
+
+      // Drop balls into bucket with stagger - IDs 0 to fillBallCount-1
+      for (let i = 0; i < fillBallCount; i++) {
+        engineRef.current.dropBallIntoBucket(i, i * staggerMs);
+      }
+
+      // Start checking if balls have settled
+      settleCheckIntervalRef.current = window.setInterval(() => {
+        if (engineRef.current && !hasNotifiedSettledRef.current) {
+          if (engineRef.current.areBallsSettled()) {
+            hasNotifiedSettledRef.current = true;
+            console.log('[PlinkoPhysicsBalls] Balls settled, calling onFillingComplete');
+            onFillingCompleteRef.current?.();
+          }
         }
-      }, index * staggerMs);
-    });
-  }, [pendingBalls, staggerMs, initialStates]);
+      }, 100);
+    }
+  }, [isFilling, fillBallCount, staggerMs]);
+
+  // Handle release phase - open bucket and assign paths
+  useEffect(() => {
+    if (isReleasing && pendingBalls && pendingBalls.length > 0 && engineRef.current) {
+      // Clear settle check interval
+      if (settleCheckIntervalRef.current) {
+        clearInterval(settleCheckIntervalRef.current);
+        settleCheckIntervalRef.current = null;
+      }
+
+      // Assign paths to balls - use INDEX as the ID (0, 1, 2...)
+      // because that's how we created them in dropBallIntoBucket
+      pendingBalls.forEach((ball, index) => {
+        engineRef.current?.assignPathToBall(index, ball.path);
+      });
+
+      // Open bucket gate - balls fall naturally through pegs
+      engineRef.current.openBucket();
+    }
+  }, [isReleasing, pendingBalls]);
+
+  // Reset when not filling and not releasing (game ended)
+  useEffect(() => {
+    if (!isFilling && !isReleasing && engineRef.current) {
+      // Only reset if we previously started
+      if (hasStartedFillingRef.current) {
+        hasStartedFillingRef.current = false;
+        hasNotifiedSettledRef.current = false;
+
+        // Clear any leftover settle check
+        if (settleCheckIntervalRef.current) {
+          clearInterval(settleCheckIntervalRef.current);
+          settleCheckIntervalRef.current = null;
+        }
+
+        // Reset bucket for next round
+        engineRef.current.resetBucket();
+      }
+    }
+  }, [isFilling, isReleasing]);
+
+  // Calculate bucket dimensions for clipping during fill phase
+  // Must match the physics engine bucket calculation
+  const centerX = PLINKO_LAYOUT.BOARD_WIDTH / 2;
+  const pinDistanceX = (PLINKO_LAYOUT.BOARD_WIDTH - PLINKO_LAYOUT.PADDING_X * 2) / (2 + rows);
+  const rowPaddingX = PLINKO_LAYOUT.PADDING_X + ((rows - 1) * pinDistanceX) / 2;
+  const firstRowSpan = (PLINKO_LAYOUT.BOARD_WIDTH - rowPaddingX * 2);
+  const bucketWidth = Math.min(140, firstRowSpan - 20);
+
+  const BUCKET = {
+    TOP_Y: -50,   // Extended up to show balls as they spawn
+    BOTTOM_Y: 72,  // Slightly extended to show full bucket
+    WIDTH: bucketWidth,
+  };
+
+  // Calculate ball radius to match physics engine exactly
+  // Formula: (24 - rows) / 2 * 0.53
+  const physicsRadius = ((24 - rows) / 2) * 0.53;
+  // Use slightly larger visual radius for better look, but close to physics
+  const visualRadius = physicsRadius;
 
   return (
     <g>
@@ -110,20 +231,36 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
         <filter id="physicsBallShadow" x="-50%" y="-50%" width="200%" height="200%">
           <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000" floodOpacity="0.3" />
         </filter>
+
+        {/* Clip path for bucket area during filling */}
+        <clipPath id="bucketClip">
+          <rect
+            x={centerX - BUCKET.WIDTH / 2}
+            y={BUCKET.TOP_Y}
+            width={BUCKET.WIDTH}
+            height={BUCKET.BOTTOM_Y - BUCKET.TOP_Y}
+          />
+        </clipPath>
       </defs>
 
-      {/* Render each ball */}
-      {Array.from(ballStates.entries()).map(([id, state]) => (
-        <PhysicsBall key={id} state={state} />
-      ))}
+      {/* Render balls - clip to bucket during filling, full view when releasing */}
+      {isFilling && !isReleasing ? (
+        <g clipPath="url(#bucketClip)">
+          {Array.from(ballStates.entries()).map(([id, state]) => (
+            <PhysicsBall key={id} state={state} radius={visualRadius} />
+          ))}
+        </g>
+      ) : (
+        Array.from(ballStates.entries()).map(([id, state]) => (
+          <PhysicsBall key={id} state={state} radius={visualRadius} />
+        ))
+      )}
     </g>
   );
 };
 
 // Individual ball renderer - unified with tunnel balls
-const BALL_RADIUS = 8;  // Matches tunnel balls for seamless transition
-
-const PhysicsBall: React.FC<{ state: BallState }> = ({ state }) => {
+const PhysicsBall: React.FC<{ state: BallState; radius: number }> = ({ state, radius }) => {
   const { x, y, rotation } = state;
 
   return (
@@ -134,34 +271,34 @@ const PhysicsBall: React.FC<{ state: BallState }> = ({ state }) => {
         {/* Drop shadow */}
         <ellipse
           cx={2}
-          cy={BALL_RADIUS + 2}
-          rx={BALL_RADIUS * 0.7}
-          ry={BALL_RADIUS * 0.25}
+          cy={radius + 2}
+          rx={radius * 0.7}
+          ry={radius * 0.25}
           fill="black"
           opacity={0.15}
         />
 
         {/* Main ball */}
         <circle
-          r={BALL_RADIUS}
+          r={radius}
           fill="url(#physicsBallGradient)"
         />
 
         {/* Specular highlight */}
         <ellipse
-          cx={-BALL_RADIUS * 0.3}
-          cy={-BALL_RADIUS * 0.3}
-          rx={BALL_RADIUS * 0.35}
-          ry={BALL_RADIUS * 0.25}
+          cx={-radius * 0.3}
+          cy={-radius * 0.3}
+          rx={radius * 0.35}
+          ry={radius * 0.25}
           fill="white"
           opacity={0.6}
         />
 
         {/* Secondary highlight */}
         <circle
-          cx={-BALL_RADIUS * 0.15}
-          cy={-BALL_RADIUS * 0.45}
-          r={BALL_RADIUS * 0.1}
+          cx={-radius * 0.15}
+          cy={-radius * 0.45}
+          r={radius * 0.1}
           fill="white"
           opacity={0.8}
         />
