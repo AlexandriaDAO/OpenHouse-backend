@@ -150,6 +150,15 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
         return Err(format!("Minimum deposit is {} USDT", MIN_DEPOSIT / 1_000_000));
     }
 
+    // Maximum user deposit: 1B USDT. Higher than LP limit (100M) - no share calculations.
+    const MAX_USER_DEPOSIT: u64 = 1_000_000_000_000;
+    if amount > MAX_USER_DEPOSIT {
+        return Err(format!(
+            "Maximum deposit is {} USDT (overflow protection)",
+            MAX_USER_DEPOSIT / 1_000_000
+        ));
+    }
+
     let caller = ic_cdk::api::msg_caller();
     let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID).expect("Invalid principal constant");
 
@@ -172,7 +181,7 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
         .map_err(|(code, msg)| format!("Call failed: {:?} {}", code, msg))?;
 
     match result {
-        Ok(block_index) => {
+        Ok(_block_index) => {
             // Credit user with the full amount
             // ICRC-2 transfer_from ACTUAL behavior:
             // - User pays: amount + fee (debited from user's account)
@@ -185,10 +194,11 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
             let new_balance = USER_BALANCES_STABLE.with(|balances| {
                 let mut balances = balances.borrow_mut();
                 let current = balances.get(&caller).unwrap_or(0);
-                let new_bal = current + amount;
+                let new_bal = current.checked_add(amount)
+                    .ok_or_else(|| "Balance overflow".to_string())?;
                 balances.insert(caller, new_bal);
-                new_bal
-            });
+                Ok::<u64, String>(new_bal)
+            })?;
 
             // Update cached canister balance (canister received `amount`)
             increment_cached_balance(amount);

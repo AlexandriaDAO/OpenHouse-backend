@@ -9,12 +9,18 @@ use crate::types::{Account, TransferFromArgs, TransferFromError, CKUSDT_CANISTER
 use super::accounting;
 use super::memory_ids::{LP_SHARES_MEMORY_ID, POOL_STATE_MEMORY_ID};
 
-// Constants
+// =============================================================================
+// CONSTANTS
+// =============================================================================
 
 const MINIMUM_LIQUIDITY: u64 = 1000;
 const MIN_DEPOSIT: u64 = 10_000_000; // 10 USDT minimum for LP (higher barrier than user deposits)
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.1 USDT
 const MIN_OPERATING_BALANCE: u64 = 100_000_000; // 100 USDT to operate games
+
+/// Maximum LP deposit: 100M USDT. Stricter than user limit (1B) because LP deposits
+/// affect share ratios and pool stability. Still ~700x total USDT supply.
+const MAX_LP_DEPOSIT: u64 = 100_000_000_000;
 const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
 const LP_WITHDRAWAL_FEE_BPS: u64 = 100; // 1%
 
@@ -139,12 +145,23 @@ fn calculate_shares_for_deposit(amount_nat: &Nat) -> Result<Nat, String> {
             }
             Ok::<Nat, String>(initial_shares - burned_shares)
         } else {
-            // Standard logic (simulation)
+            // Standard logic - this is where overflow can occur
+            // NEW: Check if multiplication would overflow Nat bounds
+            // Nat can handle very large numbers, but we should still validate
+
+            // The formula: shares = (amount * total_shares) / reserve
+            // Overflow risk: if (amount * total_shares) > Nat::MAX
+
+            // Since we added MAX_LP_DEPOSIT validation above,
+            // and total_shares grows proportionally to deposits,
+            // the multiplication is now bounded and safe
+
             let numerator = amount_nat.clone() * total_shares;
+
             if current_reserve == 0u64 {
-                 return Ok::<Nat, String>(Nat::from(0u64));
+                 return Ok(Nat::from(0u64));
             }
-            Ok::<Nat, String>(numerator / current_reserve)
+            Ok(numerator / current_reserve)
         }
     })
 }
@@ -155,6 +172,13 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
     // Validate
     if amount < MIN_DEPOSIT {
         return Err(format!("Minimum LP deposit is {} USDT", MIN_DEPOSIT / 1_000_000));
+    }
+
+    if amount > MAX_LP_DEPOSIT {
+        return Err(format!(
+            "Maximum LP deposit is {} USDT (overflow protection)",
+            MAX_LP_DEPOSIT / 1_000_000
+        ));
     }
 
     let caller = ic_cdk::api::msg_caller();
@@ -240,9 +264,9 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
     // Update user shares
     LP_SHARES.with(|shares| {
         // Handle initial burn if needed (only if this is the FIRST deposit)
-        // Note: We check total_shares again inside the block to be safe, 
+        // Note: We check total_shares again inside the block to be safe,
         // though the calculation logic already accounted for the burn subtraction.
-        // However, we need to physically insert the burned shares into the map 
+        // However, we need to physically insert the burned shares into the map
         // if this is indeed the first deposit.
         let total_shares = shares.borrow()
             .iter()
@@ -256,14 +280,16 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
 
         let mut shares_map = shares.borrow_mut();
         let current = shares_map.get(&caller).map_or(Nat::from(0u64), |s| s.0);
+
+        // Nat uses arbitrary precision - addition cannot overflow
         let new_shares = current + shares_to_mint.clone();
         shares_map.insert(caller, StorableNat(new_shares));
     });
 
-    // Update pool reserve
+    // Update pool reserve (Nat uses arbitrary precision - addition cannot overflow)
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
-        pool_state.reserve += amount_nat;
+        pool_state.reserve = pool_state.reserve + amount_nat.clone();
         state.borrow_mut().set(pool_state);
     });
 
@@ -331,8 +357,15 @@ async fn withdraw_liquidity(shares_to_burn: Nat) -> Result<u64, String> {
     }
 
     // Calculate fee (1% using basis points for precision)
-    let fee_amount = (payout_u64 * LP_WITHDRAWAL_FEE_BPS) / 10_000;
-    let lp_amount = payout_u64 - fee_amount;
+    // Note: Overflow is impossible with MAX_LP_DEPOSIT limit, but we handle it gracefully
+    let fee_amount = match payout_u64.checked_mul(LP_WITHDRAWAL_FEE_BPS) {
+        Some(product) => product / 10_000,
+        None => {
+            // Overflow would require withdrawing >9.2 trillion USDT, blocked by MAX_LP_DEPOSIT
+            return Err("Fee calculation overflow - withdrawal amount exceeds safe limits".to_string());
+        }
+    };
+    let lp_amount = payout_u64.saturating_sub(fee_amount);
 
     // Update shares BEFORE transfer (reentrancy protection)
     LP_SHARES.with(|shares| {
