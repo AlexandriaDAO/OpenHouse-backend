@@ -150,8 +150,8 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
         return Err(format!("Minimum deposit is {} USDT", MIN_DEPOSIT / 1_000_000));
     }
 
-    // NEW: Maximum check
-    const MAX_USER_DEPOSIT: u64 = 1_000_000_000_000; // 1 billion USDT
+    // Maximum user deposit: 1B USDT. Higher than LP limit (100M) - no share calculations.
+    const MAX_USER_DEPOSIT: u64 = 1_000_000_000_000;
     if amount > MAX_USER_DEPOSIT {
         return Err(format!(
             "Maximum deposit is {} USDT (overflow protection)",

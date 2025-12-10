@@ -9,13 +9,18 @@ use crate::types::{Account, TransferFromArgs, TransferFromError, CKUSDT_CANISTER
 use super::accounting;
 use super::memory_ids::{LP_SHARES_MEMORY_ID, POOL_STATE_MEMORY_ID};
 
-// Constants
+// =============================================================================
+// CONSTANTS
+// =============================================================================
 
 const MINIMUM_LIQUIDITY: u64 = 1000;
 const MIN_DEPOSIT: u64 = 10_000_000; // 10 USDT minimum for LP (higher barrier than user deposits)
 const MIN_WITHDRAWAL: u64 = 100_000; // 0.1 USDT
 const MIN_OPERATING_BALANCE: u64 = 100_000_000; // 100 USDT to operate games
-const MAX_LP_DEPOSIT: u64 = 100_000_000_000; // 100 million USDT
+
+/// Maximum LP deposit: 100M USDT. Stricter than user limit (1B) because LP deposits
+/// affect share ratios and pool stability. Still ~700x total USDT supply.
+const MAX_LP_DEPOSIT: u64 = 100_000_000_000;
 const PARENT_STAKER_CANISTER: &str = "e454q-riaaa-aaaap-qqcyq-cai";
 const LP_WITHDRAWAL_FEE_BPS: u64 = 100; // 1%
 
@@ -276,34 +281,17 @@ pub async fn deposit_liquidity(amount: u64, min_shares_expected: Option<Nat>) ->
         let mut shares_map = shares.borrow_mut();
         let current = shares_map.get(&caller).map_or(Nat::from(0u64), |s| s.0);
 
-        let new_shares = current.clone() + shares_to_mint.clone();
-
-        // Logical consistency check - Nat uses arbitrary precision so this cannot
-        // mathematically occur, but we check anyway for defense in depth
-        if new_shares < current {
-             return Err("Share addition inconsistency detected".to_string());
-        }
-
+        // Nat uses arbitrary precision - addition cannot overflow
+        let new_shares = current + shares_to_mint.clone();
         shares_map.insert(caller, StorableNat(new_shares));
-        Ok::<(), String>(())
-    })?;
+    });
 
-    // Update pool reserve
+    // Update pool reserve (Nat uses arbitrary precision - addition cannot overflow)
     POOL_STATE.with(|state| {
         let mut pool_state = state.borrow().get().clone();
-        
-        let new_reserve = pool_state.reserve.clone() + amount_nat.clone();
-
-        // Logical consistency check - Nat uses arbitrary precision so this cannot
-        // mathematically occur, but we check anyway for defense in depth
-        if new_reserve < pool_state.reserve {
-             return Err("Pool reserve inconsistency detected".to_string());
-        }
-
-        pool_state.reserve = new_reserve;
+        pool_state.reserve = pool_state.reserve + amount_nat.clone();
         state.borrow_mut().set(pool_state);
-        Ok(())
-    })?;
+    });
 
     // Update cached canister balance (canister received `amount`)
     accounting::increment_cached_balance(amount);
