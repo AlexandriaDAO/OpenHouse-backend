@@ -96,7 +96,7 @@ impl AccountingModel {
     }
 
     // Each method mirrors exact production logic
-    fn user_deposit(&mut self, user: u64, amount: u64) -> OpResult {
+    pub fn user_deposit(&mut self, user: u64, amount: u64) -> OpResult {
         // Mirror accounting.rs:170-176
         if amount < MIN_USER_DEPOSIT {
              return OpResult::BelowMinimum;
@@ -114,7 +114,7 @@ impl AccountingModel {
         }
     }
 
-    fn user_withdraw(&mut self, user: u64) -> OpResult {
+    pub    fn user_withdraw(&mut self, user: u64) -> OpResult {
         // Mirror accounting.rs:195-261
         // Check user has balance
         if let Some(balance) = self.user_balances.get_mut(&user) {
@@ -130,7 +130,7 @@ impl AccountingModel {
         }
     }
 
-    fn place_bet(&mut self, user: u64, amount: u64, win: bool, multiplier_bps: u64) -> OpResult {
+    pub    fn place_bet(&mut self, user: u64, amount: u64, win: bool, multiplier_bps: u64) -> OpResult {
         // Mirror game.rs:117-182
         
         if amount < MIN_BET {
@@ -179,7 +179,7 @@ impl AccountingModel {
 
     /// Generic bet settlement - mirrors liquidity_pool::settle_bet()
     /// This handles all payout scenarios including partial payouts (Plinko 0.2x)
-    fn settle_bet(&mut self, user: u64, bet_amount: u64, payout_amount: u64) -> OpResult {
+    pub    fn settle_bet(&mut self, user: u64, bet_amount: u64, payout_amount: u64) -> OpResult {
         // Check user has sufficient balance for the bet
         let balance = self.user_balances.entry(user).or_insert(0);
         if *balance < bet_amount {
@@ -227,7 +227,7 @@ impl AccountingModel {
         OpResult::Success
     }
 
-    fn lp_deposit(&mut self, user: u64, amount: u64) -> OpResult {
+    pub    fn lp_deposit(&mut self, user: u64, amount: u64) -> OpResult {
         // Mirror liquidity_pool.rs:126-231
         if amount < MIN_LP_DEPOSIT {
             return OpResult::BelowMinimum;
@@ -281,7 +281,7 @@ impl AccountingModel {
         OpResult::Success
     }
 
-    fn lp_withdraw(&mut self, user: u64) -> OpResult {
+    pub    fn lp_withdraw(&mut self, user: u64) -> OpResult {
         // Mirror liquidity_pool.rs:242-369
         
         let user_shares = *self.lp_shares.get(&user).unwrap_or(&0);
@@ -320,7 +320,7 @@ impl AccountingModel {
         OpResult::Success
     }
 
-    fn withdraw_fees(&mut self) -> OpResult {
+    pub    fn withdraw_fees(&mut self) -> OpResult {
         // Simulate auto_withdraw_parent
         if self.accumulated_fees == 0 {
             return OpResult::Success;
