@@ -187,11 +187,13 @@ export const Crash: React.FC = () => {
         </div>
 
         {/* Main Game Area */}
-        <div className="relative w-full max-w-xl">
+        <div className="relative w-full flex-1 min-h-0 mb-4">
           <CrashCanvas
             rocketStates={rocketStates}
             targetMultiplier={targetCashout}
             rocketsSucceeded={multiResult?.rockets_succeeded ?? 0}
+            width={1600}
+            height={900}
           />
 
           {/* Milestone overlay when any rocket passes target */}

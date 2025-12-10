@@ -11,7 +11,7 @@
 // Game backend actors
 export { default as useDice } from './useDiceActor';
 export { default as usePlinko } from './usePlinkoActor';
-export { default as useBlackjack } from './useBlackjackActor';
+export { default as useRoulette } from './useRouletteActor';
 export { default as useCrash } from './useCrashActor';
 
 // Ledger actor

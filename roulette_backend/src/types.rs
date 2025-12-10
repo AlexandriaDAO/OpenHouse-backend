@@ -99,7 +99,7 @@ impl Hand {
         sum as u8
     }
 
-    pub fn is_blackjack(&self) -> bool {
+    pub fn is_roulette(&self) -> bool {
         self.cards.len() == 2 && self.value() == 21 && !self.is_from_split
     }
 
@@ -139,11 +139,11 @@ pub enum GameResult {
     PlayerWin,
     DealerWin,
     Push,         // Tie
-    Blackjack,    // Player blackjack (3:2 payout)
+    Roulette,    // Player roulette (3:2 payout)
 }
 
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
-pub struct BlackjackGame {
+pub struct RouletteGame {
     pub game_id: u64,
     pub player: Principal,
     pub bet_amount: u64,
@@ -160,7 +160,7 @@ pub struct BlackjackGame {
     pub card_draw_counter: u32,
 }
 
-impl Storable for BlackjackGame {
+impl Storable for RouletteGame {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         Cow::Owned(serde_json::to_vec(self).unwrap())
     }
@@ -174,7 +174,7 @@ impl Storable for BlackjackGame {
     }
 
     const BOUND: ic_stable_structures::storable::Bound = ic_stable_structures::storable::Bound::Bounded {
-        max_size: 2048, // Estimate: Should be plenty for standard blackjack game
+        max_size: 2048, // Estimate: Should be plenty for standard roulette game
         is_fixed_size: false,
     };
 }
@@ -184,7 +184,7 @@ pub struct GameStartResult {
     pub game_id: u64,
     pub player_hand: Hand,
     pub dealer_showing: Card,
-    pub is_blackjack: bool,
+    pub is_roulette: bool,
     pub can_double: bool,
     pub can_split: bool,
 }
@@ -207,7 +207,7 @@ pub struct GameStats {
     pub total_player_wins: u64,
     pub total_dealer_wins: u64,
     pub total_pushes: u64,
-    pub total_blackjacks: u64,
+    pub total_roulettes: u64,
 }
 
 impl Storable for GameStats {

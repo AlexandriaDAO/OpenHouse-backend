@@ -8,7 +8,7 @@
 // pub mod seed;
 // pub mod game;
 
-// pub use types::{Card, Hand, GameResult, GameAction, GameStartResult, ActionResult, GameStats, BlackjackGame};
+// pub use types::{Card, Hand, GameResult, GameAction, GameStartResult, ActionResult, GameStats, RouletteGame};
 
 // // =============================================================================
 // // MEMORY MANAGEMENT
@@ -23,7 +23,7 @@
 
 // #[init]
 // fn init() {
-//     ic_cdk::println!("Blackjack Backend Initialized");
+//     ic_cdk::println!("Roulette Backend Initialized");
 //     defi_accounting::accounting::start_parent_withdrawal_timer();
 //     defi_accounting::start_stats_timer();
 // }
@@ -68,7 +68,7 @@
 // }
 
 // #[query]
-// fn get_game(game_id: u64) -> Option<BlackjackGame> {
+// fn get_game(game_id: u64) -> Option<RouletteGame> {
 //     game::get_game(game_id)
 // }
 
@@ -91,7 +91,7 @@
 
 // #[query]
 // fn greet(name: String) -> String {
-//     format!("Welcome to OpenHouse Blackjack, {}! Hit or Stand?", name)
+//     format!("Welcome to OpenHouse Roulette, {}! Hit or Stand?", name)
 // }
 
 // // === ACCOUNTING ENDPOINTS ===

@@ -1,5 +1,23 @@
 import React, { useEffect, useState } from 'react';
 
+interface RawPolymarketMarket {
+  id: string;
+  question: string;
+  description: string;
+  outcomes: string | string[];
+  outcomePrices: string | string[];
+  volume: string;
+  volumeNum: number;
+  liquidity: string;
+  liquidityNum: number;
+  image: string;
+  icon: string;
+  endDate: string;
+  closed: boolean;
+  active: boolean;
+  slug: string;
+}
+
 interface PolymarketMarket {
   id: string;
   question: string;
@@ -18,6 +36,17 @@ interface PolymarketMarket {
   slug: string;
 }
 
+// Parse outcomes/prices which can be JSON strings or arrays
+const parseArrayField = (field: string | string[]): string[] => {
+  if (Array.isArray(field)) return field;
+  try {
+    const parsed = JSON.parse(field);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
 export const Predict: React.FC = () => {
   const [markets, setMarkets] = useState<PolymarketMarket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,17 +55,26 @@ export const Predict: React.FC = () => {
   useEffect(() => {
     const fetchMarkets = async () => {
       try {
-        const response = await fetch(
-          'https://gamma-api.polymarket.com/markets?limit=50&closed=false&active=true'
-        );
+        // Use CORS proxy for internal development
+        const apiUrl = 'https://gamma-api.polymarket.com/markets?limit=50&closed=false&active=true';
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(apiUrl)}`;
+        const response = await fetch(proxyUrl);
         if (!response.ok) {
           throw new Error('Failed to fetch markets');
         }
-        const data: PolymarketMarket[] = await response.json();
+        const rawData: RawPolymarketMarket[] = await response.json();
+
+        // Parse and normalize the data
+        const data: PolymarketMarket[] = rawData.map(m => ({
+          ...m,
+          outcomes: parseArrayField(m.outcomes),
+          outcomePrices: parseArrayField(m.outcomePrices),
+        }));
 
         // Sort by volume (descending) and take top 10
+        // Filter out markets with no valid outcomes
         const sortedMarkets = data
-          .filter(m => m.volumeNum > 0)
+          .filter(m => m.volumeNum > 0 && m.outcomes.length > 0 && m.outcomePrices.length > 0)
           .sort((a, b) => b.volumeNum - a.volumeNum)
           .slice(0, 10);
 

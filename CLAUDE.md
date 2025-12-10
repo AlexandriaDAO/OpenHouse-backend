@@ -23,7 +23,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 ./deploy.sh --dice-only
 ./deploy.sh --plinko-only
 ./deploy.sh --crash-only
-./deploy.sh --blackjack-only
+./deploy.sh --roulette-only
 
 # Deploy frontend only
 ./deploy.sh --frontend-only
@@ -39,7 +39,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 | **Dice Backend** | `whchi-hyaaa-aaaao-a4ruq-cai` | Dice game logic | - |
 | **Plinko Backend** | `weupr-2qaaa-aaaap-abl3q-cai` | Plinko game logic | - |
 | **Crash Backend** | `fws6k-tyaaa-aaaap-qqc7q-cai` | Crash game logic | - |
-| **Blackjack Backend** | `wvrcw-3aaaa-aaaah-arm4a-cai` | Blackjack game logic | - |
+| **Roulette Backend** | `wvrcw-3aaaa-aaaah-arm4a-cai` | Roulette game logic | - |
 | **OpenHouse Frontend** | `pezw3-laaaa-aaaal-qssoa-cai` | Multi-game router UI | https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io |
 
 ### Frontend Routes
@@ -47,7 +47,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 - `/dice` - Dice game interface
 - `/plinko` - Plinko game interface
 - `/crash` - Crash game interface
-- `/blackjack` - Blackjack game interface
+- `/roulette` - Roulette game interface
 
 ## 🎮 Games Overview
 
@@ -77,14 +77,14 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 - **House Edge**: 1%
 - **Canister**: `crash_backend`
 
-### 4. Blackjack
-- **Mechanics**: Classic blackjack against the dealer
+### 4. Roulette
+- **Mechanics**: Classic roulette against the dealer
 - **Objective**: Get closer to 21 than dealer without busting
 - **Actions**: Hit, Stand, Double Down, Split
 - **Min Bet**: 0.01 USDT
 - **Max Win**: 10 USDT
 - **House Edge**: ~1%
-- **Canister**: `blackjack_backend`
+- **Canister**: `roulette_backend`
 
 ### Future Games
 - **Slots**: Traditional slot machine with crypto themes
@@ -98,7 +98,7 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 vim dice_backend/src/lib.rs
 vim plinko_backend/src/lib.rs
 vim crash_backend/src/lib.rs
-vim blackjack_backend/src/lib.rs
+vim roulette_backend/src/lib.rs
 
 # Frontend changes
 vim openhouse_frontend/dist/index.html
@@ -114,7 +114,7 @@ vim openhouse_frontend/dist/index.html
 ./deploy.sh --dice-only
 ./deploy.sh --plinko-only
 ./deploy.sh --crash-only
-./deploy.sh --blackjack-only
+./deploy.sh --roulette-only
 ./deploy.sh --frontend-only
 ```
 
@@ -137,9 +137,9 @@ dfx canister --network ic call plinko_backend get_multipliers '(16, variant { Hi
 dfx canister --network ic call crash_backend greet '("Player")'
 dfx canister --network ic call crash_backend get_game_state
 
-# Manual testing - Blackjack game
-dfx canister --network ic call blackjack_backend greet '("Player")'
-dfx canister --network ic call blackjack_backend get_stats
+# Manual testing - Roulette game
+dfx canister --network ic call roulette_backend greet '("Player")'
+dfx canister --network ic call roulette_backend get_stats
 
 # Check frontend
 open https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
@@ -188,7 +188,7 @@ get_round(round_id: u64) -> Option<GameRound>
 get_recent_rounds(limit: u32) -> Vec<GameRound>
 ```
 
-### Blackjack Backend
+### Roulette Backend
 ```rust
 // Game methods
 start_game(bet: u64, seed: String) -> Result<GameStartResult, String>
@@ -198,7 +198,7 @@ double_down(game_id: u64) -> Result<ActionResult, String>
 split(game_id: u64) -> Result<ActionResult, String>
 
 // Query functions
-get_game(game_id: u64) -> Option<BlackjackGame>
+get_game(game_id: u64) -> Option<RouletteGame>
 get_stats() -> GameStats
 ```
 
@@ -299,13 +299,13 @@ fn post_upgrade() {
 dfx canister --network ic status dice_backend
 dfx canister --network ic status plinko_backend
 dfx canister --network ic status crash_backend
-dfx canister --network ic status blackjack_backend
+dfx canister --network ic status roulette_backend
 
 # Check recent activity
 dfx canister --network ic call dice_backend get_stats
 dfx canister --network ic call plinko_backend get_stats
 dfx canister --network ic call crash_backend get_game_state
-dfx canister --network ic call blackjack_backend get_stats
+dfx canister --network ic call roulette_backend get_stats
 ```
 
 ## 🚨 Emergency Procedures
@@ -315,7 +315,7 @@ dfx canister --network ic call blackjack_backend get_stats
 dfx canister --network ic call dice_backend pause_game
 dfx canister --network ic call plinko_backend pause_game
 dfx canister --network ic call crash_backend pause_game
-dfx canister --network ic call blackjack_backend pause_game
+dfx canister --network ic call roulette_backend pause_game
 ```
 
 ### Resume Games
@@ -323,7 +323,7 @@ dfx canister --network ic call blackjack_backend pause_game
 dfx canister --network ic call dice_backend resume_game
 dfx canister --network ic call plinko_backend resume_game
 dfx canister --network ic call crash_backend resume_game
-dfx canister --network ic call blackjack_backend resume_game
+dfx canister --network ic call roulette_backend resume_game
 ```
 
 ## 📝 Deployment Checklist
@@ -352,7 +352,7 @@ After deployment:
 - **Dice Backend**: https://dashboard.internetcomputer.org/canister/whchi-hyaaa-aaaao-a4ruq-cai
 - **Plinko Backend**: https://dashboard.internetcomputer.org/canister/weupr-2qaaa-aaaap-abl3q-cai
 - **Crash Backend**: https://dashboard.internetcomputer.org/canister/fws6k-tyaaa-aaaap-qqc7q-cai
-- **Blackjack Backend**: https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai
+- **Roulette Backend**: https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai
 - **VRF Documentation**: https://internetcomputer.org/docs/current/references/ic-interface-spec#ic-raw_rand
 
 ## ⚡ Key Principles

@@ -2,7 +2,7 @@ import React from 'react';
 import { Hand } from './Hand';
 import { Card, CardData } from './Card';
 
-interface BlackjackTableProps {
+interface RouletteTableProps {
   dealerHand: CardData[];
   dealerHidden: boolean;
   playerHands: CardData[][];
@@ -11,7 +11,7 @@ interface BlackjackTableProps {
   gameActive: boolean;
 }
 
-export const BlackjackTable: React.FC<BlackjackTableProps> = ({
+export const RouletteTable: React.FC<RouletteTableProps> = ({
   dealerHand,
   dealerHidden,
   playerHands,

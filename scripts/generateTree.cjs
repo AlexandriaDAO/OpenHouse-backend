@@ -36,7 +36,7 @@ const ignoreFilePrefixes = [
 const rootLevelDirs = [
   'crash_backend',
   'plinko_backend',
-  'blackjack_backend',
+  'roulette_backend',
   'dice_backend',
   'openhouse_frontend',
   'scripts'
@@ -127,7 +127,7 @@ This tree shows the complete file structure of the OpenHouse Casino project with
 ### Key Directories:
 - \`crash_backend/\` - Crash game backend canister
 - \`plinko_backend/\` - Plinko game backend canister
-- \`blackjack_backend/\` - Blackjack game backend canister
+- \`roulette_backend/\` - Roulette game backend canister
 - \`dice_backend/\` - Dice game backend canister
 - \`openhouse_frontend/\` - Multi-game frontend interface
 - \`scripts/\` - Utility scripts

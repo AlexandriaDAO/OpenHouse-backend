@@ -30,7 +30,7 @@ export const OnboardingBanner: React.FC<OnboardingBannerProps> = ({
     gameBalanceContext.balances.dice.game +
     gameBalanceContext.balances.plinko.game +
     gameBalanceContext.balances.crash.game +
-    gameBalanceContext.balances.blackjack.game;
+    gameBalanceContext.balances.roulette.game;
 
   // Check if user has dismissed the "get ckUSDT" banner before
   useEffect(() => {

@@ -13,7 +13,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const isGameRoute = location.pathname.startsWith('/dice') ||
                       location.pathname.startsWith('/plinko') ||
                       location.pathname.startsWith('/crash') ||
-                      location.pathname.startsWith('/blackjack');
+                      location.pathname.startsWith('/roulette');
   const [showModal, setShowModal] = useState(false);
 
   return (

@@ -12,10 +12,10 @@
       "candid": "plinko_backend/plinko_backend.did",
       "specified_id": "weupr-2qaaa-aaaap-abl3q-cai"
     },
-    "blackjack_backend": {
+    "roulette_backend": {
       "type": "rust",
-      "package": "blackjack_backend",
-      "candid": "blackjack_backend/blackjack_backend.did",
+      "package": "roulette_backend",
+      "candid": "roulette_backend/roulette_backend.did",
       "specified_id": "wvrcw-3aaaa-aaaah-arm4a-cai"
     },
     "dice_backend": {
@@ -33,7 +33,7 @@
       "type": "assets",
       "source": ["openhouse_frontend/dist"],
       "specified_id": "pezw3-laaaa-aaaal-qssoa-cai",
-      "dependencies": ["crash_backend", "plinko_backend", "blackjack_backend", "dice_backend"]
+      "dependencies": ["crash_backend", "plinko_backend", "roulette_backend", "dice_backend"]
     }
   },
   "defaults": {

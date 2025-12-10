@@ -5,7 +5,7 @@ interface HandProps {
   cards: CardData[];
   isActive?: boolean;
   label?: string;
-  result?: string | null; // 'Win', 'Loss', 'Push', 'Blackjack'
+  result?: string | null; // 'Win', 'Loss', 'Push'
 }
 
 export const Hand: React.FC<HandProps> = ({ cards, isActive, label, result }) => {
@@ -41,7 +41,7 @@ export const Hand: React.FC<HandProps> = ({ cards, isActive, label, result }) =>
 
   const getResultColor = (res: string | null) => {
     if (!res) return 'bg-gray-700';
-    if (res.includes('Win') || res.includes('Blackjack')) return 'bg-green-600';
+    if (res.includes('Win')) return 'bg-green-600';
     if (res.includes('Push')) return 'bg-yellow-600';
     return 'bg-red-600';
   };

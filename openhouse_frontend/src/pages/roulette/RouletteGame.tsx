@@ -1,24 +1,24 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import useBlackjackActor from '@/hooks/actors/useBlackjackActor';
+import useRouletteActor from '@/hooks/actors/useRouletteActor';
 import useLedgerActor from '@/hooks/actors/useLedgerActor';
 import { GameLayout } from '@/components/game-ui';
 import { BettingRail } from '@/components/betting';
-import { BlackjackTable, CardData } from '@/components/game-specific/blackjack';
+import { RouletteTable, CardData } from '@/components/game-specific/roulette';
 import { useGameBalance } from '@/providers/GameBalanceProvider';
 import { useBalance } from '@/providers/BalanceProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { DECIMALS_PER_CKUSDT, formatUSDT } from '@/types/balance';
 
-const BLACKJACK_BACKEND_CANISTER_ID = 'wvrcw-3aaaa-aaaah-arm4a-cai';
+const ROULETTE_BACKEND_CANISTER_ID = 'wvrcw-3aaaa-aaaah-arm4a-cai';
 
-export function Blackjack() {
-  const { actor } = useBlackjackActor();
+export function Roulette() {
+  const { actor } = useRouletteActor();
   const { actor: ledgerActor } = useLedgerActor();
   const { isAuthenticated } = useAuth();
 
   // Balance
   const { balance: walletBalance, refreshBalance: refreshWalletBalance } = useBalance();
-  const gameBalanceContext = useGameBalance('blackjack');
+  const gameBalanceContext = useGameBalance('roulette');
   const balance = gameBalanceContext.balance;
 
   const handleBalanceRefresh = useCallback(() => {
@@ -73,19 +73,19 @@ export function Blackjack() {
         setGameId(data.game_id);
         setPlayerHands([mapHand(data.player_hand)]);
         setDealerHand([data.dealer_showing]);
-        setDealerHidden(!data.is_blackjack); // Reveal if instant blackjack
+        setDealerHidden(!data.is_roulette); // Reveal if instant roulette
         setCurrentHandIndex(0);
         setCanDouble(data.can_double);
         setCanSplit(data.can_split);
-        setGameActive(!data.is_blackjack); // If blackjack, game over immediately
+        setGameActive(!data.is_roulette); // If roulette, game over immediately
         
-        if (data.is_blackjack) {
+        if (data.is_roulette) {
              // We need to check result. But start_game returns game_id and initial state.
-             // If is_blackjack is true, the game is effectively over on backend, but backend might not return result in GameStartResult.
-             // My backend impl sets is_active=false if blackjack.
+             // If is_roulette is true, the game is effectively over on backend, but backend might not return result in GameStartResult.
+             // My backend impl sets is_active=false if roulette.
              // I should fetch game state or infer result.
-             // If dealer showing Ace/10, they might have blackjack too (Push).
-             // Else Player Blackjack (Win).
+             // If dealer showing Ace/10, they might have roulette too (Push).
+             // Else Player Roulette (Win).
              // Backend handled payout.
              // I'll fetch full game state to be sure or display animation.
              // Let's quickly fetch updated game state.
@@ -192,7 +192,7 @@ export function Blackjack() {
           </div>
         )}
 
-        <BlackjackTable 
+        <RouletteTable
             dealerHand={dealerHand}
             dealerHidden={dealerHidden}
             playerHands={playerHands}
@@ -270,7 +270,7 @@ export function Blackjack() {
             onBalanceRefresh={handleBalanceRefresh}
             disabled={gameActive || isLoading}
             multiplier={2} // Estimated
-            canisterId={BLACKJACK_BACKEND_CANISTER_ID}
+            canisterId={ROULETTE_BACKEND_CANISTER_ID}
             isBalanceLoading={gameBalanceContext.isLoading}
             isBalanceInitialized={gameBalanceContext.isInitialized}
         />

@@ -1,3 +1,3 @@
 export * from './Card';
 export * from './Hand';
-export * from './BlackjackTable';
+export * from './RouletteTable';

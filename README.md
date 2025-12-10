@@ -37,7 +37,7 @@ The name "OpenHouse" is a triple play on words:
 |------|-------------|------------|---------|----------|
 | **Crash** | Multiplier rises until crash - cash out before it's too late | 1% | 1000x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/crash) |
 | **Plinko** | Drop a ball through pegs into multiplier slots | 1% | 1000x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/plinko) |
-| **Blackjack** | Beat the dealer to 21 | ~1% | 2.5x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/blackjack) |
+| **Roulette** | Beat the dealer to 21 | ~1% | 2.5x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/roulette) |
 | **Dice** | Roll over or under your target number | 1% | 100x | [Play](https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io/dice) |
 
 **Frontend**: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
@@ -80,7 +80,7 @@ OpenHouse is built as a modular system where each game runs in its own Internet 
 openhouse/
 ├── crash_backend/          # Crash game canister (fws6k-tyaaa-aaaap-qqc7q-cai)
 ├── plinko_backend/         # Plinko game canister (weupr-2qaaa-aaaap-abl3q-cai)
-├── blackjack_backend/      # Blackjack game canister (wvrcw-3aaaa-aaaah-arm4a-cai)
+├── roulette_backend/      # Roulette game canister (wvrcw-3aaaa-aaaah-arm4a-cai)
 ├── dice_backend/           # Dice game canister (whchi-hyaaa-aaaao-a4ruq-cai)
 └── openhouse_frontend/     # Multi-game UI (pezw3-laaaa-aaaal-qssoa-cai)
 ```
@@ -102,7 +102,7 @@ Each game backend is written in Rust and independently manages:
 # Deploy specific game
 ./deploy.sh --crash-only
 ./deploy.sh --plinko-only
-./deploy.sh --blackjack-only
+./deploy.sh --roulette-only
 ./deploy.sh --dice-only
 
 # Deploy frontend only
@@ -154,10 +154,10 @@ Anyone can:
 - Different multiplier distributions per configuration
 - Min bet: 0.01 USDT | Max win: 1000x
 
-### Blackjack
-- Classic Blackjack rules
+### Roulette
+- Classic Roulette rules
 - Dealer stands on 17
-- Blackjack pays 3:2
+- Roulette pays 3:2
 - Min bet: 0.01 USDT | Max win: 10 USDT
 
 ### Dice
@@ -182,9 +182,9 @@ openhouse/
 ├── plinko_backend/
 │   ├── src/lib.rs           # Plinko game logic
 │   └── plinko_backend.did   # Candid interface
-├── blackjack_backend/
-│   ├── src/lib.rs           # Blackjack game logic
-│   └── blackjack_backend.did # Candid interface
+├── roulette_backend/
+│   ├── src/lib.rs           # Roulette game logic
+│   └── roulette_backend.did # Candid interface
 ├── dice_backend/
 │   ├── src/lib.rs           # Dice game logic
 │   └── dice_backend.did     # Candid interface
@@ -207,8 +207,8 @@ dfx canister --network ic call crash_backend get_game_state
 dfx canister --network ic call plinko_backend get_stats
 dfx canister --network ic call plinko_backend get_multipliers '(16, variant { High })'
 
-# Test Blackjack backend
-dfx canister --network ic call blackjack_backend get_stats
+# Test Roulette backend
+dfx canister --network ic call roulette_backend get_stats
 
 # Test Dice backend
 dfx canister --network ic call dice_backend get_stats
@@ -225,7 +225,7 @@ Check canister status and health:
 # View canister cycles
 dfx canister --network ic status crash_backend
 dfx canister --network ic status plinko_backend
-dfx canister --network ic status blackjack_backend
+dfx canister --network ic status roulette_backend
 dfx canister --network ic status dice_backend
 
 # View on IC Dashboard

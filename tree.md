@@ -3,9 +3,9 @@
 Generated on: 2025-12-06T11:45:43.666Z
 
 ```
-├── blackjack_backend/
+├── roulette_backend/
 │   ├── Cargo.toml (19 lines)
-│   ├── blackjack_backend.did (155 lines)
+│   ├── roulette_backend.did (155 lines)
 │   └── src/
 │       ├── game.rs (619 lines)
 │       ├── lib.rs (218 lines)
@@ -135,8 +135,8 @@ Generated on: 2025-12-06T11:45:43.666Z
 │   │   │   │   ├── index.ts (7 lines)
 │   │   │   │   └── types.ts (135 lines)
 │   │   │   ├── game-specific/
-│   │   │   │   ├── blackjack/
-│   │   │   │   │   ├── BlackjackTable.tsx (56 lines)
+│   │   │   │   ├── roulette/
+│   │   │   │   │   ├── RouletteTable.tsx (56 lines)
 │   │   │   │   │   ├── Card.tsx (68 lines)
 │   │   │   │   │   ├── Hand.tsx (73 lines)
 │   │   │   │   │   └── index.ts (4 lines)
@@ -206,7 +206,7 @@ Generated on: 2025-12-06T11:45:43.666Z
 │   │   ├── hooks/
 │   │   │   ├── actors/
 │   │   │   │   ├── index.ts (22 lines)
-│   │   │   │   ├── useBlackjackActor.ts (14 lines)
+│   │   │   │   ├── useRouletteActor.ts (14 lines)
 │   │   │   │   ├── useCrashActor.ts (14 lines)
 │   │   │   │   ├── useDiceActor.ts (14 lines)
 │   │   │   │   ├── useGameActor.ts (37 lines)
@@ -247,10 +247,10 @@ Generated on: 2025-12-06T11:45:43.666Z
 │   │   │   ├── Dice.tsx (3 lines)
 │   │   │   ├── Home.tsx (64 lines)
 │   │   │   ├── Wallet.tsx (472 lines)
-│   │   │   ├── blackjack/
-│   │   │   │   ├── BlackjackGame.tsx (281 lines)
-│   │   │   │   ├── BlackjackLayout.tsx (15 lines)
-│   │   │   │   ├── BlackjackLiquidity.tsx (6 lines)
+│   │   │   ├── roulette/
+│   │   │   │   ├── RouletteGame.tsx (281 lines)
+│   │   │   │   ├── RouletteLayout.tsx (15 lines)
+│   │   │   │   ├── RouletteLiquidity.tsx (6 lines)
 │   │   │   │   └── index.ts (4 lines)
 │   │   │   ├── dice/
 │   │   │   │   ├── DiceGame.tsx (470 lines)
@@ -331,7 +331,7 @@ This tree shows the complete file structure of the OpenHouse Casino project with
 ### Key Directories:
 - `crash_backend/` - Crash game backend canister
 - `plinko_backend/` - Plinko game backend canister
-- `blackjack_backend/` - Blackjack game backend canister
+- `roulette_backend/` - Roulette game backend canister
 - `dice_backend/` - Dice game backend canister
 - `openhouse_frontend/` - Multi-game frontend interface
 - `scripts/` - Utility scripts

@@ -10,7 +10,7 @@ import { Home } from './pages/Home';
 import { DiceGame } from './pages/dice';
 import { PlinkoGame } from './pages/plinko';
 import { Crash } from './pages/Crash';
-import { BlackjackGame } from './pages/blackjack';
+import { RouletteGame } from './pages/roulette';
 import { Admin } from './pages/Admin';
 import { Wallet } from './pages/Wallet';
 import { Liquidity } from './pages/Liquidity';
@@ -30,7 +30,7 @@ function App() {
                   <Route path="/dice" element={<DiceGame />} />
                   <Route path="/plinko" element={<PlinkoGame />} />
                   <Route path="/crash" element={<AdminRoute><Crash /></AdminRoute>} />
-                  <Route path="/blackjack" element={<AdminRoute><BlackjackGame /></AdminRoute>} />
+                  <Route path="/roulette" element={<AdminRoute><RouletteGame /></AdminRoute>} />
                   <Route path="/wallet" element={<Wallet />} />
                   <Route path="/liquidity" element={<Liquidity />} />
                   <Route path="/predict" element={<Predict />} />

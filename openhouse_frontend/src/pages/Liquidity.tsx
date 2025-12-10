@@ -98,21 +98,21 @@ function AggregatedStats() {
   // Fetch stats for all games
   const diceStats = usePoolStats('dice');
   const plinkoStats = usePoolStats('plinko');
-  const blackjackStats = usePoolStats('blackjack');
+  const rouletteStats = usePoolStats('roulette');
 
   const diceApy = useApyData('dice');
   const plinkoApy = useApyData('plinko');
-  const blackjackApy = useApyData('blackjack');
+  const rouletteApy = useApyData('roulette');
 
   // Calculate totals
-  const totalPoolSize = [diceStats, plinkoStats, blackjackStats]
+  const totalPoolSize = [diceStats, plinkoStats, rouletteStats]
     .reduce((sum, s) => sum + (s.poolStats ? Number(s.poolStats.pool_reserve) : 0), 0);
 
-  const totalProviders = [diceStats, plinkoStats, blackjackStats]
+  const totalProviders = [diceStats, plinkoStats, rouletteStats]
     .reduce((sum, s) => sum + (s.poolStats ? Number(s.poolStats.total_liquidity_providers) : 0), 0);
 
   // Average APY (only include games with data)
-  const apyValues = [diceApy, plinkoApy, blackjackApy]
+  const apyValues = [diceApy, plinkoApy, rouletteApy]
     .filter(a => a.apy7)
     .map(a => a.apy7!.actual_apy_percent);
   const avgApy = apyValues.length > 0

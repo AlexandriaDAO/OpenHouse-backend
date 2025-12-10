@@ -39,7 +39,7 @@ const STATS_MEMORY_ID: MemoryId = MemoryId::new(41);
 // =============================================================================
 
 thread_local! {
-    static GAMES: RefCell<StableBTreeMap<u64, BlackjackGame, VirtualMemory<DefaultMemoryImpl>>> = RefCell::new(
+    static GAMES: RefCell<StableBTreeMap<u64, RouletteGame, VirtualMemory<DefaultMemoryImpl>>> = RefCell::new(
         StableBTreeMap::init(
             crate::MEMORY_MANAGER.with(|m| m.borrow().get(GAMES_MEMORY_ID))
         )
@@ -74,7 +74,7 @@ fn get_next_game_id() -> u64 {
 ///
 /// ## House Edge Impact
 /// Using an infinite shoe slightly increases the house edge compared to
-/// finite deck blackjack:
+/// finite deck roulette:
 /// - Single deck: ~0.17% house edge
 /// - 8-deck shoe: ~0.46% house edge
 /// - Infinite shoe: ~0.47% house edge
@@ -158,7 +158,7 @@ fn update_stats(result: &GameResult) {
             GameResult::PlayerWin => stats.total_player_wins += 1,
             GameResult::DealerWin => stats.total_dealer_wins += 1,
             GameResult::Push => stats.total_pushes += 1,
-            GameResult::Blackjack => stats.total_blackjacks += 1,
+            GameResult::Roulette => stats.total_roulettes += 1,
         }
         stats_map.insert(0, stats);
     });
@@ -184,7 +184,7 @@ pub async fn start_game(bet_amount: u64, client_seed: String, caller: Principal)
     }
 
     // Check House Limit
-    let max_payout = (bet_amount as f64 * 2.5) as u64; // Blackjack pays 3:2 + bet back = 2.5x
+    let max_payout = (bet_amount as f64 * 2.5) as u64; // Roulette pays 3:2 + bet back = 2.5x
     let max_allowed = accounting::get_max_allowed_payout();
     if max_allowed == 0 {
         return Err("House balance not initialized".to_string());
@@ -216,26 +216,26 @@ pub async fn start_game(bet_amount: u64, client_seed: String, caller: Principal)
     dealer_hand.add_card(d_card1.clone());
     // Hidden card stored separately until reveal
 
-    let is_blackjack = player_hand.is_blackjack();
+    let is_roulette = player_hand.is_roulette();
     let can_split = player_hand.can_split();
     let can_double = true; // Always allowed on first two cards
     
     let game_id = get_next_game_id();
     
-    // Handle Instant Blackjack
+    // Handle Instant Roulette
     let mut payout = 0;
     let mut results = vec![None];
     let mut game_over = false;
     
-    if is_blackjack {
-        // Check if dealer also has blackjack?
+    if is_roulette {
+        // Check if dealer also has roulette?
         // Standard rule: if dealer showing Ace or Ten, they peek.
-        // If dealer also has blackjack, it's a Push.
+        // If dealer also has roulette, it's a Push.
         // If dealer doesn't, Player wins 3:2.
         // For simplicity/fairness in this version:
-        // We reveal dealer card immediately if player has blackjack.
+        // We reveal dealer card immediately if player has roulette.
         dealer_hand.add_card(d_card2.clone()); // Reveal
-        if dealer_hand.is_blackjack() {
+        if dealer_hand.is_roulette() {
             // Push
             payout = bet_amount;
             results = vec![Some(GameResult::Push)];
@@ -243,8 +243,8 @@ pub async fn start_game(bet_amount: u64, client_seed: String, caller: Principal)
         } else {
             // Player Win 3:2
             payout = (bet_amount as f64 * 2.5) as u64;
-            results = vec![Some(GameResult::Blackjack)];
-            update_stats(&GameResult::Blackjack);
+            results = vec![Some(GameResult::Roulette)];
+            update_stats(&GameResult::Roulette);
         }
         
         // Settle
@@ -254,20 +254,20 @@ pub async fn start_game(bet_amount: u64, client_seed: String, caller: Principal)
                  // Refund bet on failure
                  let current_bal = accounting::get_balance(caller);
                  accounting::update_balance(caller, current_bal + bet_amount)?;
-                 return Err(format!("House cannot afford blackjack payout: {}", e));
+                 return Err(format!("House cannot afford roulette payout: {}", e));
              }
 
              // Pool succeeded - credit user
              let new_bal = accounting::get_balance(caller) + payout;
              accounting::update_balance(caller, new_bal)?;
         } else {
-             // Loss (impossible for Blackjack but for general logic)
+             // Loss (impossible for Roulette but for general logic)
              let _ = liquidity_pool::settle_bet(bet_amount, 0);
         }
         game_over = true;
     }
 
-    let game = BlackjackGame {
+    let game = RouletteGame {
         game_id,
         player: caller,
         bet_amount,
@@ -292,7 +292,7 @@ pub async fn start_game(bet_amount: u64, client_seed: String, caller: Principal)
         game_id,
         player_hand,
         dealer_showing: d_card1,
-        is_blackjack,
+        is_roulette,
         can_double: !game_over,
         can_split: !game_over && can_split,
     })
@@ -514,7 +514,7 @@ pub async fn split(game_id: u64, caller: Principal) -> Result<ActionResult, Stri
     })
 }
 
-async fn resolve_game(mut game: BlackjackGame, caller: Principal) -> Result<ActionResult, String> {
+async fn resolve_game(mut game: RouletteGame, caller: Principal) -> Result<ActionResult, String> {
     // Reveal dealer card
     if let Some(hidden) = game.dealer_hidden_card.take() {
         game.dealer_hand.add_card(hidden);
@@ -609,7 +609,7 @@ async fn resolve_game(mut game: BlackjackGame, caller: Principal) -> Result<Acti
     })
 }
 
-pub fn get_game(game_id: u64) -> Option<BlackjackGame> {
+pub fn get_game(game_id: u64) -> Option<RouletteGame> {
     GAMES.with(|g| g.borrow().get(&game_id))
 }
 

@@ -14,7 +14,7 @@ type GameResult = variant {
   PlayerWin;
   DealerWin;
   Push;
-  Blackjack;
+  Roulette;
 };
 
 type GameAction = variant {
@@ -24,7 +24,7 @@ type GameAction = variant {
   Split;
 };
 
-type BlackjackGame = record {
+type RouletteGame = record {
   game_id: nat64;
   player: principal;
   bet_amount: nat64;
@@ -43,7 +43,7 @@ type GameStartResult = record {
   game_id: nat64;
   player_hand: Hand;
   dealer_showing: Card;
-  is_blackjack: bool;
+  is_roulette: bool;
   can_double: bool;
   can_split: bool;
 };
@@ -64,7 +64,7 @@ type GameStats = record {
   total_player_wins: nat64;
   total_dealer_wins: nat64;
   total_pushes: nat64;
-  total_blackjacks: nat64;
+  total_roulettes: nat64;
 };
 
 type AccountingStats = record {
@@ -114,7 +114,7 @@ service : {
   split: (nat64) -> (variant { Ok: ActionResult; Err: text });
 
   // Query methods
-  get_game: (nat64) -> (opt BlackjackGame) query;
+  get_game: (nat64) -> (opt RouletteGame) query;
   get_stats: () -> (GameStats) query;
   greet: (text) -> (text) query;
 

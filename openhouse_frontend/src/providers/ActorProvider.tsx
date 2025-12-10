@@ -11,7 +11,7 @@ import {
 import { type DelegationIdentity, isDelegationValid } from '@dfinity/identity';
 import useCrashActor from '../hooks/actors/useCrashActor';
 import usePlinkoActor from '../hooks/actors/usePlinkoActor';
-import useBlackjackActor from '../hooks/actors/useBlackjackActor';
+import useRouletteActor from '../hooks/actors/useRouletteActor';
 import useDiceActor from '../hooks/actors/useDiceActor';
 import useLedgerActor from '../hooks/actors/useLedgerActor';
 
@@ -103,7 +103,7 @@ export function ActorProvider() {
   // Initialize all actor hooks
   const crash = useCrashActor();
   const plinko = usePlinkoActor();
-  const blackjack = useBlackjackActor();
+  const roulette = useRouletteActor();
   const dice = useDiceActor();
   const ledger = useLedgerActor();
 
@@ -202,7 +202,7 @@ export function ActorProvider() {
     ensureAllInitialized().then(() => {
       crash.setInterceptors(interceptors);
       plinko.setInterceptors(interceptors);
-      blackjack.setInterceptors(interceptors);
+      roulette.setInterceptors(interceptors);
       dice.setInterceptors(interceptors);
       ledger.setInterceptors(interceptors);
     });

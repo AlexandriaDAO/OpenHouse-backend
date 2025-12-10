@@ -59,12 +59,12 @@ export const GAME_REGISTRY: Record<string, GameConfig> = {
       gradient: 'from-orange-500/5 to-transparent',
     },
   },
-  blackjack: {
-    id: 'blackjack',
-    name: 'Blackjack',
+  roulette: {
+    id: 'roulette',
+    name: 'Roulette',
     icon: '🃏',
     canisterId: 'wvrcw-3aaaa-aaaah-arm4a-cai',
-    routes: { base: '/blackjack' },
+    routes: { base: '/roulette' },
     liquidity: { enabled: false, minDeposit: 10, hasStatistics: false, withdrawalFeePercent: 1 },
     theme: {
       primary: 'green-500',

@@ -1,6 +1,6 @@
 #!/bin/bash
 # OpenHouse Multi-Game Casino Deployment Script - Mainnet Only
-# Usage: ./deploy.sh [--crash-only|--plinko-only|--blackjack-only|--dice-only|--frontend-only] [--test]
+# Usage: ./deploy.sh [--crash-only|--plinko-only|--roulette-only|--dice-only|--frontend-only] [--test]
 
 set -e
 
@@ -21,8 +21,8 @@ while [[ $# -gt 0 ]]; do
             DEPLOY_TARGET="plinko"
             shift
             ;;
-        --blackjack-only)
-            DEPLOY_TARGET="blackjack"
+        --roulette-only)
+            DEPLOY_TARGET="roulette"
             shift
             ;;
         --dice-only)
@@ -45,7 +45,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --crash-only       Deploy only crash backend"
             echo "  --plinko-only      Deploy only plinko backend"
-            echo "  --blackjack-only   Deploy only blackjack backend (Rust)"
+            echo "  --roulette-only   Deploy only roulette backend (Rust)"
             echo "  --dice-only        Deploy only dice backend"
             echo "  --frontend-only    Deploy only the frontend"
             echo "  --test             Run post-deployment tests"
@@ -54,7 +54,7 @@ while [[ $# -gt 0 ]]; do
             echo "Examples:"
             echo "  ./deploy.sh                    # Deploy everything to mainnet"
             echo "  ./deploy.sh --crash-only       # Deploy only crash backend"
-            echo "  ./deploy.sh --blackjack-only   # Deploy only blackjack backend"
+            echo "  ./deploy.sh --roulette-only   # Deploy only roulette backend"
             echo "  ./deploy.sh --test             # Deploy and run tests"
             echo ""
             echo "IMPORTANT: This script ALWAYS deploys to MAINNET"
@@ -80,7 +80,7 @@ echo ""
 echo "Mainnet Canister IDs:"
 echo "  Crash Backend:     fws6k-tyaaa-aaaap-qqc7q-cai"
 echo "  Plinko Backend:    weupr-2qaaa-aaaap-abl3q-cai"
-echo "  Blackjack Backend: wvrcw-3aaaa-aaaah-arm4a-cai"
+echo "  Roulette Backend: wvrcw-3aaaa-aaaah-arm4a-cai"
 echo "  Dice Backend:      whchi-hyaaa-aaaao-a4ruq-cai"
 echo "  Frontend:          pezw3-laaaa-aaaal-qssoa-cai"
 echo "================================================"
@@ -149,26 +149,26 @@ deploy_plinko() {
     echo ""
 }
 
-# Function to deploy blackjack backend
-deploy_blackjack() {
+# Function to deploy roulette backend
+deploy_roulette() {
     echo "================================================"
-    echo "Deploying Blackjack Backend Canister"
+    echo "Deploying Roulette Backend Canister"
     echo "=================================================="
-    echo "Deploying Blackjack Backend Canister"
+    echo "Deploying Roulette Backend Canister"
     echo "=================================================="
 
     # Build the backend canister
-    echo "Building blackjack backend canister..."
-    cargo build --release --target wasm32-unknown-unknown --package blackjack_backend
+    echo "Building roulette backend canister..."
+    cargo build --release --target wasm32-unknown-unknown --package roulette_backend
 
     # Skip candid extraction - using manually created .did file
     echo "Using pre-defined candid interface..."
 
     # Deploy to mainnet
-    echo "Deploying blackjack backend to mainnet..."
-    dfx deploy blackjack_backend --network ic
+    echo "Deploying roulette backend to mainnet..."
+    dfx deploy roulette_backend --network ic
 
-    echo "Blackjack backend deployment completed!"
+    echo "Roulette backend deployment completed!"
     echo ""
 }
 
@@ -203,7 +203,7 @@ deploy_frontend() {
     echo "Regenerating backend declarations from Candid interfaces..."
     dfx generate crash_backend 2>/dev/null || echo "Warning: Could not generate crash_backend declarations"
     dfx generate plinko_backend 2>/dev/null || echo "Warning: Could not generate plinko_backend declarations"
-    dfx generate blackjack_backend 2>/dev/null || echo "Warning: Could not generate blackjack_backend declarations"
+    dfx generate roulette_backend 2>/dev/null || echo "Warning: Could not generate roulette_backend declarations"
     dfx generate dice_backend 2>/dev/null || echo "Warning: Could not generate dice_backend declarations"
 
     # Sync declarations
@@ -257,9 +257,9 @@ run_tests() {
     echo "Testing plinko backend canister..."
     dfx canister --network ic call plinko_backend greet '("Tester")' 2>/dev/null || echo "Plinko backend test method not yet implemented"
 
-    # Test blackjack backend
-    echo "Testing blackjack backend canister..."
-    dfx canister --network ic call blackjack_backend greet '("Tester")' 2>/dev/null || echo "Blackjack backend test method not yet implemented"
+    # Test roulette backend
+    echo "Testing roulette backend canister..."
+    dfx canister --network ic call roulette_backend greet '("Tester")' 2>/dev/null || echo "Roulette backend test method not yet implemented"
 
     # Test dice backend
     echo "Testing dice backend canister..."
@@ -283,10 +283,10 @@ main() {
             deploy_crash
             ;;
         plinko)
-            deploy_plinko
+            # deploy_plinko
             ;;
-        blackjack)
-            deploy_blackjack
+        roulette)
+            deploy_roulette
             ;;
         dice)
             # deploy_dice
@@ -297,7 +297,7 @@ main() {
         all)
             deploy_crash
             deploy_plinko
-            deploy_blackjack
+            deploy_roulette
             deploy_dice
             deploy_frontend
             ;;
@@ -312,7 +312,7 @@ main() {
     echo "=================================================="
     echo "Crash Backend:     https://dashboard.internetcomputer.org/canister/fws6k-tyaaa-aaaap-qqc7q-cai"
     echo "Plinko Backend:    https://dashboard.internetcomputer.org/canister/weupr-2qaaa-aaaap-abl3q-cai"
-    echo "Blackjack Backend: https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai"
+    echo "Roulette Backend: https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai"
     echo "Dice Backend:      https://dashboard.internetcomputer.org/canister/whchi-hyaaa-aaaao-a4ruq-cai"
     echo "Frontend:          https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io"
     echo ""

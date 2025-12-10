@@ -8,7 +8,7 @@ Verify that deployed canisters match this open-source code.
 |------|-------------|-------------|
 | Plinko | `weupr-2qaaa-aaaap-abl3q-cai` | `9a55f67401ca119308a02fc0fd8ce0e26e005ccb99f4cea420fc9d00326a66b0` |
 | Crash | `fws6k-tyaaa-aaaap-qqc7q-cai` | `1c6b9aceeafeaaa3038d3c66e6d956861a2d1649620665bafcacd0f0a1d5773b` |
-| Blackjack | `wvrcw-3aaaa-aaaah-arm4a-cai` | `11829c7099b7a29e255179fcb37faded45d4e7318252c8d948a9d1f665f8d6b5` |
+| Roulette | `wvrcw-3aaaa-aaaah-arm4a-cai` | `11829c7099b7a29e255179fcb37faded45d4e7318252c8d948a9d1f665f8d6b5` |
 | Dice | `whchi-hyaaa-aaaao-a4ruq-cai` | `25c41b51cd48b98c73972138b34bfc3ac8a3699db734d6c4143eca5a06730721` |
 
 ## How to Verify
@@ -67,7 +67,7 @@ For reproducible builds, these settings are required:
 |------|------------|------------|
 | Plinko | 1% | IC VRF |
 | Crash | 1% | IC VRF |
-| Blackjack | ~1% | IC VRF |
+| Roulette | ~1% | IC VRF |
 | Dice | 1% | IC VRF |
 
 All games use the Internet Computer's Verifiable Random Function (raw_rand) for provably fair randomness.
