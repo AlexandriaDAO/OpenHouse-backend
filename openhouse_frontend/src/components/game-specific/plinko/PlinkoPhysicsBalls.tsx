@@ -127,6 +127,10 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
 
       console.log(`[PlinkoPhysicsBalls] Creating ${fillBallCount} balls with stagger ${staggerMs}ms`);
 
+      // IMPORTANT: Set expected ball count BEFORE creating balls
+      // This ensures areBallsSettled() won't return true until all balls are created
+      engineRef.current.setExpectedBallCount(fillBallCount);
+
       // Drop balls into bucket with stagger - IDs 0 to fillBallCount-1
       for (let i = 0; i < fillBallCount; i++) {
         engineRef.current.dropBallIntoBucket(i, i * staggerMs);

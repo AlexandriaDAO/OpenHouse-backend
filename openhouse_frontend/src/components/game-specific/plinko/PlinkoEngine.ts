@@ -57,6 +57,9 @@ export class PlinkoPhysicsEngine {
     GATE_HEIGHT: 4,
   };
 
+  // Track expected number of balls for filling phase
+  private expectedBallCount: number = 0;
+
   // Ball friction by row count (from open source, tuned for expected payout)
   private static frictionAirByRowCount: Record<number, number> = {
     8: 0.0395,
@@ -341,6 +344,7 @@ export class PlinkoPhysicsEngine {
    * Reset bucket for next round (recreate gate and walls).
    */
   public resetBucket(): void {
+    console.log('[PlinkoEngine] resetBucket called');
     // Remove old walls if exist
     if (this.bucketWalls.length > 0) {
       Matter.Composite.remove(this.engine.world, this.bucketWalls);
@@ -351,6 +355,7 @@ export class PlinkoPhysicsEngine {
     this.bucketWalls = [];
     this.bucketGate = null;
     this.isBucketOpen = false;
+    this.expectedBallCount = 0; // Reset for next round
 
     // Recreate bucket for next round
     this.createBucket();
@@ -366,9 +371,25 @@ export class PlinkoPhysicsEngine {
   }
 
   /**
+   * Set the expected number of balls for the filling phase.
+   * Must be called before dropBallIntoBucket to ensure areBallsSettled works correctly.
+   */
+  public setExpectedBallCount(count: number): void {
+    this.expectedBallCount = count;
+    console.log(`[PlinkoEngine] Expected ball count set to ${count}`);
+  }
+
+  /**
    * Check if all balls in bucket have settled (low velocity).
+   * Returns false until ALL expected balls have been created AND settled.
    */
   public areBallsSettled(): boolean {
+    // Don't settle until all expected balls have been created
+    if (this.balls.size < this.expectedBallCount) {
+      console.log(`[PlinkoEngine] areBallsSettled: false (only ${this.balls.size}/${this.expectedBallCount} balls created)`);
+      return false;
+    }
+
     const velocityThreshold = 0.3;
     for (const ball of this.balls.values()) {
       const speed = Math.sqrt(ball.velocity.x ** 2 + ball.velocity.y ** 2);
@@ -376,6 +397,7 @@ export class PlinkoPhysicsEngine {
         return false;
       }
     }
+    console.log(`[PlinkoEngine] areBallsSettled: true (all ${this.balls.size} balls settled)`);
     return this.balls.size > 0;
   }
 
