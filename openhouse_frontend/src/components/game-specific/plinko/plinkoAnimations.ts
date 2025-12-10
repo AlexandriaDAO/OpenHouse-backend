@@ -53,7 +53,7 @@ export const PLINKO_LAYOUT = {
   // Colors (Tailwind-compatible) - Aligned with OpenHouse brand
   COLORS: {
     peg: '#e8e8e8',
-    ball: '#39FF14',      // Brand turquoise
+    ball: '#E8D5B5',      // Champagne gold
     win: '#00E19B',       // Brand green
     lose: '#ED0047',      // Brand red
     board: 'transparent',
@@ -66,12 +66,12 @@ export const PLINKO_LAYOUT = {
 
 // Multiplier slot colors - reversed for outcome visualization
 // Center = LOW multipliers = losses = RED
-// Edges = HIGH multipliers = big wins = GREEN
+// Edges = HIGH multipliers = big wins = PURPLE
 export const BUCKET_COLORS = {
-  // High multiplier (edges) - GREEN (big wins!)
+  // High multiplier (edges) - PURPLE (big wins!)
   high: {
-    bg: { r: 0, g: 225, b: 155 },      // Brand green #00E19B
-    shadow: { r: 0, g: 140, b: 96 },
+    bg: { r: 59, g: 0, b: 185 },       // Brand purple #3B00B9
+    shadow: { r: 35, g: 0, b: 110 },
   },
   // Low multiplier (center) - RED (losses)
   low: {
@@ -110,7 +110,7 @@ export function getBucketColors(index: number, totalBuckets: number): {
     shadow: lerpColor(BUCKET_COLORS.low.shadow, BUCKET_COLORS.high.shadow, t),
     glow: lerpColor(
       { r: 237, g: 50, b: 100 },   // Red glow at center (losses)
-      { r: 0, g: 255, b: 180 },    // Green glow at edges (wins)
+      { r: 100, g: 50, b: 255 },   // Purple glow at edges (wins)
       t
     ),
   };

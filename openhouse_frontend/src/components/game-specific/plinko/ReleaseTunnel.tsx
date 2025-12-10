@@ -25,7 +25,8 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
   const centerX = BOARD_WIDTH / 2;
 
   // Calculate dynamic width based on first row pins (matching physics engine exactly)
-  const pinDistanceX = (BOARD_WIDTH - PADDING_X * 2) / (2 + rows);
+  // Physics uses: / (lastRowPinCount - 1) where lastRowPinCount = 2 + rows
+  const pinDistanceX = (BOARD_WIDTH - PADDING_X * 2) / (2 + rows - 1);
   const rowPaddingX = PADDING_X + ((rows - 1) * pinDistanceX) / 2;
   const firstRowSpan = (BOARD_WIDTH - rowPaddingX * 2);
   const bucketWidth = Math.min(140, firstRowSpan - 20);
@@ -42,6 +43,7 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
   const bucketHeight = BUCKET.BOTTOM_Y - BUCKET.TOP_Y;
 
   // Calculate ball positions - box shape with consistent width
+  // Balls can now extend off-screen (negative Y) since roof is removed
   const boxBalls = useMemo(() => {
     const balls: { x: number; y: number; delay: number }[] = [];
     const ballDiameter = ballRadius * 2;
@@ -50,11 +52,12 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
     // Calculate how many balls fit per row
     const ballsPerRow = Math.floor((BUCKET.WIDTH - 8) / spacing);
 
-    // Stack balls from bottom up inside the box
+    // Stack balls from bottom up - no upper limit since container is open-topped
     let currentY = BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT - ballRadius - 2;
     let ballIndex = 0;
 
-    while (ballIndex < ballCount && currentY > BUCKET.TOP_Y + ballRadius) {
+    // Allow balls to stack up to -80 (off-screen) instead of stopping at TOP_Y
+    while (ballIndex < ballCount && currentY > -80) {
       const actualBallsInRow = Math.min(ballsPerRow, ballCount - ballIndex);
       const rowWidth = actualBallsInRow * spacing - 2;
       const startX = -rowWidth / 2 + ballRadius;
@@ -81,15 +84,31 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
       {/* SVG definitions */}
       <defs>
         <radialGradient id="tunnelBallGradient" cx="35%" cy="35%" r="60%">
-          <stop offset="0%" stopColor="#b3ffb3" />
-          <stop offset="30%" stopColor="#39FF14" />
-          <stop offset="70%" stopColor="#2ad912" />
-          <stop offset="100%" stopColor="#1a8a0a" />
+          <stop offset="0%" stopColor="#FFFFFF" />
+          <stop offset="30%" stopColor="#E2E8F0" />
+          <stop offset="70%" stopColor="#94A3B8" />
+          <stop offset="100%" stopColor="#475569" />
         </radialGradient>
 
+        {/* Container interior - darker, more visible background - Cyber dark */}
         <linearGradient id="boxGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#1a202c" stopOpacity="0.2" />
-          <stop offset="100%" stopColor="#2d3748" stopOpacity="0.2" />
+          <stop offset="0%" stopColor="#1a1a2e" stopOpacity="0.8" />
+          <stop offset="100%" stopColor="#0d0d1a" stopOpacity="0.9" />
+        </linearGradient>
+
+        {/* Wall gradient for 3D metallic depth - Dark Steel/Tech */}
+        <linearGradient id="wallGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#4a4a5a" stopOpacity="0.9" />
+          <stop offset="50%" stopColor="#2d2d3d" stopOpacity="0.7" />
+          <stop offset="100%" stopColor="#1a1a2e" stopOpacity="0.9" />
+        </linearGradient>
+
+        {/* Gate metallic gradient - Dark Tech */}
+        <linearGradient id="gateGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#5c5c6c" />
+          <stop offset="40%" stopColor="#3d3d4d" />
+          <stop offset="70%" stopColor="#262636" />
+          <stop offset="100%" stopColor="#121218" />
         </linearGradient>
 
         {/* Drop shadow filter to match board balls */}
@@ -97,38 +116,84 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
           <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000" floodOpacity="0.3" />
         </filter>
 
-        {/* Clip path for box shape */}
+        {/* Container drop shadow filter */}
+        <filter id="containerShadow" x="-20%" y="-10%" width="140%" height="130%">
+          <feDropShadow dx="2" dy="4" stdDeviation="3" floodColor="#000" floodOpacity="0.5" />
+        </filter>
+
+        {/* Clip path for box shape - extended upward for off-screen balls */}
         <clipPath id="bucketClip">
           <rect
             x={-BUCKET.WIDTH/2}
-            y={BUCKET.TOP_Y}
+            y={-100}
             width={BUCKET.WIDTH}
-            height={BUCKET.BOTTOM_Y - BUCKET.TOP_Y}
+            height={BUCKET.BOTTOM_Y + 100}
           />
         </clipPath>
       </defs>
 
-      {/* Box container - subtle turquoise outline */}
-      <rect
-        x={-BUCKET.WIDTH/2}
-        y={BUCKET.TOP_Y}
-        width={BUCKET.WIDTH}
-        height={BUCKET.BOTTOM_Y - BUCKET.TOP_Y}
-        fill="url(#boxGradient)"
-        stroke="rgba(57, 255, 20, 0.3)"
-        strokeWidth={1}
-        rx={4}
-      />
+      {/* Container with drop shadow */}
+      <g filter="url(#containerShadow)">
+        {/* U-shaped container - open top extends off-screen */}
+        <path
+          d={`
+            M ${-BUCKET.WIDTH/2} ${-50}
+            L ${-BUCKET.WIDTH/2} ${BUCKET.BOTTOM_Y}
+            L ${BUCKET.WIDTH/2} ${BUCKET.BOTTOM_Y}
+            L ${BUCKET.WIDTH/2} ${-50}
+          `}
+          fill="url(#boxGradient)"
+          stroke="none"
+        />
+
+        {/* Outer wall stroke - shadow side (darker) */}
+        <path
+          d={`
+            M ${-BUCKET.WIDTH/2 - 1.5} ${-50}
+            L ${-BUCKET.WIDTH/2 - 1.5} ${BUCKET.BOTTOM_Y + 1}
+            L ${BUCKET.WIDTH/2 + 1.5} ${BUCKET.BOTTOM_Y + 1}
+            L ${BUCKET.WIDTH/2 + 1.5} ${-50}
+          `}
+          fill="none"
+          stroke="#1a1a2e"
+          strokeWidth={3}
+        />
+
+        {/* Inner wall stroke - highlight side (Tech Green Accent) */}
+        <path
+          d={`
+            M ${-BUCKET.WIDTH/2 + 1} ${-50}
+            L ${-BUCKET.WIDTH/2 + 1} ${BUCKET.BOTTOM_Y - 1}
+            L ${BUCKET.WIDTH/2 - 1} ${BUCKET.BOTTOM_Y - 1}
+            L ${BUCKET.WIDTH/2 - 1} ${-50}
+          `}
+          fill="none"
+          stroke="rgba(57, 255, 20, 0.3)"
+          strokeWidth={1}
+        />
+
+        {/* Metallic rim on walls */}
+        <path
+          d={`
+            M ${-BUCKET.WIDTH/2} ${-50}
+            L ${-BUCKET.WIDTH/2} ${BUCKET.BOTTOM_Y}
+            L ${BUCKET.WIDTH/2} ${BUCKET.BOTTOM_Y}
+            L ${BUCKET.WIDTH/2} ${-50}
+          `}
+          fill="none"
+          stroke="url(#wallGradient)"
+          strokeWidth={2}
+        />
+      </g>
 
       {/* Inner shadow for depth */}
       <rect
-        x={-BUCKET.WIDTH/2 + 3}
-        y={BUCKET.TOP_Y + 2}
-        width={BUCKET.WIDTH - 6}
-        height={BUCKET.BOTTOM_Y - BUCKET.TOP_Y - BUCKET.GATE_HEIGHT - 4}
-        fill="#0a0a14"
-        opacity={0.1}
-        rx={2}
+        x={-BUCKET.WIDTH/2 + 4}
+        y={-50}
+        width={BUCKET.WIDTH - 8}
+        height={BUCKET.BOTTOM_Y + 50 - BUCKET.GATE_HEIGHT - 4}
+        fill="#000000"
+        opacity={0.3}
       />
 
       {/* Box balls (clipped) - only shown when showBalls is true */}
@@ -150,29 +215,76 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
         </g>
       )}
 
-      {/* Release gate at bottom (splits open) - turquoise brand color */}
+      {/* Gate groove tracks on sides */}
+      <rect
+        x={-BUCKET.WIDTH/2 - 3}
+        y={BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT - 2}
+        width={3}
+        height={BUCKET.GATE_HEIGHT + 4}
+        fill="#111118"
+        rx={1}
+      />
+      <rect
+        x={BUCKET.WIDTH/2}
+        y={BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT - 2}
+        width={3}
+        height={BUCKET.GATE_HEIGHT + 4}
+        fill="#111118"
+        rx={1}
+      />
+
+      {/* Release gate at bottom (slides down) - metallic finish */}
       <motion.g
         animate={{ y: isOpen ? 12 : 0, opacity: isOpen ? 0 : 1 }}
         transition={{ duration: 0.15, ease: 'easeOut' }}
       >
+        {/* Gate shadow */}
+        <rect
+          x={-BUCKET.WIDTH/2 + 1}
+          y={BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT + 1}
+          width={BUCKET.WIDTH - 2}
+          height={BUCKET.GATE_HEIGHT}
+          fill="#000000"
+          rx={1}
+          opacity={0.5}
+        />
+        {/* Gate body with metallic gradient */}
         <rect
           x={-BUCKET.WIDTH/2}
           y={BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT}
           width={BUCKET.WIDTH}
           height={BUCKET.GATE_HEIGHT}
-          fill="#39FF14"
-          rx={2}
+          fill="url(#gateGradient)"
+          rx={1}
+        />
+        {/* Gate highlight - Green Tech Accent */}
+        <rect
+          x={-BUCKET.WIDTH/2 + 2}
+          y={BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT}
+          width={BUCKET.WIDTH - 4}
+          height={1}
+          fill="rgba(57, 255, 20, 0.4)"
+          rx={0.5}
         />
       </motion.g>
 
-      {/* Bottom edge decoration - turquoise brand color */}
+      {/* Bottom edge decoration - metallic rim */}
+      <rect
+        x={-BUCKET.WIDTH/2 - 3}
+        y={BUCKET.BOTTOM_Y}
+        width={BUCKET.WIDTH + 6}
+        height={3}
+        fill="#2d2d3d"
+        rx={1}
+      />
+      {/* Bottom edge highlight */}
       <rect
         x={-BUCKET.WIDTH/2 - 2}
-        y={BUCKET.BOTTOM_Y - 1}
+        y={BUCKET.BOTTOM_Y}
         width={BUCKET.WIDTH + 4}
-        height={2}
-        fill="#39FF14"
-        rx={1}
+        height={1}
+        fill="rgba(57, 255, 20, 0.2)"
+        rx={0.5}
       />
     </g>
   );

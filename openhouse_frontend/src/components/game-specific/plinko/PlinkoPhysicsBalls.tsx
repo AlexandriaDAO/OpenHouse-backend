@@ -197,8 +197,9 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
 
   // Calculate bucket dimensions for clipping during fill phase
   // Must match the physics engine bucket calculation
+  // Physics uses: / (lastRowPinCount - 1) where lastRowPinCount = 2 + rows
   const centerX = PLINKO_LAYOUT.BOARD_WIDTH / 2;
-  const pinDistanceX = (PLINKO_LAYOUT.BOARD_WIDTH - PLINKO_LAYOUT.PADDING_X * 2) / (2 + rows);
+  const pinDistanceX = (PLINKO_LAYOUT.BOARD_WIDTH - PLINKO_LAYOUT.PADDING_X * 2) / (2 + rows - 1);
   const rowPaddingX = PLINKO_LAYOUT.PADDING_X + ((rows - 1) * pinDistanceX) / 2;
   const firstRowSpan = (PLINKO_LAYOUT.BOARD_WIDTH - rowPaddingX * 2);
   const bucketWidth = Math.min(140, firstRowSpan - 20);
@@ -219,12 +220,12 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
     <g>
       {/* SVG defs for ball rendering */}
       <defs>
-        {/* Ball gradient - metallic turquoise (brand color) */}
+        {/* Ball gradient - Titanium (Bright Silver) */}
         <radialGradient id="physicsBallGradient" cx="35%" cy="35%" r="60%">
-          <stop offset="0%" stopColor="#b3ffb3" />
-          <stop offset="30%" stopColor="#39FF14" />
-          <stop offset="70%" stopColor="#2ad912" />
-          <stop offset="100%" stopColor="#1a8a0a" />
+          <stop offset="0%" stopColor="#FFFFFF" />
+          <stop offset="30%" stopColor="#E2E8F0" />
+          <stop offset="70%" stopColor="#94A3B8" />
+          <stop offset="100%" stopColor="#475569" />
         </radialGradient>
 
         {/* Ball shadow filter */}

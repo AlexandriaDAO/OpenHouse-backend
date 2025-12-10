@@ -4,7 +4,8 @@ import usePlinkoActor from '../../hooks/actors/usePlinkoActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import { GameLayout } from '../../components/game-ui';
 import { BettingRail } from '../../components/betting';
-import { PlinkoBoard, ReleaseTunnel, PlinkoPhysicsBalls, PLINKO_LAYOUT } from '../../components/game-specific/plinko';
+import { PlinkoBoard, ReleaseTunnel, PlinkoPhysicsBalls, PlinkoResultPopup, LastResults, PLINKO_LAYOUT } from '../../components/game-specific/plinko';
+import type { ResultRecord } from '../../components/game-specific/plinko/LastResults';
 import { useGameBalance } from '../../providers/GameBalanceProvider';
 import { useBalance } from '../../providers/BalanceProvider';
 import { useAuth } from '../../providers/AuthProvider';
@@ -92,6 +93,13 @@ export const Plinko: React.FC = () => {
 
   // Track recently landed slots for highlighting
   const [activeSlots, setActiveSlots] = useState<Set<number>>(new Set());
+
+  // Result popup state
+  const [showResultPopup, setShowResultPopup] = useState(false);
+
+  // Result history for LastResults component
+  const [resultHistory, setResultHistory] = useState<ResultRecord[]>([]);
+  const resultIdCounterRef = useRef(0);
 
   // Load game data on mount
   useEffect(() => {
@@ -192,6 +200,7 @@ export const Plinko: React.FC = () => {
       setGameError('');
       setCurrentResult(null);
       setMultiBallResult(null);
+      setShowResultPopup(false);
       setBucketOpen(false);
       setPendingBalls([]);
       setIsFilling(true);
@@ -298,7 +307,19 @@ export const Plinko: React.FC = () => {
         return next;
       });
     }, 600);
-  }, []);
+
+    // Add result to history for LastResults display
+    if (multipliers.length > 0) {
+      const multiplier = multipliers[slotIndex] ?? 0;
+      const newResult: ResultRecord = {
+        id: `result-${Date.now()}-${resultIdCounterRef.current++}`,
+        multiplier,
+        binIndex: slotIndex,
+        totalBins: multipliers.length,
+      };
+      setResultHistory(prev => [...prev, newResult]);
+    }
+  }, [multipliers]);
 
   // Callback when all balls have landed (from physics engine)
   const handleAllBallsLanded = useCallback(() => {
@@ -307,6 +328,8 @@ export const Plinko: React.FC = () => {
     setIsFilling(false);
     setIsReleasing(false);
     gameBalanceContext.refresh();
+    // Show result popup
+    setShowResultPopup(true);
   }, [gameBalanceContext]);
 
   const houseEdge = ((1 - expectedValue) * 100).toFixed(2);
@@ -318,7 +341,7 @@ export const Plinko: React.FC = () => {
 
         {/* Game Board - SVG with embedded controls */}
         <div
-          className={`cursor-pointer transition-transform duration-100 h-full ${(isPlaying || isWaiting || isFilling) ? 'cursor-default' : 'active:scale-[0.99]'}`}
+          className={`relative cursor-pointer transition-transform duration-100 h-full ${(isPlaying || isWaiting || isFilling) ? 'cursor-default' : 'active:scale-[0.99]'}`}
           onClick={dropBalls}
           style={{ maxHeight: 'calc(100vh - 200px)' }}
         >
@@ -351,20 +374,19 @@ export const Plinko: React.FC = () => {
               staggerMs={60}
             />
 
-            {/* LEFT SIDE - Total bet, info & result */}
-            <foreignObject x="40" y="20" width="50" height="200">
+            {/* LEFT SIDE - Total bet, info & result history */}
+            <foreignObject x="5" y="20" width="85" height="350">
               <div
                 className="flex flex-col items-center"
                 onClick={(e) => e.stopPropagation()}
               >
-                {/* Total Bet Section */}
-                <span className="text-[7px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Total</span>
-                <div className="text-sm font-bold text-[#39FF14] font-mono tabular-nums leading-tight">
+                {/* Total Bet - matching ball count size */}
+                <div className="text-lg font-bold text-[#39FF14] font-mono tabular-nums">
                   ${(betAmount * ballCount).toFixed(2)}
                 </div>
 
                 {/* Per ball info */}
-                <div className="text-[7px] text-gray-500 font-mono mt-1">
+                <div className="text-[7px] text-gray-500 font-mono">
                   ${betAmount.toFixed(2)}×{ballCount}
                 </div>
 
@@ -381,31 +403,16 @@ export const Plinko: React.FC = () => {
                   </svg>
                 </button>
 
-                {/* Result display - below bet info */}
-                {!isPlaying && !isWaiting && !isFilling && (currentResult || multiBallResult) && (
-                  <div className="mt-2 text-center pointer-events-none">
-                    {currentResult ? (
-                      <div className={currentResult.win ? 'text-green-400' : 'text-red-400'}>
-                        <div className="text-sm font-bold drop-shadow-lg">{currentResult.multiplier.toFixed(2)}x</div>
-                        <div className="text-[8px] font-mono opacity-80">
-                          {currentResult.profit && currentResult.profit >= 0 ? '+' : ''}${currentResult.profit?.toFixed(2)}
-                        </div>
-                      </div>
-                    ) : multiBallResult ? (
-                      <div className={(multiBallResult.net_profit ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}>
-                        <div className="text-sm font-bold drop-shadow-lg">{multiBallResult.average_multiplier.toFixed(2)}x</div>
-                        <div className="text-[8px] font-mono opacity-80">
-                          {(multiBallResult.net_profit ?? 0) >= 0 ? '+' : ''}${multiBallResult.net_profit?.toFixed(2)}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                )}
+                {/* Result History - Vertical stack of recent multipliers */}
+                <div className="mt-3">
+                  <LastResults results={resultHistory} maxResults={5} />
+                </div>
+
               </div>
             </foreignObject>
 
             {/* RIGHT SIDE - Ball count with vertical slider */}
-            <foreignObject x="310" y="20" width="50" height="280">
+            <foreignObject x="310" y="20" width="85" height="280">
               <div
                 className="flex flex-col items-center h-full"
                 onClick={(e) => e.stopPropagation()}
@@ -464,6 +471,33 @@ export const Plinko: React.FC = () => {
               </foreignObject>
             )}
           </svg>
+
+          {/* Result Popup - shows after balls land */}
+          <PlinkoResultPopup
+            show={showResultPopup && (currentResult !== null || multiBallResult !== null)}
+            multiplier={
+              currentResult
+                ? currentResult.multiplier
+                : multiBallResult
+                  ? multiBallResult.average_multiplier
+                  : 0
+            }
+            profit={
+              currentResult
+                ? (currentResult.profit ?? 0)
+                : multiBallResult
+                  ? (multiBallResult.net_profit ?? 0)
+                  : 0
+            }
+            isWin={
+              currentResult
+                ? currentResult.win
+                : multiBallResult
+                  ? (multiBallResult.net_profit ?? 0) >= 0
+                  : false
+            }
+            onHide={() => setShowResultPopup(false)}
+          />
         </div>
       </div>
 
@@ -564,6 +598,20 @@ const InfoModal: React.FC<InfoModalProps> = (props) => {
                 </span>
               ))}
             </div>
+          </div>
+
+          <div className="pt-3 border-t border-gray-700/50">
+            <p className="text-xs text-gray-400">
+              All game logic is open-source. You can verify the deployed canister's code hash matches this repository.{' '}
+              <a
+                href="https://github.com/AlexandriaDAO/alexandria/tree/master/openhouse/plinko_backend"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-dfinity-turquoise hover:underline"
+              >
+                Verification Guide →
+              </a>
+            </p>
           </div>
         </div>
       </div>

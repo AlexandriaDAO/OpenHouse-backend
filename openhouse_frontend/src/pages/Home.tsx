@@ -19,12 +19,11 @@ const games: GameInfo[] = [
     id: 'plinko',
     name: 'Plinko',
     description: 'Drop the ball and watch it bounce to a multiplier',
-    minBet: 1,
+    minBet: 0.01,
     maxWin: 1000,
     houseEdge: 1,
     path: '/plinko',
     icon: '🎯',
-    comingSoon: true,
   },
   {
     id: 'crash',

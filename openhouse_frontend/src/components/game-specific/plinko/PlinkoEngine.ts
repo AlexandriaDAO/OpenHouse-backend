@@ -63,17 +63,17 @@ export class PlinkoPhysicsEngine {
   // Track pending ball creation timeouts to cancel them if needed
   private pendingBallTimeouts: number[] = [];
 
-  // Ball friction by row count (from open source, tuned for expected payout)
+  // Ball friction by row count (reduced ~20% from open source for faster movement)
   private static frictionAirByRowCount: Record<number, number> = {
-    8: 0.0395,
-    9: 0.041,
-    10: 0.038,
-    11: 0.0355,
-    12: 0.0414,
-    13: 0.0437,
-    14: 0.0401,
-    15: 0.0418,
-    16: 0.0364,
+    8: 0.032,
+    9: 0.033,
+    10: 0.030,
+    11: 0.028,
+    12: 0.033,
+    13: 0.035,
+    14: 0.032,
+    15: 0.033,
+    16: 0.029,
   };
 
   constructor(options: PhysicsEngineOptions) {
@@ -81,6 +81,7 @@ export class PlinkoPhysicsEngine {
 
     this.engine = Matter.Engine.create({
       timing: { timeScale: 1 },
+      gravity: { x: 0, y: 1.5 },  // Increased from default 1 for faster ball movement
     });
 
     this.runner = Matter.Runner.create();

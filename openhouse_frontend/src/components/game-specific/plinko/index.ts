@@ -4,5 +4,7 @@ export { PlinkoBucket } from './PlinkoBucket';
 export { ReleaseTunnel } from './ReleaseTunnel';
 export { MultiplierSlot } from './MultiplierSlot';
 export { PlinkoPhysicsBalls } from './PlinkoPhysicsBalls';
+export { PlinkoResultPopup } from './PlinkoResultPopup';
+export { LastResults } from './LastResults';
 export * from './plinkoAnimations';
 export * from './PlinkoEngine';

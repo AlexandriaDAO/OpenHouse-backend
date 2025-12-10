@@ -289,7 +289,7 @@ main() {
             deploy_blackjack
             ;;
         dice)
-            deploy_dice
+            # deploy_dice
             ;;
         frontend)
             deploy_frontend

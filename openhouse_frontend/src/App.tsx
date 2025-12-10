@@ -27,7 +27,7 @@ function App() {
                 <Routes>
                   <Route path="/" element={<Home />} />
                   <Route path="/dice" element={<DiceGame />} />
-                  <Route path="/plinko" element={<AdminRoute><PlinkoGame /></AdminRoute>} />
+                  <Route path="/plinko" element={<PlinkoGame />} />
                   <Route path="/crash" element={<AdminRoute><Crash /></AdminRoute>} />
                   <Route path="/blackjack" element={<AdminRoute><BlackjackGame /></AdminRoute>} />
                   <Route path="/wallet" element={<Wallet />} />
