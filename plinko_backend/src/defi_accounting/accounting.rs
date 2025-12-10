@@ -150,6 +150,15 @@ pub async fn deposit(amount: u64) -> Result<u64, String> {
         return Err(format!("Minimum deposit is {} USDT", MIN_DEPOSIT / 1_000_000));
     }
 
+    // NEW: Maximum check
+    const MAX_USER_DEPOSIT: u64 = 1_000_000_000_000; // 1 billion USDT
+    if amount > MAX_USER_DEPOSIT {
+        return Err(format!(
+            "Maximum deposit is {} USDT (overflow protection)",
+            MAX_USER_DEPOSIT / 1_000_000
+        ));
+    }
+
     let caller = ic_cdk::api::msg_caller();
     let ck_usdt_principal = Principal::from_text(CKUSDT_CANISTER_ID).expect("Invalid principal constant");
 

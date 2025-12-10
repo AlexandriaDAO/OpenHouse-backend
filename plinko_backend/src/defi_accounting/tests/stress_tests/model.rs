@@ -54,10 +54,10 @@ impl AccountingModel {
     /// THE CORE INVARIANT
     /// Must hold after ANY sequence of operations
     pub fn check_invariant(&self) -> Result<(), String> {
-        let sum_user_balances: u64 = self.user_balances.values().sum();
-        let calculated = self.pool_reserve + sum_user_balances + self.accumulated_fees;
+        let sum_user_balances: u128 = self.user_balances.values().map(|&x| x as u128).sum();
+        let calculated = self.pool_reserve as u128 + sum_user_balances + self.accumulated_fees as u128;
 
-        if calculated != self.total_system_funds {
+        if calculated != self.total_system_funds as u128 {
             return Err(format!(
                 "INVARIANT VIOLATION: pool({}) + users({}) + fees({}) = {} != total({})",
                 self.pool_reserve, sum_user_balances, self.accumulated_fees,
@@ -268,15 +268,34 @@ impl AccountingModel {
             return OpResult::BelowMinimum; // Effectively too small to get shares
         }
 
-        // Add shares to user
-        *self.lp_shares.entry(user).or_insert(0) += shares;
-        self.total_shares += shares;
+        // Add amount to total_system_funds - Check FIRST to prevent partial updates
+        let new_total_funds = match self.total_system_funds.checked_add(amount) {
+            Some(f) => f,
+            None => return OpResult::Overflow,
+        };
 
-        // Add amount to pool_reserve
-        self.pool_reserve = self.pool_reserve.checked_add(amount).expect("Pool reserve overflow");
-        
-        // Add amount to total_system_funds
-        self.total_system_funds = self.total_system_funds.checked_add(amount).expect("System funds overflow");
+        // Add amount to pool_reserve - Check SECOND
+        let new_reserve = match self.pool_reserve.checked_add(amount) {
+            Some(r) => r,
+            None => return OpResult::Overflow,
+        };
+
+        // Update shares
+        let user_shares = self.lp_shares.entry(user).or_insert(0);
+        let new_user_shares = match user_shares.checked_add(shares) {
+            Some(s) => s,
+            None => return OpResult::Overflow,
+        };
+        let new_total_shares = match self.total_shares.checked_add(shares) {
+            Some(s) => s,
+            None => return OpResult::Overflow,
+        };
+
+        // Commit state changes
+        *user_shares = new_user_shares;
+        self.total_shares = new_total_shares;
+        self.pool_reserve = new_reserve;
+        self.total_system_funds = new_total_funds;
         
         OpResult::Success
     }
@@ -296,7 +315,10 @@ impl AccountingModel {
         let gross_payout = (shares_to_withdraw as u128 * self.pool_reserve as u128 / self.total_shares as u128) as u64;
         
         // Calculate 1% fee
-        let fee = gross_payout * LP_WITHDRAWAL_FEE_BPS / 10000;
+        let fee = match gross_payout.checked_mul(LP_WITHDRAWAL_FEE_BPS) {
+            Some(prod) => prod / 10000,
+            None => u64::MAX / 10000, // Saturate on overflow matches implementation
+        };
         let net_payout = gross_payout - fee;
 
         // Remove user shares
