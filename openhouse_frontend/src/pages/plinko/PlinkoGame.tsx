@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import usePlinkoActor from '../../hooks/actors/usePlinkoActor';
 import useLedgerActor from '../../hooks/actors/useLedgerActor';
 import { GameLayout } from '../../components/game-ui';
@@ -185,116 +186,99 @@ export const Plinko: React.FC = () => {
       return;
     }
 
-    // Reset state for new game
-    setGameError('');
-    setCurrentResult(null);
-    setMultiBallResult(null);
-    setBucketOpen(false);
-    setPendingBalls([]);
+    // Reset state for new game and start filling animation
+    // Use flushSync to force React to update the DOM immediately
+    flushSync(() => {
+      setGameError('');
+      setCurrentResult(null);
+      setMultiBallResult(null);
+      setBucketOpen(false);
+      setPendingBalls([]);
+      setIsFilling(true);
+      setIsWaiting(true);
+    });
+
     fillingCompleteRef.current = false;
     backendResultsRef.current = null;
 
-    // Start filling animation immediately (gives user something to watch)
-    setIsFilling(true);
-    setIsWaiting(true);
+    // Defer backend call to ensure UI renders first
+    setTimeout(async () => {
+      try {
+        const betAmountE8s = BigInt(Math.floor(betAmount * DECIMALS_PER_CKUSDT));
+        const totalBetE8s = betAmountE8s * BigInt(ballCount);
 
-    // DEBUG: Log pre-play state
-    const prePlayTimestamp = Date.now();
-    console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] === PRE-PLAY STATE ===`);
-    console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] Game balance: ${balance.game.toString()} (${Number(balance.game) / DECIMALS_PER_CKUSDT} USDT)`);
-    console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] House balance: ${balance.house.toString()} (${Number(balance.house) / DECIMALS_PER_CKUSDT} USDT)`);
-    console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] Bet: ${betAmount} USDT x ${ballCount} balls = ${betAmount * ballCount} USDT total`);
+        if (totalBetE8s > balance.game) {
+          setGameError(`Insufficient balance. Total bet: $${(betAmount * ballCount).toFixed(2)}`);
+          setIsWaiting(false);
+          setIsFilling(false);
+          return;
+        }
 
-    try {
-      const betAmountE8s = BigInt(Math.floor(betAmount * DECIMALS_PER_CKUSDT));
-      const totalBetE8s = betAmountE8s * BigInt(ballCount);
+        // Call backend based on ball count
+        let results: { path: boolean[] }[] = [];
 
-      if (totalBetE8s > balance.game) {
-        console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] FAILED: Insufficient balance (frontend check)`);
-        setGameError(`Insufficient balance. Total bet: $${(betAmount * ballCount).toFixed(2)}`);
+        if (ballCount === 1) {
+          const result = await actor.play_plinko(betAmountE8s);
+          if ('Ok' in result) {
+            const r = result.Ok;
+            results = [{ path: r.path }];
+
+            setCurrentResult({
+              path: r.path,
+              final_position: r.final_position,
+              multiplier: r.multiplier,
+              win: r.is_win,
+              timestamp: Date.now(),
+              bet_amount: Number(r.bet_amount) / DECIMALS_PER_CKUSDT,
+              payout: Number(r.payout) / DECIMALS_PER_CKUSDT,
+              profit: Number(r.profit) / DECIMALS_PER_CKUSDT,
+            });
+          } else {
+            throw new Error(result.Err);
+          }
+        } else {
+          const result = await actor.play_multi_plinko(ballCount, betAmountE8s);
+          if ('Ok' in result) {
+            const r = result.Ok;
+            results = r.results.map(res => ({ path: res.path }));
+
+            setMultiBallResult({
+              results: r.results.map((res: BackendPlinkoResult) => ({
+                path: res.path,
+                final_position: res.final_position,
+                multiplier: res.multiplier,
+                win: res.is_win,
+              })),
+              total_balls: r.total_balls,
+              total_wins: r.results.filter((res: BackendPlinkoResult) => res.is_win).length,
+              average_multiplier: r.average_multiplier,
+              total_bet: Number(r.total_bet) / DECIMALS_PER_CKUSDT,
+              total_payout: Number(r.total_payout) / DECIMALS_PER_CKUSDT,
+              net_profit: Number(r.net_profit) / DECIMALS_PER_CKUSDT,
+            });
+          } else {
+            throw new Error(result.Err);
+          }
+        }
+
+        // Backend responded - store results and try to release
+        backendResultsRef.current = results;
+        tryReleaseBalls();
+
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to play';
+
+        // Refresh balance after error to check if state changed
+        setTimeout(async () => {
+          await gameBalanceContext.refresh();
+        }, 1000);
+
+        setGameError(errorMsg);
         setIsWaiting(false);
         setIsFilling(false);
-        return;
+        setBucketOpen(false);
       }
-
-      // Call backend based on ball count
-      let results: { path: boolean[] }[] = [];
-
-      console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] Calling backend...`);
-      const callStartTime = Date.now();
-
-      if (ballCount === 1) {
-        const result = await actor.play_plinko(betAmountE8s);
-        console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] Backend responded in ${Date.now() - callStartTime}ms`);
-        if ('Ok' in result) {
-          const r = result.Ok;
-          results = [{ path: r.path }];
-
-          console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] SUCCESS: bet=${Number(r.bet_amount)/DECIMALS_PER_CKUSDT}, payout=${Number(r.payout)/DECIMALS_PER_CKUSDT}, profit=${Number(r.profit)/DECIMALS_PER_CKUSDT}, mult=${r.multiplier}`);
-
-          setCurrentResult({
-            path: r.path,
-            final_position: r.final_position,
-            multiplier: r.multiplier,
-            win: r.is_win,
-            timestamp: Date.now(),
-            bet_amount: Number(r.bet_amount) / DECIMALS_PER_CKUSDT,
-            payout: Number(r.payout) / DECIMALS_PER_CKUSDT,
-            profit: Number(r.profit) / DECIMALS_PER_CKUSDT,
-          });
-        } else {
-          console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] BACKEND ERROR: ${result.Err}`);
-          throw new Error(result.Err);
-        }
-      } else {
-        const result = await actor.play_multi_plinko(ballCount, betAmountE8s);
-        console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] Backend responded in ${Date.now() - callStartTime}ms`);
-        if ('Ok' in result) {
-          const r = result.Ok;
-          results = r.results.map(res => ({ path: res.path }));
-
-          console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] MULTI SUCCESS: total_bet=${Number(r.total_bet)/DECIMALS_PER_CKUSDT}, total_payout=${Number(r.total_payout)/DECIMALS_PER_CKUSDT}, net_profit=${Number(r.net_profit)/DECIMALS_PER_CKUSDT}, avg_mult=${r.average_multiplier}`);
-
-          setMultiBallResult({
-            results: r.results.map((res: BackendPlinkoResult) => ({
-              path: res.path,
-              final_position: res.final_position,
-              multiplier: res.multiplier,
-              win: res.is_win,
-            })),
-            total_balls: r.total_balls,
-            total_wins: r.results.filter((res: BackendPlinkoResult) => res.is_win).length,
-            average_multiplier: r.average_multiplier,
-            total_bet: Number(r.total_bet) / DECIMALS_PER_CKUSDT,
-            total_payout: Number(r.total_payout) / DECIMALS_PER_CKUSDT,
-            net_profit: Number(r.net_profit) / DECIMALS_PER_CKUSDT,
-          });
-        } else {
-          console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] MULTI BACKEND ERROR: ${result.Err}`);
-          throw new Error(result.Err);
-        }
-      }
-
-      // Backend responded - store results and try to release
-      backendResultsRef.current = results;
-      tryReleaseBalls();
-
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Failed to play';
-      console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] EXCEPTION: ${errorMsg}`);
-      console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] Full error:`, err);
-
-      // Refresh balance after error to check if state changed
-      setTimeout(async () => {
-        await gameBalanceContext.refresh();
-        console.log(`[PLINKO-DEBUG ${prePlayTimestamp}] POST-ERROR balance refresh: game=${gameBalanceContext.balance?.game?.toString()}, house=${gameBalanceContext.balance?.house?.toString()}`);
-      }, 1000);
-
-      setGameError(errorMsg);
-      setIsWaiting(false);
-      setIsFilling(false);
-      setBucketOpen(false);
-    }
+    }, 75); // 75ms delay to allow UI to paint "Filling" state
   };
 
   // Callback when a single ball lands in a slot
@@ -347,6 +331,7 @@ export const Plinko: React.FC = () => {
 
             {/* Release tunnel - structure always visible */}
             <ReleaseTunnel
+              rows={ROWS}
               ballCount={ballCount}
               isOpen={bucketOpen}
               isVisible={true}
@@ -374,7 +359,7 @@ export const Plinko: React.FC = () => {
               >
                 {/* Total Bet Section */}
                 <span className="text-[7px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Total</span>
-                <div className="text-sm font-bold text-yellow-500 font-mono tabular-nums leading-tight">
+                <div className="text-sm font-bold text-[#39FF14] font-mono tabular-nums leading-tight">
                   ${(betAmount * ballCount).toFixed(2)}
                 </div>
 
@@ -426,12 +411,12 @@ export const Plinko: React.FC = () => {
                 onClick={(e) => e.stopPropagation()}
               >
                 {/* Ball count display */}
-                <div className="text-lg font-bold text-yellow-500 font-mono tabular-nums">
+                <div className="text-lg font-bold text-[#39FF14] font-mono tabular-nums">
                   {ballCount}
                 </div>
                 <span className="text-[7px] text-gray-400 uppercase tracking-wider font-semibold mb-2">Balls</span>
 
-                {/* Tall vertical slider */}
+                {/* Minimalist tech vertical slider */}
                 <input
                   type="range"
                   min={1}
@@ -440,13 +425,16 @@ export const Plinko: React.FC = () => {
                   onChange={(e) => { e.stopPropagation(); setBallCount(Math.min(30, Math.max(1, Number(e.target.value)))); }}
                   onClick={(e) => e.stopPropagation()}
                   disabled={isPlaying || isWaiting || isFilling}
-                  className="w-3 flex-1 bg-gray-700/60 rounded-full appearance-none cursor-pointer
-                    [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6
-                    [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-yellow-500
-                    [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-yellow-600
-                    [&::-webkit-slider-thumb]:shadow-lg
-                    [&::-moz-range-thumb]:w-6 [&::-moz-range-thumb]:h-6 [&::-moz-range-thumb]:rounded-full
-                    [&::-moz-range-thumb]:bg-yellow-500 [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-yellow-600"
+                  className="w-2 flex-1 bg-[#1a1a2e] rounded-sm appearance-none cursor-pointer border border-[#39FF14]/30
+                    [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5
+                    [&::-webkit-slider-thumb]:rounded-sm [&::-webkit-slider-thumb]:bg-[#39FF14]
+                    [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:border-none
+                    [&::-webkit-slider-thumb]:shadow-[0_0_8px_rgba(57,255,20,0.4)]
+                    [&::-webkit-slider-thumb]:transition-all [&::-webkit-slider-thumb]:duration-150
+                    [&::-webkit-slider-thumb]:hover:scale-105
+                    [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:rounded-sm
+                    [&::-moz-range-thumb]:bg-[#39FF14] [&::-moz-range-thumb]:border-none
+                    [&::-moz-range-thumb]:shadow-[0_0_8px_rgba(57,255,20,0.4)]"
                   style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
                 />
               </div>

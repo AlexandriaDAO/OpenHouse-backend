@@ -294,16 +294,13 @@ export class PlinkoPhysicsEngine {
     const centerX = this.options.width / 2;
     const bucketWidth = this.getBucketWidth();
 
-    console.log(`[PlinkoEngine] Scheduling ball ${id} to drop in ${delay}ms (bucket width: ${bucketWidth})`);
-
-    const timeoutId = window.setTimeout(() => {
+    // Internal function to create the ball
+    const createBall = () => {
       const boxHalfWidth = bucketWidth / 2 - this.pinRadius * 2 - 4;
       const startX = centerX + (Math.random() * 2 - 1) * boxHalfWidth;
       // Start balls at top of visible bucket area (y=0 to y=20)
       // They'll fall down and pile up on the gate
       const startY = 0 + Math.random() * 20;
-
-      console.log(`[PlinkoEngine] Creating ball ${id} at (${startX.toFixed(1)}, ${startY.toFixed(1)})`);
 
       const ball = Matter.Bodies.circle(startX, startY, this.pinRadius * 2, {
         restitution: 0.4, // Less bouncy in bucket
@@ -326,17 +323,31 @@ export class PlinkoPhysicsEngine {
 
       Matter.Composite.add(this.engine.world, ball);
       this.balls.set(id, ball);
-      console.log(`[PlinkoEngine] Ball ${id} added. Total balls in world: ${this.balls.size}`);
-    }, delay);
+    };
 
-    this.pendingBallTimeouts.push(timeoutId);
+    // Create first ball synchronously for instant visual feedback
+    // Subsequent balls use setTimeout for staggered entry
+    if (delay === 0) {
+      createBall();
+      // Immediately report ball state to React for instant visual render
+      const ball = this.balls.get(id);
+      if (ball) {
+        this.options.onBallUpdate?.(id, {
+          x: ball.position.x,
+          y: ball.position.y,
+          rotation: ball.angle * (180 / Math.PI),
+        });
+      }
+    } else {
+      const timeoutId = window.setTimeout(createBall, delay);
+      this.pendingBallTimeouts.push(timeoutId);
+    }
   }
 
   /**
    * Open the bucket gate to release all balls onto the peg board.
    */
   public openBucket(): void {
-    console.log(`[PlinkoEngine] openBucket called. Gate exists: ${!!this.bucketGate}, already open: ${this.isBucketOpen}, balls in world: ${this.balls.size}`);
     if (this.bucketGate && !this.isBucketOpen) {
       Matter.Composite.remove(this.engine.world, this.bucketGate);
       this.bucketGate = null;
@@ -351,8 +362,6 @@ export class PlinkoPhysicsEngine {
           time: now
         });
       }
-
-      console.log('[PlinkoEngine] Bucket gate opened');
     }
   }
 
@@ -361,8 +370,6 @@ export class PlinkoPhysicsEngine {
    * Cancels any pending ball creations.
    */
   public clearAllBalls(): void {
-    console.log('[PlinkoEngine] clearAllBalls called');
-    
     // Cancel pending timeouts
     this.pendingBallTimeouts.forEach(id => clearTimeout(id));
     this.pendingBallTimeouts = [];
@@ -371,7 +378,7 @@ export class PlinkoPhysicsEngine {
     for (const ball of this.balls.values()) {
       Matter.Composite.remove(this.engine.world, ball);
     }
-    
+
     this.balls.clear();
     this.ballTargets.clear();
     this.ballLastPositions.clear();
@@ -381,7 +388,6 @@ export class PlinkoPhysicsEngine {
    * Reset bucket for next round (recreate gate and walls).
    */
   public resetBucket(): void {
-    console.log('[PlinkoEngine] resetBucket called');
     // Ensure no leftover balls
     this.clearAllBalls();
 
@@ -416,7 +422,6 @@ export class PlinkoPhysicsEngine {
    */
   public setExpectedBallCount(count: number): void {
     this.expectedBallCount = count;
-    console.log(`[PlinkoEngine] Expected ball count set to ${count}`);
   }
 
   /**
@@ -426,7 +431,6 @@ export class PlinkoPhysicsEngine {
   public areBallsSettled(): boolean {
     // Don't settle until all expected balls have been created
     if (this.balls.size < this.expectedBallCount) {
-      console.log(`[PlinkoEngine] areBallsSettled: false (only ${this.balls.size}/${this.expectedBallCount} balls created)`);
       return false;
     }
 
@@ -437,7 +441,6 @@ export class PlinkoPhysicsEngine {
         return false;
       }
     }
-    console.log(`[PlinkoEngine] areBallsSettled: true (all ${this.balls.size} balls settled)`);
     return this.balls.size > 0;
   }
 
@@ -592,7 +595,6 @@ export class PlinkoPhysicsEngine {
                                     (now - lastPos.time) > 1500;
 
         if (isStuck || isOutOfBounds || isNearBottomAndSlow) {
-          console.log(`[Plinko] Ball ${id} detected as stuck. Forcing landing. Reason: ${isStuck ? 'no movement' : isOutOfBounds ? 'out of bounds' : 'near bottom and slow'}`);
           this.forceLandBall(id, ball);
           continue;
         }

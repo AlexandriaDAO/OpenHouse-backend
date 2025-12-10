@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { PLINKO_LAYOUT } from './plinkoAnimations';
 
 interface ReleaseTunnelProps {
+  rows: number;        // Number of plinko rows (needed for dynamic width calculation)
   ballCount: number;
   isOpen: boolean;
   isVisible: boolean;
@@ -14,19 +15,26 @@ interface ReleaseTunnelProps {
  * Narrow tube extends up off-screen to hold overflow balls.
  */
 export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
+  rows,
   ballCount,
   isOpen,
   isVisible,
   showBalls = true,
 }) => {
-  const { BOARD_WIDTH } = PLINKO_LAYOUT;
+  const { BOARD_WIDTH, PADDING_X } = PLINKO_LAYOUT;
   const centerX = BOARD_WIDTH / 2;
 
-  // Box bucket dimensions - wide rectangle for dynamic ball movement
+  // Calculate dynamic width based on first row pins (matching physics engine exactly)
+  const pinDistanceX = (BOARD_WIDTH - PADDING_X * 2) / (2 + rows);
+  const rowPaddingX = PADDING_X + ((rows - 1) * pinDistanceX) / 2;
+  const firstRowSpan = (BOARD_WIDTH - rowPaddingX * 2);
+  const bucketWidth = Math.min(140, firstRowSpan - 20);
+
+  // Box bucket dimensions - width now matches physics engine
   const BUCKET = {
-    TOP_Y: 5,            // Higher up for more space
-    BOTTOM_Y: 70,        // Gate location
-    WIDTH: 140,          // Wide box (same width top to bottom)
+    TOP_Y: 5,
+    BOTTOM_Y: 70,
+    WIDTH: bucketWidth,
     GATE_HEIGHT: 4,
   };
 
@@ -73,10 +81,10 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
       {/* SVG definitions */}
       <defs>
         <radialGradient id="tunnelBallGradient" cx="35%" cy="35%" r="60%">
-          <stop offset="0%" stopColor="#fff7cc" />
-          <stop offset="30%" stopColor="#ffd700" />
-          <stop offset="70%" stopColor="#daa520" />
-          <stop offset="100%" stopColor="#b8860b" />
+          <stop offset="0%" stopColor="#b3ffb3" />
+          <stop offset="30%" stopColor="#39FF14" />
+          <stop offset="70%" stopColor="#2ad912" />
+          <stop offset="100%" stopColor="#1a8a0a" />
         </radialGradient>
 
         <linearGradient id="boxGradient" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -100,14 +108,14 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
         </clipPath>
       </defs>
 
-      {/* Box container - subtle/transparent */}
+      {/* Box container - subtle turquoise outline */}
       <rect
         x={-BUCKET.WIDTH/2}
         y={BUCKET.TOP_Y}
         width={BUCKET.WIDTH}
         height={BUCKET.BOTTOM_Y - BUCKET.TOP_Y}
         fill="url(#boxGradient)"
-        stroke="rgba(74, 85, 104, 0.15)"
+        stroke="rgba(57, 255, 20, 0.3)"
         strokeWidth={1}
         rx={4}
       />
@@ -142,7 +150,7 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
         </g>
       )}
 
-      {/* Release gate at bottom (splits open) */}
+      {/* Release gate at bottom (splits open) - turquoise brand color */}
       <motion.g
         animate={{ y: isOpen ? 12 : 0, opacity: isOpen ? 0 : 1 }}
         transition={{ duration: 0.15, ease: 'easeOut' }}
@@ -152,18 +160,18 @@ export const ReleaseTunnel: React.FC<ReleaseTunnelProps> = ({
           y={BUCKET.BOTTOM_Y - BUCKET.GATE_HEIGHT}
           width={BUCKET.WIDTH}
           height={BUCKET.GATE_HEIGHT}
-          fill="#4a5568"
+          fill="#39FF14"
           rx={2}
         />
       </motion.g>
 
-      {/* Bottom edge decoration */}
+      {/* Bottom edge decoration - turquoise brand color */}
       <rect
         x={-BUCKET.WIDTH/2 - 2}
         y={BUCKET.BOTTOM_Y - 1}
         width={BUCKET.WIDTH + 4}
         height={2}
-        fill="#4a5568"
+        fill="#39FF14"
         rx={1}
       />
     </g>

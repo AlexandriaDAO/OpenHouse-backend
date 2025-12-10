@@ -35,12 +35,12 @@ export const PlinkoBoard: React.FC<PlinkoBoardProps> = ({ rows, multipliers, act
           </feMerge>
         </filter>
 
-        {/* Ball gradient - metallic gold */}
+        {/* Ball gradient - metallic turquoise (brand color) */}
         <radialGradient id="ballGradient" cx="35%" cy="35%" r="60%">
-          <stop offset="0%" stopColor="#fff7cc" />
-          <stop offset="30%" stopColor="#ffd700" />
-          <stop offset="70%" stopColor="#daa520" />
-          <stop offset="100%" stopColor="#b8860b" />
+          <stop offset="0%" stopColor="#b3ffb3" />
+          <stop offset="30%" stopColor="#39FF14" />
+          <stop offset="70%" stopColor="#2ad912" />
+          <stop offset="100%" stopColor="#1a8a0a" />
         </radialGradient>
 
         {/* Ball shadow filter */}

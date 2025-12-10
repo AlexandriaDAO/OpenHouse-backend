@@ -50,12 +50,12 @@ export const PLINKO_LAYOUT = {
   BALL_STAGGER_MS: 40,
   BUCKET_OPEN_MS: 300,
 
-  // Colors (Tailwind-compatible)
+  // Colors (Tailwind-compatible) - Aligned with OpenHouse brand
   COLORS: {
     peg: '#e8e8e8',
-    ball: '#ffd700',
-    win: '#22c55e',
-    lose: '#6b7280',
+    ball: '#39FF14',      // Brand turquoise
+    win: '#00E19B',       // Brand green
+    lose: '#ED0047',      // Brand red
     board: 'transparent',
     bucket: '#4a5568',
     bucketAccent: '#2d3748',
@@ -64,17 +64,19 @@ export const PLINKO_LAYOUT = {
   }
 };
 
-// Stake-style bucket colors
+// Multiplier slot colors - reversed for outcome visualization
+// Center = LOW multipliers = losses = RED
+// Edges = HIGH multipliers = big wins = GREEN
 export const BUCKET_COLORS = {
-  // High multiplier (edges) - Red
+  // High multiplier (edges) - GREEN (big wins!)
   high: {
-    bg: { r: 255, g: 0, b: 63 },
-    shadow: { r: 166, g: 0, b: 4 },
+    bg: { r: 0, g: 225, b: 155 },      // Brand green #00E19B
+    shadow: { r: 0, g: 140, b: 96 },
   },
-  // Low multiplier (center) - Yellow
+  // Low multiplier (center) - RED (losses)
   low: {
-    bg: { r: 255, g: 192, b: 0 },
-    shadow: { r: 171, g: 121, b: 0 },
+    bg: { r: 237, g: 0, b: 71 },       // Brand red #ED0047
+    shadow: { r: 150, g: 0, b: 45 },
   },
 };
 
@@ -90,7 +92,7 @@ function lerpColor(
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-// Get bucket colors based on position (edges=red, center=yellow)
+// Get bucket colors based on position (center=red losses, edges=green wins)
 export function getBucketColors(index: number, totalBuckets: number): {
   background: string;
   shadow: string;
@@ -107,8 +109,8 @@ export function getBucketColors(index: number, totalBuckets: number): {
     background: lerpColor(BUCKET_COLORS.low.bg, BUCKET_COLORS.high.bg, t),
     shadow: lerpColor(BUCKET_COLORS.low.shadow, BUCKET_COLORS.high.shadow, t),
     glow: lerpColor(
-      { r: 255, g: 200, b: 50 },
-      { r: 255, g: 50, b: 100 },
+      { r: 237, g: 50, b: 100 },   // Red glow at center (losses)
+      { r: 0, g: 255, b: 180 },    // Green glow at edges (wins)
       t
     ),
   };

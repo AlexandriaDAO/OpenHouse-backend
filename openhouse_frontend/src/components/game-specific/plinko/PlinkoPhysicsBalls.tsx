@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { PLINKO_LAYOUT } from './plinkoAnimations';
 import { PlinkoPhysicsEngine, BallState } from './PlinkoEngine';
 
@@ -59,7 +59,8 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
   }, [onFillingComplete]);
 
   // Initialize physics engine - ONLY depends on rows
-  useEffect(() => {
+  // Use useLayoutEffect to ensure engine is ready synchronously before filling starts
+  useLayoutEffect(() => {
     const engine = new PlinkoPhysicsEngine({
       rows,
       width: PLINKO_LAYOUT.BOARD_WIDTH,
@@ -108,7 +109,10 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
   const prevFillingRef = useRef(false);
 
   // Handle filling phase - drop balls into bucket
-  useEffect(() => {
+  // CRITICAL: Use useLayoutEffect to run SYNCHRONOUSLY before browser paint
+  // This ensures balls appear immediately when isFilling becomes true,
+  // rather than being deferred by React's concurrent rendering
+  useLayoutEffect(() => {
     // Detect when isFilling transitions from false to true (new game starting)
     const justStartedFilling = isFilling && !prevFillingRef.current;
     prevFillingRef.current = isFilling;
@@ -116,7 +120,6 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
     // If just started filling, reset the flag to allow ball creation
     if (justStartedFilling) {
       hasStartedFillingRef.current = false;
-      console.log('[PlinkoPhysicsBalls] Filling started fresh, resetting hasStartedFillingRef');
 
       // Clear any previous state from engine and React
       if (engineRef.current) {
@@ -130,8 +133,6 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
       hasNotifiedSettledRef.current = false;
       totalBallsRef.current = fillBallCount;
       landedBallsRef.current = new Set();
-
-      console.log(`[PlinkoPhysicsBalls] Creating ${fillBallCount} balls with stagger ${staggerMs}ms`);
 
       // IMPORTANT: Set expected ball count BEFORE creating balls
       // This ensures areBallsSettled() won't return true until all balls are created
@@ -147,7 +148,6 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
         if (engineRef.current && !hasNotifiedSettledRef.current) {
           if (engineRef.current.areBallsSettled()) {
             hasNotifiedSettledRef.current = true;
-            console.log('[PlinkoPhysicsBalls] Balls settled, calling onFillingComplete');
             onFillingCompleteRef.current?.();
           }
         }
@@ -210,21 +210,21 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
   };
 
   // Calculate ball radius to match physics engine exactly
-  // Formula: (24 - rows) / 2 * 0.53
+  // Formula: (24 - rows) / 2 * 0.53 for pins, then * 2 for balls
   const physicsRadius = ((24 - rows) / 2) * 0.53;
-  // Use slightly larger visual radius for better look, but close to physics
-  const visualRadius = physicsRadius;
+  // Visual radius matches physics: ball = 2x pin radius
+  const visualRadius = physicsRadius * 2;
 
   return (
     <g>
       {/* SVG defs for ball rendering */}
       <defs>
-        {/* Ball gradient - metallic gold */}
+        {/* Ball gradient - metallic turquoise (brand color) */}
         <radialGradient id="physicsBallGradient" cx="35%" cy="35%" r="60%">
-          <stop offset="0%" stopColor="#fff7cc" />
-          <stop offset="30%" stopColor="#ffd700" />
-          <stop offset="70%" stopColor="#daa520" />
-          <stop offset="100%" stopColor="#b8860b" />
+          <stop offset="0%" stopColor="#b3ffb3" />
+          <stop offset="30%" stopColor="#39FF14" />
+          <stop offset="70%" stopColor="#2ad912" />
+          <stop offset="100%" stopColor="#1a8a0a" />
         </radialGradient>
 
         {/* Ball shadow filter */}
@@ -233,7 +233,7 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
         </filter>
 
         {/* Clip path for bucket area during filling */}
-        <clipPath id="bucketClip">
+        <clipPath id="plinkoPhysicsFillClip">
           <rect
             x={centerX - BUCKET.WIDTH / 2}
             y={BUCKET.TOP_Y}
@@ -245,7 +245,7 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
 
       {/* Render balls - clip to bucket during filling, full view when releasing */}
       {isFilling && !isReleasing ? (
-        <g clipPath="url(#bucketClip)">
+        <g clipPath="url(#plinkoPhysicsFillClip)">
           {Array.from(ballStates.entries()).map(([id, state]) => (
             <PhysicsBall key={id} state={state} radius={visualRadius} />
           ))}
