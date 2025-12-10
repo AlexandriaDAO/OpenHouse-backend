@@ -203,6 +203,12 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
     WIDTH: bucketWidth,
   };
 
+  // Calculate ball radius to match physics engine exactly
+  // Formula: (24 - rows) / 2 * 0.53
+  const physicsRadius = ((24 - rows) / 2) * 0.53;
+  // Use slightly larger visual radius for better look, but close to physics
+  const visualRadius = physicsRadius;
+
   return (
     <g>
       {/* SVG defs for ball rendering */}
@@ -235,12 +241,12 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
       {isFilling && !isReleasing ? (
         <g clipPath="url(#bucketClip)">
           {Array.from(ballStates.entries()).map(([id, state]) => (
-            <PhysicsBall key={id} state={state} />
+            <PhysicsBall key={id} state={state} radius={visualRadius} />
           ))}
         </g>
       ) : (
         Array.from(ballStates.entries()).map(([id, state]) => (
-          <PhysicsBall key={id} state={state} />
+          <PhysicsBall key={id} state={state} radius={visualRadius} />
         ))
       )}
     </g>
@@ -248,9 +254,7 @@ export const PlinkoPhysicsBalls: React.FC<PlinkoPhysicsBallsProps> = ({
 };
 
 // Individual ball renderer - unified with tunnel balls
-const BALL_RADIUS = 8;  // Matches tunnel balls for seamless transition
-
-const PhysicsBall: React.FC<{ state: BallState }> = ({ state }) => {
+const PhysicsBall: React.FC<{ state: BallState; radius: number }> = ({ state, radius }) => {
   const { x, y, rotation } = state;
 
   return (
@@ -261,34 +265,34 @@ const PhysicsBall: React.FC<{ state: BallState }> = ({ state }) => {
         {/* Drop shadow */}
         <ellipse
           cx={2}
-          cy={BALL_RADIUS + 2}
-          rx={BALL_RADIUS * 0.7}
-          ry={BALL_RADIUS * 0.25}
+          cy={radius + 2}
+          rx={radius * 0.7}
+          ry={radius * 0.25}
           fill="black"
           opacity={0.15}
         />
 
         {/* Main ball */}
         <circle
-          r={BALL_RADIUS}
+          r={radius}
           fill="url(#physicsBallGradient)"
         />
 
         {/* Specular highlight */}
         <ellipse
-          cx={-BALL_RADIUS * 0.3}
-          cy={-BALL_RADIUS * 0.3}
-          rx={BALL_RADIUS * 0.35}
-          ry={BALL_RADIUS * 0.25}
+          cx={-radius * 0.3}
+          cy={-radius * 0.3}
+          rx={radius * 0.35}
+          ry={radius * 0.25}
           fill="white"
           opacity={0.6}
         />
 
         {/* Secondary highlight */}
         <circle
-          cx={-BALL_RADIUS * 0.15}
-          cy={-BALL_RADIUS * 0.45}
-          r={BALL_RADIUS * 0.1}
+          cx={-radius * 0.15}
+          cy={-radius * 0.45}
+          r={radius * 0.1}
           fill="white"
           opacity={0.8}
         />

@@ -336,6 +336,17 @@ export class PlinkoPhysicsEngine {
       Matter.Composite.remove(this.engine.world, this.bucketGate);
       this.bucketGate = null;
       this.isBucketOpen = true;
+
+      // Reset stuck detection timers for all balls so they don't get deleted immediately
+      const now = Date.now();
+      for (const [id, ball] of this.balls) {
+        this.ballLastPositions.set(id, {
+          x: ball.position.x,
+          y: ball.position.y,
+          time: now
+        });
+      }
+
       console.log('[PlinkoEngine] Bucket gate opened');
     }
   }
@@ -517,6 +528,11 @@ export class PlinkoPhysicsEngine {
    * A ball is considered stuck if it hasn't moved significantly for STUCK_THRESHOLD_MS.
    */
   private checkForStuckBalls() {
+    // Don't check for stuck balls while they are in the bucket (filling phase)
+    if (!this.isBucketOpen && this.bucketGate) {
+      return;
+    }
+
     const now = Date.now();
     const { height } = this.options;
     const { PADDING_BOTTOM } = PLINKO_LAYOUT;
