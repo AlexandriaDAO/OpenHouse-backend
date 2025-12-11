@@ -7,7 +7,7 @@ pub mod statistics;
 pub mod types;
 
 // Re-export types and update functions from original modules
-pub use accounting::update_balance;
+pub use accounting::{update_balance, try_deduct_balance};
 
 // Re-export query functions from query module
 pub use query::{

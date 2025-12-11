@@ -82,39 +82,31 @@ fn calculate_payout(bet_amount: u64, multiplier_bp: u64) -> Result<u64, String> 
 // =============================================================================
 
 pub async fn play_plinko(bet_amount: u64, caller: Principal) -> Result<PlinkoGameResult, String> {
-    // 1. Check user balance
-    let user_balance = accounting::get_balance(caller);
-    if user_balance < bet_amount {
-        return Err("INSUFFICIENT_BALANCE".to_string());
-    }
-
-    // 2. Validate minimum bet (0.01 USDT)
+    // 1. Validate minimum bet (0.01 USDT)
     if bet_amount < MIN_BET {
         return Err("Invalid bet: minimum is 0.01 USDT".to_string());
     }
 
-    // 3. Check max payout against house limit
+    // 2. Check max payout against house limit
     let max_potential_payout = calculate_payout(bet_amount, MAX_MULTIPLIER_BP)?;
     let max_allowed = accounting::get_max_allowed_payout();
     if max_potential_payout > max_allowed {
         return Err("Invalid bet: exceeds house limit".to_string());
     }
 
-    // 4. Get VRF randomness BEFORE deducting balance (fail safe)
+    // 3. Get VRF randomness (async call - execution may suspend here)
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?;
-        
+
     if random_bytes.is_empty() {
         return Err("Insufficient randomness".to_string());
     }
     let random_byte = random_bytes[0];
 
-    // 5. Deduct bet from balance
-    let balance_after_bet = user_balance.checked_sub(bet_amount)
-        .ok_or("Balance underflow")?;
-    accounting::update_balance(caller, balance_after_bet)?;
+    // 4. Atomically deduct bet AFTER await to prevent TOCTOU race condition
+    let _balance_after_bet = accounting::try_deduct_balance(caller, bet_amount)?;
 
-    // 6. Record volume for statistics
+    // 5. Record volume for statistics
     crate::defi_accounting::record_bet_volume(bet_amount);
 
     // 7. Generate path and calculate position
@@ -177,13 +169,7 @@ pub async fn play_multi_plinko(ball_count: u8, bet_per_ball: u64, caller: Princi
     let total_bet = bet_per_ball.checked_mul(ball_count as u64)
         .ok_or("Total bet calculation overflow")?;
 
-    // 2. Check user balance
-    let user_balance = accounting::get_balance(caller);
-    if user_balance < total_bet {
-        return Err("INSUFFICIENT_BALANCE".to_string());
-    }
-
-    // 3. Check max payout against house limit (using variance-aware calculation)
+    // 2. Check max payout against house limit (using variance-aware calculation)
     // Use the effective multiplier based on ball count, not the theoretical max
     let effective_mult_bp = calculate_effective_max_multiplier_bp(ball_count);
     let max_potential_payout_per_ball = calculate_payout(bet_per_ball, effective_mult_bp)?;
@@ -195,7 +181,7 @@ pub async fn play_multi_plinko(ball_count: u8, bet_per_ball: u64, caller: Princi
         return Err("Invalid bet: exceeds house limit for total payout".to_string());
     }
 
-    // 4. Get VRF randomness
+    // 3. Get VRF randomness (async call - execution may suspend here)
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?;
 
@@ -203,12 +189,10 @@ pub async fn play_multi_plinko(ball_count: u8, bet_per_ball: u64, caller: Princi
         return Err("Insufficient randomness".to_string());
     }
 
-    // 5. Deduct total bet
-    let balance_after_bet = user_balance.checked_sub(total_bet)
-        .ok_or("Balance underflow")?;
-    accounting::update_balance(caller, balance_after_bet)?;
+    // 4. Atomically deduct total bet AFTER await to prevent TOCTOU race condition
+    let _balance_after_bet = accounting::try_deduct_balance(caller, total_bet)?;
 
-    // 6. Record volume
+    // 5. Record volume
     crate::defi_accounting::record_bet_volume(total_bet);
 
     // 7. Process each ball
