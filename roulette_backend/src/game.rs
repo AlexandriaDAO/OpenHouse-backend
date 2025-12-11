@@ -146,7 +146,12 @@ fn evaluate_bet(bet: &Bet, winning: u8) -> BetResult {
     };
 
     // Payout includes original bet back (e.g., 35:1 means bet + 35*bet)
-    let payout = if won { bet.amount + bet.amount * multiplier } else { 0 };
+    // Use saturating arithmetic to prevent overflow on large bets
+    let payout = if won {
+        bet.amount.saturating_add(bet.amount.saturating_mul(multiplier))
+    } else {
+        0
+    };
 
     BetResult {
         bet_type: bet.bet_type.clone(),
