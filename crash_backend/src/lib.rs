@@ -18,213 +18,294 @@
 //! - All crash points independently verifiable
 //! - No state, no rounds, no complex mechanics
 
-use candid::{CandidType, Deserialize};
+use candid::{CandidType, Deserialize, Principal};
 use ic_cdk::{init, pre_upgrade, post_upgrade, query, update};
 use ic_cdk::management_canister::raw_rand;
+use ic_stable_structures::memory_manager::{MemoryManager, VirtualMemory};
+use ic_stable_structures::DefaultMemoryImpl;
+use std::cell::RefCell;
+use std::time::Duration;
 
-// Constants
-const MAX_CRASH: f64 = 100.0;  // Cap crash at 100x
+// ============================================================================
+// MODULE DECLARATIONS
+// ============================================================================
 
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct CrashResult {
-    pub crash_point: f64,           // Where it crashed (1.00x - 1000.00x)
-    pub randomness_hash: String,    // IC randomness hash for audit/reference
+mod defi_accounting;
+pub mod types;
+pub mod game;
+
+pub use game::{PlayCrashResult, MultiCrashResult};
+
+// ============================================================================
+// MEMORY MANAGEMENT
+// ============================================================================
+
+pub type Memory = VirtualMemory<DefaultMemoryImpl>;
+
+thread_local! {
+    pub static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
+        RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
 }
 
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct PlayCrashResult {
-    pub crash_point: f64,              // Where it crashed
-    pub won: bool,                     // Did user win?
-    pub target_multiplier: f64,        // User's target
-    pub payout: u64,                   // Payout in ckUSDT decimals - 6 decimals (0 if lost)
-    pub randomness_hash: String,       // IC randomness hash
-}
+// ============================================================================
+// CONSTANTS
+// ============================================================================
 
-/// Result for a single rocket in multi-rocket mode
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct SingleRocketResult {
-    pub rocket_index: u8,           // 0-9
-    pub crash_point: f64,           // Where this rocket crashed
-    pub reached_target: bool,       // Did it reach the target?
-    pub payout: u64,                // Payout for this rocket (0 if crashed early)
-}
+const MAX_CRASH: f64 = 100.0;
 
-/// Result for multi-rocket crash game
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct MultiCrashResult {
-    pub rockets: Vec<SingleRocketResult>,  // Individual results
-    pub target_multiplier: f64,            // Shared target
-    pub rocket_count: u8,                  // How many rockets launched
-    pub rockets_succeeded: u8,             // How many reached target
-    pub total_payout: u64,                 // Sum of all payouts
-    pub master_randomness_hash: String,    // VRF seed hash for verification
-}
+// ============================================================================
+// LIFECYCLE HOOKS
+// ============================================================================
 
-// Memory management for future upgrades
 #[init]
 fn init() {
-    ic_cdk::println!("Simple Crash Game initialized");
+    ic_cdk::println!("Crash Backend Initialized with DeFi Accounting");
+    defi_accounting::accounting::start_parent_withdrawal_timer();
+    defi_accounting::accounting::start_balance_reconciliation_timer();
+    defi_accounting::start_stats_timer();
+
+    // Initialize cached balance on fresh install using a one-shot timer
+    ic_cdk_timers::set_timer(Duration::ZERO, async {
+        defi_accounting::accounting::refresh_canister_balance().await;
+        ic_cdk::println!("Init: balance cache initialized");
+    });
 }
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    // Stateless - nothing to preserve
-    ic_cdk::println!("Pre-upgrade: No state to preserve");
+    // StableBTreeMap persists automatically
+    ic_cdk::println!("Pre-upgrade: state persists automatically");
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    // Stateless - nothing to restore
-    ic_cdk::println!("Post-upgrade: No state to restore");
+    defi_accounting::accounting::start_parent_withdrawal_timer();
+    defi_accounting::accounting::start_balance_reconciliation_timer();
+    defi_accounting::start_stats_timer();
+
+    // Initialize cached balance immediately after upgrade using a one-shot timer
+    ic_cdk_timers::set_timer(Duration::ZERO, async {
+        defi_accounting::accounting::refresh_canister_balance().await;
+        ic_cdk::println!("Post-upgrade: balance cache initialized");
+    });
+
+    ic_cdk::println!("Post-upgrade: timers restarted");
 }
 
-/// Simulate a crash point using IC threshold randomness
-/// Returns crash point and randomness hash for audit/reference
-///
-/// DEPRECATED: Use play_crash() instead for secure pre-commitment model
-#[update]
-async fn simulate_crash() -> Result<CrashResult, String> {
-    // Get randomness from IC's threshold randomness beacon (raw_rand)
-    let random_bytes = raw_rand().await
-        .map_err(|e| format!("Randomness unavailable: {:?}", e))?
-;
+// ============================================================================
+// SOLVENCY CHECK
+// ============================================================================
 
-    // Convert first 8 bytes to f64 in range [0.0, 1.0)
-    let random = bytes_to_float(&random_bytes)?;
+fn is_canister_solvent() -> bool {
+    let pool_reserve = defi_accounting::liquidity_pool::get_pool_reserve();
+    let total_deposits = defi_accounting::accounting::calculate_total_deposits_internal();
+    let canister_balance = defi_accounting::accounting::get_cached_canister_balance_internal();
 
-    // Calculate crash point with 1% house edge
-    // Formula: crash = 1.0 / (1.0 - 0.99 * random)
-    let crash_point = calculate_crash_point(random);
-
-    // Create randomness hash for audit/reference (SHA256 of random bytes)
-    let randomness_hash = create_randomness_hash(&random_bytes);
-
-    Ok(CrashResult {
-        crash_point,
-        randomness_hash,
-    })
-}
-
-/// Play crash game with pre-committed target
-/// User must set target before game starts (no mid-flight decisions)
-/// Returns outcome after rocket crashes
-#[update]
-async fn play_crash(target_multiplier: f64) -> Result<PlayCrashResult, String> {
-    // Validate target is in valid range
-    if target_multiplier < 1.01 {
-        return Err("Target must be at least 1.01x".to_string());
-    }
-    if target_multiplier > MAX_CRASH {
-        return Err(format!("Target cannot exceed {}x", MAX_CRASH));
-    }
-    if !target_multiplier.is_finite() {
-        return Err("Target must be a finite number".to_string());
-    }
-
-    // Get randomness from IC VRF
-    let random_bytes = raw_rand().await
-        .map_err(|e| format!("Randomness unavailable: {:?}", e))?
-;
-
-    // Convert to float and calculate crash point
-    let random = bytes_to_float(&random_bytes)?;
-    let crash_point = calculate_crash_point(random);
-
-    // Determine outcome
-    let won = crash_point >= target_multiplier;
-
-    // Calculate payout (for now, simple 1 USDT bet)
-    // In future: integrate with actual betting system
-    let payout = if won {
-        (target_multiplier * 1_000_000.0) as u64  // Convert to 6 decimals
-    } else {
-        0
+    let obligations = match pool_reserve.checked_add(total_deposits) {
+        Some(o) => o,
+        None => {
+            ic_cdk::println!("CRITICAL: Obligations overflow u64::MAX");
+            return false;
+        }
     };
 
-    // Create hash for provable fairness
-    let randomness_hash = create_randomness_hash(&random_bytes);
-
-    Ok(PlayCrashResult {
-        crash_point,
-        won,
-        target_multiplier,
-        payout,
-        randomness_hash,
-    })
+    canister_balance >= obligations
 }
 
-/// Play crash game with multiple rockets targeting same multiplier
-/// Each rocket has independent crash point derived from single VRF call
-/// Returns outcome for all rockets after they crash
+// ============================================================================
+// GAME ENDPOINTS (BETTING)
+// ============================================================================
+
 #[update]
-async fn play_crash_multi(target_multiplier: f64, rocket_count: u8) -> Result<MultiCrashResult, String> {
-    const MAX_ROCKETS: u8 = 10;
-
-    // Validate target_multiplier (same as play_crash)
-    if target_multiplier < 1.01 {
-        return Err("Target must be at least 1.01x".to_string());
+async fn play_crash(bet_amount: u64, target_multiplier: f64) -> Result<PlayCrashResult, String> {
+    if !is_canister_solvent() {
+        return Err("Game temporarily paused - insufficient funds.".to_string());
     }
-    if target_multiplier > MAX_CRASH {
-        return Err(format!("Target cannot exceed {}x", MAX_CRASH));
-    }
-    if !target_multiplier.is_finite() {
-        return Err("Target must be a finite number".to_string());
-    }
-
-    // Validate rocket_count
-    if rocket_count < 1 {
-        return Err("Must launch at least 1 rocket".to_string());
-    }
-    if rocket_count > MAX_ROCKETS {
-        return Err(format!("Maximum {} rockets allowed", MAX_ROCKETS));
-    }
-
-    // Get randomness from IC VRF (single call for all rockets)
-    let random_bytes = raw_rand().await
-        .map_err(|e| format!("Randomness unavailable: {:?}", e))?;
-
-    // Derive independent crash point for each rocket
-    let mut rockets = Vec::with_capacity(rocket_count as usize);
-    let mut rockets_succeeded: u8 = 0;
-    let mut total_payout: u64 = 0;
-
-    for i in 0..rocket_count {
-        let random = derive_rocket_random(&random_bytes, i)?;
-        let crash_point = calculate_crash_point(random);
-        let reached_target = crash_point >= target_multiplier;
-
-        // Calculate payout (1 USDT per rocket, 6 decimals)
-        let payout = if reached_target {
-            (target_multiplier * 1_000_000.0) as u64
-        } else {
-            0
-        };
-
-        if reached_target {
-            rockets_succeeded += 1;
-        }
-        total_payout += payout;
-
-        rockets.push(SingleRocketResult {
-            rocket_index: i,
-            crash_point,
-            reached_target,
-            payout,
-        });
-    }
-
-    // Create master hash for provable fairness
-    let master_randomness_hash = create_randomness_hash(&random_bytes);
-
-    Ok(MultiCrashResult {
-        rockets,
-        target_multiplier,
-        rocket_count,
-        rockets_succeeded,
-        total_payout,
-        master_randomness_hash,
-    })
+    game::play_crash(bet_amount, target_multiplier, ic_cdk::api::msg_caller()).await
 }
+
+#[update]
+async fn play_crash_multi(bet_amount: u64, target_multiplier: f64, rocket_count: u8) -> Result<MultiCrashResult, String> {
+    if !is_canister_solvent() {
+        return Err("Game temporarily paused - insufficient funds.".to_string());
+    }
+    game::play_crash_multi(bet_amount, target_multiplier, rocket_count, ic_cdk::api::msg_caller()).await
+}
+
+// =============================================================================
+// ACCOUNTING ENDPOINTS
+// =============================================================================
+
+#[update]
+async fn deposit(amount: u64) -> Result<u64, String> {
+    defi_accounting::accounting::deposit(amount).await
+}
+
+#[update]
+async fn withdraw_all() -> Result<u64, String> {
+    defi_accounting::accounting::withdraw_all().await
+}
+
+#[update]
+async fn retry_withdrawal() -> Result<u64, String> {
+    defi_accounting::accounting::retry_withdrawal().await
+}
+
+#[update]
+fn abandon_withdrawal() -> Result<u64, String> {
+    defi_accounting::accounting::abandon_withdrawal()
+}
+
+#[query]
+fn get_my_withdrawal_status() -> Option<defi_accounting::types::PendingWithdrawal> {
+    defi_accounting::accounting::get_withdrawal_status()
+}
+
+#[query]
+fn get_balance(principal: Principal) -> u64 {
+    defi_accounting::query::get_balance(principal)
+}
+
+#[query]
+fn get_my_balance() -> u64 {
+    defi_accounting::query::get_my_balance()
+}
+
+#[query]
+fn get_house_balance() -> u64 {
+    defi_accounting::query::get_house_balance()
+}
+
+#[query]
+fn get_max_allowed_payout() -> u64 {
+    defi_accounting::query::get_max_allowed_payout()
+}
+
+// =============================================================================
+// LIQUIDITY POOL ENDPOINTS
+// =============================================================================
+
+#[update]
+async fn deposit_liquidity(amount: u64, min_shares_expected: Option<candid::Nat>) -> Result<candid::Nat, String> {
+    defi_accounting::liquidity_pool::deposit_liquidity(amount, min_shares_expected).await
+}
+
+#[update]
+async fn withdraw_all_liquidity() -> Result<u64, String> {
+    defi_accounting::liquidity_pool::withdraw_all_liquidity().await
+}
+
+#[query]
+fn get_pool_stats() -> defi_accounting::liquidity_pool::PoolStats {
+    defi_accounting::query::get_pool_stats()
+}
+
+#[query]
+fn get_lp_position(principal: Principal) -> defi_accounting::liquidity_pool::LPPosition {
+    defi_accounting::query::get_lp_position(principal)
+}
+
+#[query]
+fn get_my_lp_position() -> defi_accounting::liquidity_pool::LPPosition {
+    defi_accounting::query::get_my_lp_position()
+}
+
+#[query]
+fn calculate_shares_preview(amount: u64) -> Result<candid::Nat, String> {
+    defi_accounting::liquidity_pool::calculate_shares_preview(amount)
+}
+
+#[query]
+fn can_accept_bets() -> bool {
+    defi_accounting::liquidity_pool::can_accept_bets()
+}
+
+#[query]
+fn get_house_mode() -> String {
+    defi_accounting::query::get_house_mode()
+}
+
+// =============================================================================
+// ADMIN ENDPOINTS
+// =============================================================================
+
+#[update]
+async fn admin_health_check() -> Result<defi_accounting::types::HealthCheck, String> {
+    defi_accounting::admin_query::admin_health_check().await
+}
+
+#[query]
+fn admin_get_all_pending_withdrawals() -> Result<Vec<defi_accounting::types::PendingWithdrawalInfo>, String> {
+    defi_accounting::admin_query::get_all_pending_withdrawals()
+}
+
+#[query]
+fn admin_get_orphaned_funds_report(recent_limit: Option<u64>) -> Result<defi_accounting::types::OrphanedFundsReport, String> {
+    defi_accounting::admin_query::get_orphaned_funds_report(recent_limit)
+}
+
+#[query]
+fn admin_get_orphaned_funds_report_full() -> Result<defi_accounting::types::OrphanedFundsReport, String> {
+    defi_accounting::admin_query::get_orphaned_funds_report_full()
+}
+
+#[query]
+fn admin_get_all_balances(offset: u64, limit: u64) -> Result<Vec<defi_accounting::types::UserBalance>, String> {
+    defi_accounting::admin_query::get_all_balances(offset, limit)
+}
+
+#[query]
+fn admin_get_all_balances_complete() -> Result<Vec<defi_accounting::types::UserBalance>, String> {
+    defi_accounting::admin_query::get_all_balances_complete()
+}
+
+#[query]
+fn admin_get_all_lp_positions(offset: u64, limit: u64) -> Result<Vec<defi_accounting::types::LPPositionInfo>, String> {
+    defi_accounting::admin_query::get_all_lp_positions(offset, limit)
+}
+
+#[query]
+fn admin_get_all_lp_positions_complete() -> Result<Vec<defi_accounting::types::LPPositionInfo>, String> {
+    defi_accounting::admin_query::get_all_lp_positions_complete()
+}
+
+#[query]
+fn admin_get_audit_log(limit: u64, offset: u64) -> Result<Vec<defi_accounting::types::AuditEntry>, String> {
+    defi_accounting::admin_query::get_audit_log(limit, offset)
+}
+
+#[query]
+fn admin_get_audit_log_count() -> Result<u64, String> {
+    defi_accounting::admin_query::get_audit_log_count()
+}
+
+// =============================================================================
+// STATISTICS ENDPOINTS
+// =============================================================================
+
+#[query]
+fn get_daily_stats(limit: u32) -> Vec<defi_accounting::DailySnapshot> {
+    defi_accounting::get_daily_snapshots(limit)
+}
+
+#[query]
+fn get_pool_apy(days: Option<u32>) -> defi_accounting::ApyInfo {
+    defi_accounting::get_apy_info(days)
+}
+
+#[query]
+fn get_stats_range(start_ts: u64, end_ts: u64) -> Vec<defi_accounting::DailySnapshot> {
+    defi_accounting::get_snapshots_range(start_ts, end_ts)
+}
+
+#[query]
+fn get_stats_count() -> u64 {
+    defi_accounting::get_snapshot_count()
+}
+
+// ============================================================================
+// EXISTING QUERY FUNCTIONS (PRESERVED)
+// ============================================================================
 
 /// Get the crash formula as a string
 #[query]
@@ -271,504 +352,7 @@ fn get_probability_table() -> Vec<(f64, f64)> {
         .collect()
 }
 
-// ============================================================================
-// INTERNAL FUNCTIONS
-// ============================================================================
-
-/// Convert VRF bytes to float in range [0.0, 1.0)
-fn bytes_to_float(bytes: &[u8]) -> Result<f64, String> {
-    if bytes.len() < 8 {
-        return Err("Insufficient randomness bytes".to_string());
-    }
-
-    // Use first 8 bytes as u64, then normalize to [0.0, 1.0)
-    let mut byte_array = [0u8; 8];
-    byte_array.copy_from_slice(&bytes[0..8]);
-    let random_u64 = u64::from_be_bytes(byte_array);
-
-    // Normalize: divide by 2^53 to get [0.0, 1.0) with full f64 precision
-    // f64 has 53 bits of mantissa, so we right-shift by 11 bits (64 - 53 = 11)
-    // to get the most significant 53 bits, ensuring uniform distribution
-    // across the full floating-point precision range
-    let random = (random_u64 >> 11) as f64 / (1u64 << 53) as f64;
-
-    Ok(random)
-}
-
-/// Derive an independent float for a specific rocket index
-/// Uses SHA256(vrf_bytes + index) to generate independent values
-/// This ensures each rocket has a cryptographically independent crash point
-fn derive_rocket_random(vrf_bytes: &[u8], rocket_index: u8) -> Result<f64, String> {
-    use sha2::{Sha256, Digest};
-
-    let mut hasher = Sha256::new();
-    hasher.update(vrf_bytes);
-    hasher.update([rocket_index]); // Include index for independence
-    let hash = hasher.finalize();
-
-    // Convert first 8 bytes to f64 in range [0.0, 1.0)
-    let mut byte_array = [0u8; 8];
-    byte_array.copy_from_slice(&hash[0..8]);
-    let random_u64 = u64::from_be_bytes(byte_array);
-    let random = (random_u64 >> 11) as f64 / (1u64 << 53) as f64;
-
-    Ok(random)
-}
-
-/// Calculate crash point using the formula
-/// crash = 0.99 / (1.0 - random)
-///
-/// **Mathematical Guarantee**: This formula provides exactly 1% house edge for ALL multipliers:
-/// - P(crash ≥ X) = 0.99 / X
-/// - Expected return = P(crash ≥ X) × X = 0.99 (constant 1% house edge)
-/// - This holds for ANY cash-out strategy or multiplier target
-///
-/// **Distribution Note**: Random values are clamped to [0.0, 0.99999] before applying
-/// the formula to prevent division by zero:
-/// - Max crash = 0.99 / (1.0 - 0.99999) ≈ 99,000x (then capped at MAX_CRASH)
-/// - Clamping affects <0.001% of values, minimal impact on fairness
-/// - House edge remains exactly 1% for all practical multipliers
-///
-/// **Precision Note**: For very high multipliers (>100x), floating-point
-/// rounding may introduce small deviations (<0.01%) from the theoretical
-/// distribution. This is acceptable for practical casino purposes.
-pub fn calculate_crash_point(random: f64) -> f64 {
-    // Ensure random is in valid range to prevent division by zero
-    // Clamping to 0.99999 allows max crash ≈ 99,000x before MAX_CRASH cap
-    let random = random.max(0.0).min(0.99999);
-
-    // Apply corrected formula for constant 1% house edge
-    let crash = 0.99 / (1.0 - random);
-
-    // Cap at maximum
-    crash.min(MAX_CRASH)
-}
-
-/// Create SHA256 hash of IC randomness bytes for audit/display purposes
-///
-/// **Important Limitation**: This hash is for reference only and does not provide
-/// cryptographic verification of fairness. Users cannot independently verify the
-/// randomness without access to IC's internal consensus mechanism. The hash serves
-/// as an identifier for this particular random draw, not a cryptographic proof.
-///
-/// True cryptographic verification would require:
-/// - Access to IC's BLS threshold signatures
-/// - Verification against subnet public keys
-/// - Understanding of IC's random tape construction
-///
-/// For now, fairness relies on trusting the IC's threshold randomness beacon.
-fn create_randomness_hash(bytes: &[u8]) -> String {
-    use sha2::{Sha256, Digest};
-
-    // Ensure we have sufficient entropy (at least 32 bytes)
-    let hash_bytes = if bytes.len() >= 32 {
-        &bytes[0..32]
-    } else {
-        // Use all available bytes if less than 32
-        bytes
-    };
-
-    let mut hasher = Sha256::new();
-    hasher.update(hash_bytes);
-    format!("{:x}", hasher.finalize())
-}
-
 #[query]
 fn greet(name: String) -> String {
     format!("Simple Crash: Transparent 1% edge, {} wins or loses fairly with USDT!", name)
-}
-
-// ============================================================================
-// TESTS
-// ============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_crash_formula_at_boundaries() {
-        // random = 0.0 → crash = 0.99 / 1.0 = 0.99x
-        assert!((calculate_crash_point(0.0) - 0.99).abs() < 0.01);
-
-        // random = 0.5 → crash = 0.99 / 0.5 = 1.98x
-        assert!((calculate_crash_point(0.5) - 1.98).abs() < 0.01);
-
-        // random = 0.9 → crash = 0.99 / 0.1 = 9.9x
-        assert!((calculate_crash_point(0.9) - 9.9).abs() < 0.1);
-
-        // random = 0.99 → crash = 0.99 / 0.01 = 99x
-        let high_crash = calculate_crash_point(0.99);
-        assert!((high_crash - 99.0).abs() < 1.0);
-        assert!(high_crash <= MAX_CRASH);
-    }
-
-    #[test]
-    fn test_win_probability_formula() {
-        // P(crash ≥ 2.0) = 0.99 / 2.0 = 49.5%
-        assert!((get_win_probability(2.0).unwrap() - 0.495).abs() < 0.001);
-
-        // P(crash ≥ 10.0) = 0.99 / 10.0 = 9.9%
-        assert!((get_win_probability(10.0).unwrap() - 0.099).abs() < 0.001);
-
-        // P(crash ≥ 100.0) = 0.99 / 100.0 = 0.99%
-        assert!((get_win_probability(100.0).unwrap() - 0.0099).abs() < 0.0001);
-    }
-
-    #[test]
-    fn test_expected_return_constant_house_edge() {
-        // For ANY target X: P(crash ≥ X) × X should equal 0.99
-        let targets = vec![1.1, 2.0, 5.0, 10.0, 50.0, 100.0];
-
-        for target in targets {
-            let win_prob = get_win_probability(target).unwrap();
-            let expected_return = win_prob * target;
-
-            assert!(
-                (expected_return - 0.99).abs() < 0.01,
-                "Target {}: expected return = {}, should be 0.99",
-                target, expected_return
-            );
-        }
-    }
-
-    #[test]
-    fn test_bytes_to_float_range() {
-        // Test with various byte patterns
-        let test_cases = vec![
-            vec![0u8; 8],           // All zeros → 0.0
-            vec![255u8; 8],         // All ones → ~1.0
-            vec![128u8; 8],         // Mid → ~0.5
-        ];
-
-        for bytes in test_cases {
-            let random = bytes_to_float(&bytes).unwrap();
-            assert!(random >= 0.0 && random < 1.0,
-                "Random value {} out of range [0.0, 1.0)", random);
-        }
-    }
-
-    #[test]
-    fn test_create_randomness_hash() {
-        // Test that randomness hash is consistent and has expected format
-        let test_bytes = vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
-                              17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
-
-        let hash1 = create_randomness_hash(&test_bytes);
-        let hash2 = create_randomness_hash(&test_bytes);
-
-        // Hash should be deterministic
-        assert_eq!(hash1, hash2);
-
-        // Hash should be 64 hex characters (32 bytes * 2)
-        assert_eq!(hash1.len(), 64);
-
-        // Hash should only contain hex characters
-        assert!(hash1.chars().all(|c| c.is_ascii_hexdigit()));
-
-        // Different input should produce different hash
-        let different_bytes = vec![255u8; 32];
-        let hash3 = create_randomness_hash(&different_bytes);
-        assert_ne!(hash1, hash3);
-    }
-
-    #[test]
-    fn test_greet() {
-        // Test greeting message format
-        let result = greet("Alice".to_string());
-        assert_eq!(result, "Simple Crash: Transparent 1% edge, Alice wins or loses fairly with USDT!");
-
-        let result2 = greet("Bob".to_string());
-        assert_eq!(result2, "Simple Crash: Transparent 1% edge, Bob wins or loses fairly with USDT!");
-
-        // Test with empty string
-        let result3 = greet("".to_string());
-        assert_eq!(result3, "Simple Crash: Transparent 1% edge,  wins or loses fairly with USDT!");
-    }
-
-    #[test]
-    fn test_win_probability_edge_cases() {
-        // Target < 1.0 should return 1.0 (always wins since min crash is 1.0)
-        assert_eq!(get_win_probability(0.5).unwrap(), 1.0);
-        assert_eq!(get_win_probability(0.99).unwrap(), 1.0);
-        assert_eq!(get_win_probability(0.0).unwrap(), 1.0);
-
-        // Target > MAX_CRASH should return 0.0 (impossible to reach)
-        assert_eq!(get_win_probability(1001.0).unwrap(), 0.0);
-        assert_eq!(get_win_probability(10000.0).unwrap(), 0.0);
-
-        // Target exactly at 1.0 should return close to 1.0
-        let prob_at_one = get_win_probability(1.0).unwrap();
-        assert!((prob_at_one - 0.99).abs() < 0.01);
-
-        // Target at MAX_CRASH should return very small probability
-        let prob_at_max = get_win_probability(MAX_CRASH).unwrap();
-        assert!(prob_at_max > 0.0 && prob_at_max < 0.01);
-
-        // Test non-finite inputs
-        assert!(get_win_probability(f64::NAN).is_err());
-        assert!(get_win_probability(f64::INFINITY).is_err());
-        assert!(get_win_probability(f64::NEG_INFINITY).is_err());
-    }
-
-    #[test]
-    fn test_crash_point_extreme_values() {
-        // Test with random = 0.0 (minimum) → crash = 0.99 / 1.0 = 0.99x
-        let crash_min = calculate_crash_point(0.0);
-        assert!((crash_min - 0.99).abs() < 0.01);
-
-        // Test with random = 0.999 → crash = 0.99 / 0.001 = 990x, capped at MAX_CRASH
-        let crash_at_clamp = calculate_crash_point(0.999);
-        assert!(crash_at_clamp <= MAX_CRASH);
-
-        // Test with random > 0.99999 (should be clamped to 0.99999)
-        // crash = 0.99 / 0.00001 = 99,000x (then capped at MAX_CRASH)
-        let crash_above_clamp = calculate_crash_point(0.9999);
-        assert!(crash_above_clamp <= MAX_CRASH);
-
-        // Test with random = 1.0 (should be clamped to 0.99999)
-        let crash_at_one = calculate_crash_point(1.0);
-        assert!(crash_at_one <= MAX_CRASH);
-
-        // Verify clamping prevents division by zero
-        let crash_extreme = calculate_crash_point(f64::MAX);
-        assert!(crash_extreme.is_finite());
-        assert!(crash_extreme <= MAX_CRASH);
-    }
-
-    #[test]
-    fn test_create_randomness_hash_with_short_input() {
-        // Test with less than 32 bytes
-        let short_bytes = vec![1u8; 16];
-        let hash = create_randomness_hash(&short_bytes);
-
-        // Should still produce valid hash
-        assert_eq!(hash.len(), 64);
-        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
-
-        // Test with minimal bytes
-        let minimal_bytes = vec![42u8; 8];
-        let hash_minimal = create_randomness_hash(&minimal_bytes);
-        assert_eq!(hash_minimal.len(), 64);
-
-        // Different short inputs should produce different hashes
-        assert_ne!(hash, hash_minimal);
-    }
-
-    #[test]
-    fn test_bytes_to_float_insufficient_bytes() {
-        // Test with less than 8 bytes (should error)
-        let short = vec![1u8; 7];
-        let result = bytes_to_float(&short);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Insufficient randomness bytes");
-
-        // Test with exactly 8 bytes (should work)
-        let exact = vec![1u8; 8];
-        let result = bytes_to_float(&exact);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_clamping_preserves_distribution() {
-        // Verify that clamping doesn't significantly distort the distribution
-        // With new formula: crash = 0.99 / (1 - random)
-        // Higher random values produce higher crash points
-
-        let r1 = 0.0;   // crash = 0.99 / 1.0 = 0.99x
-        let r2 = 0.5;   // crash = 0.99 / 0.5 = 1.98x
-        let r3 = 0.98;  // crash = 0.99 / 0.02 = 49.5x
-
-        let c1 = calculate_crash_point(r1);
-        let c2 = calculate_crash_point(r2);
-        let c3 = calculate_crash_point(r3);
-
-        // Verify increasing random produces increasing crash (until cap)
-        assert!(c1 < c2);
-        assert!(c2 < c3);
-
-        // All should be within valid range (note: c1 can be < 1.0 with new formula)
-        assert!(c1 > 0.0 && c1 <= MAX_CRASH);
-        assert!(c2 > 0.0 && c2 <= MAX_CRASH);
-        assert!(c3 > 0.0 && c3 <= MAX_CRASH);
-
-        // Verify specific values
-        assert!((c1 - 0.99).abs() < 0.01);
-        assert!((c2 - 1.98).abs() < 0.01);
-        assert!((c3 - 49.5).abs() < 1.0);
-    }
-
-    // ============================================================================
-    // MULTI-ROCKET TESTS
-    // ============================================================================
-
-    #[test]
-    fn test_derive_rocket_random_independence() {
-        // Same VRF bytes, different indices should produce different values
-        let vrf_bytes = vec![1u8; 32];
-
-        let r0 = derive_rocket_random(&vrf_bytes, 0).unwrap();
-        let r1 = derive_rocket_random(&vrf_bytes, 1).unwrap();
-        let r2 = derive_rocket_random(&vrf_bytes, 2).unwrap();
-
-        // All should be different
-        assert_ne!(r0, r1);
-        assert_ne!(r1, r2);
-        assert_ne!(r0, r2);
-
-        // All should be in valid range
-        assert!(r0 >= 0.0 && r0 < 1.0);
-        assert!(r1 >= 0.0 && r1 < 1.0);
-        assert!(r2 >= 0.0 && r2 < 1.0);
-    }
-
-    #[test]
-    fn test_derive_rocket_random_deterministic() {
-        // Same inputs should always produce same output
-        let vrf_bytes = vec![42u8; 32];
-
-        let r1 = derive_rocket_random(&vrf_bytes, 5).unwrap();
-        let r2 = derive_rocket_random(&vrf_bytes, 5).unwrap();
-
-        assert_eq!(r1, r2);
-    }
-
-    #[test]
-    fn test_derive_rocket_random_different_seeds() {
-        // Different VRF bytes should produce different values for same index
-        let vrf_bytes1 = vec![1u8; 32];
-        let vrf_bytes2 = vec![2u8; 32];
-
-        let r1 = derive_rocket_random(&vrf_bytes1, 0).unwrap();
-        let r2 = derive_rocket_random(&vrf_bytes2, 0).unwrap();
-
-        assert_ne!(r1, r2);
-    }
-
-    #[test]
-    fn test_multi_crash_house_edge() {
-        // Verify each rocket maintains 1% house edge independently
-        // Expected return per rocket = 0.99
-
-        // Test specific crash points derived from known random values
-        let test_randoms = vec![0.0, 0.5, 0.9, 0.99];
-        for random in test_randoms {
-            let crash = calculate_crash_point(random);
-            // Just verify crash point is valid
-            assert!(crash > 0.0 && crash <= MAX_CRASH);
-        }
-    }
-
-    #[test]
-    fn test_derive_rocket_all_indices() {
-        // Test all 10 possible rocket indices produce unique values
-        let vrf_bytes = vec![123u8; 32];
-        let mut values = Vec::new();
-
-        for i in 0..10u8 {
-            let r = derive_rocket_random(&vrf_bytes, i).unwrap();
-            assert!(r >= 0.0 && r < 1.0, "Index {} produced out of range value: {}", i, r);
-            values.push(r);
-        }
-
-        // All values should be unique
-        for i in 0..values.len() {
-            for j in (i + 1)..values.len() {
-                assert_ne!(values[i], values[j], "Indices {} and {} produced same value", i, j);
-            }
-        }
-    }
-
-    // ============================================================================
-    // HOUSE EDGE SIMULATION TESTS
-    // ============================================================================
-    // Note: These tests use the `rand` crate which is only available in dev-dependencies
-    // They are kept inline rather than in tests/ folder due to cdylib linking constraints
-
-    #[cfg(test)]
-    mod house_edge_simulation {
-        use super::*;
-
-        /// Simulate N games and calculate average return when cashing out at target multiplier
-        fn simulate_games_at_multiplier(target: f64, num_games: usize, seed: u64) -> f64 {
-            use rand::{Rng, SeedableRng};
-            use rand_chacha::ChaCha8Rng;
-
-            let mut rng = ChaCha8Rng::seed_from_u64(seed);
-            let mut total_return = 0.0;
-
-            for _ in 0..num_games {
-                // Generate random value in [0.0, 1.0)
-                let random: f64 = rng.gen();
-
-                // Calculate crash point using actual game formula
-                let crash_point = calculate_crash_point(random);
-
-                // Player cashes out at target multiplier
-                let return_multiplier = if crash_point >= target {
-                    target
-                } else {
-                    0.0
-                };
-
-                total_return += return_multiplier;
-            }
-
-            total_return / num_games as f64
-        }
-
-        #[test]
-        fn test_house_edge_at_various_multipliers() {
-            println!("\n╔════════════════════════════════════════════════════════════════════╗");
-            println!("║         Crash Game House Edge Simulation (100K games each)        ║");
-            println!("╚════════════════════════════════════════════════════════════════════╝\n");
-
-            const NUM_GAMES: usize = 100_000;
-            const SEED: u64 = 12345;
-
-            // Test comprehensive range of multipliers up to MAX_CRASH (100x)
-            let targets = vec![1.1, 1.5, 2.0, 3.0, 5.0, 10.0, 20.0, 50.0, 100.0];
-            let mut all_returns = Vec::new();
-
-            println!("Target | Wins      | Win %   | Avg Return | House Edge | Theoretical");
-            println!("-------|-----------|---------|------------|------------|------------");
-
-            for target in targets {
-                let avg_return = simulate_games_at_multiplier(target, NUM_GAMES, SEED);
-                all_returns.push(avg_return);
-
-                // Calculate win count from average return
-                let win_rate = avg_return / target;
-                let wins = (win_rate * NUM_GAMES as f64) as usize;
-                let house_edge = (1.0 - avg_return) * 100.0;
-                let theoretical_edge = 1.0;
-
-                println!("{:>6.1}x | {:>9} | {:>6.2}% | {:>10.4}x | {:>9.2}% | {:>10.2}%",
-                         target, wins, win_rate * 100.0, avg_return, house_edge, theoretical_edge);
-
-                // Verify house edge exists (return < 1.0)
-                assert!(avg_return < 1.0, "House should have an edge");
-
-                // Verify it's reasonably close to 0.99x (allowing for statistical variance)
-                // Higher tolerance for extreme multipliers due to capping and variance
-                let tolerance = if target >= MAX_CRASH { 0.05 } else { 0.02 };
-                assert!(
-                    (avg_return - 0.99).abs() < tolerance,
-                    "Target {}x: expected return ≈ 0.99x, got {:.4}x",
-                    target, avg_return
-                );
-            }
-
-            let overall_avg = all_returns.iter().sum::<f64>() / all_returns.len() as f64;
-            let overall_edge = (1.0 - overall_avg) * 100.0;
-
-            println!("\n{}", "═".repeat(72));
-            println!("Overall Average Return: {:.4}x", overall_avg);
-            println!("Overall House Edge:     {:.2}%", overall_edge);
-            println!("Target House Edge:      1.00%");
-            println!("{}", "═".repeat(72));
-            println!("\n✓ All multipliers show consistent ~1% house edge");
-            println!("✓ Max crash capped at {:.0}x", MAX_CRASH);
-        }
-    }
 }
