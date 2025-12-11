@@ -83,28 +83,18 @@ pub async fn play_dice(
     client_seed: String,
     caller: Principal
 ) -> Result<MinimalGameResult, String> {
-    // Check user has sufficient internal balance
-    let user_balance = accounting::get_balance(caller);
-    if user_balance < bet_amount {
-        return Err(format!(
-            "INSUFFICIENT_BALANCE|Your dice balance: {:.4} USDT|Bet amount: {:.4} USDT|This bet was not placed and no funds were deducted.",
-            user_balance as f64 / DECIMALS_PER_CKUSDT as f64,
-            bet_amount as f64 / DECIMALS_PER_CKUSDT as f64
-        ));
-    }
-
-    // Validate bet amount
+    // 1. Validate bet amount
     if bet_amount < MIN_BET {
         return Err(format!("Invalid bet: minimum is {:.2} USDT", MIN_BET as f64 / DECIMALS_PER_CKUSDT as f64));
     }
 
-    // Validate target number (P3: uses shared helper)
+    // 2. Validate target number (P3: uses shared helper)
     validate_target_number(target_number, &direction)?;
 
-    // Calculate multiplier for this specific bet
+    // 3. Calculate multiplier for this specific bet
     let multiplier = calculate_multiplier_direct(target_number, &direction);
 
-    // Check house limit (P0: uses shared payout calculator)
+    // 4. Check house limit (P0: uses shared payout calculator)
     let max_payout = calculate_payout(bet_amount, multiplier);
     let max_allowed = accounting::get_max_allowed_payout();
     if max_allowed == 0 {
@@ -118,21 +108,19 @@ pub async fn play_dice(
         ));
     }
 
-    // Validate client seed length (DoS protection)
+    // 5. Validate client seed length (DoS protection)
     if client_seed.len() > 256 {
         return Err("Invalid seed: max 256 characters".to_string());
     }
 
-    // Generate roll BEFORE deducting balance using per-game VRF
+    // 6. Generate roll using per-game VRF (async call - execution may suspend here)
     let (rolled_number, server_seed, nonce) = crate::seed::generate_dice_roll_vrf(&client_seed).await?;
     let server_seed_hash = crate::seed::hash_server_seed(&server_seed);
 
-    // Deduct bet AFTER all validations and fallible operations pass
-    let balance_after_bet = user_balance.checked_sub(bet_amount)
-        .ok_or("Error: balance underflow")?;
-    accounting::update_balance(caller, balance_after_bet)?;
+    // 7. Atomically deduct bet AFTER await to prevent TOCTOU race condition
+    let _balance_after_bet = accounting::try_deduct_balance(caller, bet_amount)?;
 
-    // Record volume for daily statistics
+    // 8. Record volume for daily statistics
     crate::defi_accounting::record_bet_volume(bet_amount);
 
     // Check for exact hit (house wins on exact target match - 0.99% edge)
@@ -208,7 +196,7 @@ pub async fn play_multi_dice(
     client_seed: String,
     caller: Principal,
 ) -> Result<MultiDiceGameResult, String> {
-    // Validate dice count
+    // 1. Validate dice count
     if dice_count == 0 || dice_count > MAX_DICE_COUNT {
         return Err(format!("Invalid dice count: must be 1-{}", MAX_DICE_COUNT));
     }
@@ -217,30 +205,18 @@ pub async fn play_multi_dice(
         .checked_mul(bet_per_dice)
         .ok_or("Error: bet calculation overflow")?;
 
-    // Check user balance
-    let user_balance = accounting::get_balance(caller);
-    if user_balance < total_bet {
-        return Err(format!(
-            "INSUFFICIENT_BALANCE|Your dice balance: {:.4} USDT|Total bet: {:.4} USDT ({} dice x {:.4} USDT)",
-            user_balance as f64 / DECIMALS_PER_CKUSDT as f64,
-            total_bet as f64 / DECIMALS_PER_CKUSDT as f64,
-            dice_count,
-            bet_per_dice as f64 / DECIMALS_PER_CKUSDT as f64
-        ));
-    }
-
-    // Validate per-dice bet
+    // 2. Validate per-dice bet
     if bet_per_dice < MIN_BET {
         return Err(format!("Invalid bet: minimum per dice is {:.2} USDT", MIN_BET as f64 / DECIMALS_PER_CKUSDT as f64));
     }
 
-    // Validate target number (P3: uses shared helper)
+    // 3. Validate target number (P3: uses shared helper)
     validate_target_number(target_number, &direction)?;
 
-    // Calculate multiplier (same for all dice)
+    // 4. Calculate multiplier (same for all dice)
     let multiplier = calculate_multiplier_direct(target_number, &direction);
 
-    // Aggregate max payout check - worst case: all dice win (P0: uses shared calculator)
+    // 5. Aggregate max payout check - worst case: all dice win (P0: uses shared calculator)
     let max_payout_per_dice = calculate_payout(bet_per_dice, multiplier);
     let max_aggregate_payout = max_payout_per_dice
         .checked_mul(dice_count as u64)
@@ -259,20 +235,20 @@ pub async fn play_multi_dice(
         ));
     }
 
-    // Validate client seed
+    // 6. Validate client seed
     if client_seed.len() > 256 {
         return Err("Invalid seed: max 256 characters".to_string());
     }
 
-    // VRF generation (single call for all dice)
+    // 7. VRF generation (async call - execution may suspend here)
     let (rolled_numbers, server_seed, nonce) =
         crate::seed::generate_multi_dice_roll_vrf(dice_count, &client_seed).await?;
     let server_seed_hash = crate::seed::hash_server_seed(&server_seed);
 
-    // Deduct total bet
-    let balance_after_bet = user_balance.checked_sub(total_bet).ok_or("Error: balance underflow")?;
-    accounting::update_balance(caller, balance_after_bet)?;
+    // 8. Atomically deduct total bet AFTER await to prevent TOCTOU race condition
+    let _balance_after_bet = accounting::try_deduct_balance(caller, total_bet)?;
 
+    // 9. Record volume
     crate::defi_accounting::record_bet_volume(total_bet);
 
     // Process each dice

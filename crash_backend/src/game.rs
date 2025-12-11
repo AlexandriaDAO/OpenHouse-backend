@@ -171,26 +171,14 @@ fn create_randomness_hash(bytes: &[u8]) -> String {
 // =============================================================================
 // MAIN GAME LOGIC
 // =============================================================================
-//
-// RACE CONDITION SAFETY:
-// IC canisters execute messages sequentially - no concurrent threads.
-// The balance check → deduct → game → credit sequence has no await points
-// between balance check and deduction, ensuring atomicity.
-// See: https://internetcomputer.org/docs/current/concepts/canisters-code#execution
 
 pub async fn play_crash(bet_amount: u64, target_multiplier: f64, caller: Principal) -> Result<PlayCrashResult, String> {
-    // 1. Check user balance (sync - no await before deduction)
-    let user_balance = accounting::get_balance(caller);
-    if user_balance < bet_amount {
-        return Err("INSUFFICIENT_BALANCE".to_string());
-    }
-
-    // 2. Validate minimum bet (0.01 USDT)
+    // 1. Validate minimum bet (0.01 USDT)
     if bet_amount < MIN_BET {
         return Err("Invalid bet: minimum is 0.01 USDT".to_string());
     }
 
-    // 3. Validate target multiplier
+    // 2. Validate target multiplier
     if target_multiplier < 1.01 {
         return Err("Target must be at least 1.01x".to_string());
     }
@@ -201,14 +189,14 @@ pub async fn play_crash(bet_amount: u64, target_multiplier: f64, caller: Princip
         return Err("Target must be a finite number".to_string());
     }
 
-    // 4. Check max payout against house limit
+    // 3. Check max payout against house limit
     let max_potential_payout = calculate_payout(bet_amount, target_multiplier)?;
     let max_allowed = accounting::get_max_allowed_payout();
     if max_potential_payout > max_allowed {
         return Err("Invalid bet: exceeds house limit".to_string());
     }
 
-    // 5. Get VRF randomness BEFORE deducting balance (fail safe)
+    // 4. Get VRF randomness (async call - execution may suspend here)
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?;
 
@@ -216,12 +204,11 @@ pub async fn play_crash(bet_amount: u64, target_multiplier: f64, caller: Princip
         return Err("Insufficient randomness".to_string());
     }
 
-    // 6. Deduct bet from balance
-    let balance_after_bet = user_balance.checked_sub(bet_amount)
-        .ok_or("Balance underflow")?;
-    accounting::update_balance(caller, balance_after_bet)?;
+    // 5. Atomically deduct bet AFTER await to prevent TOCTOU race condition
+    // This reads current balance and deducts in a single atomic operation
+    let _balance_after_bet = accounting::try_deduct_balance(caller, bet_amount)?;
 
-    // 7. Record volume for statistics
+    // 6. Record volume for statistics
     crate::defi_accounting::record_bet_volume(bet_amount);
 
     // 8. Calculate crash point
@@ -294,13 +281,7 @@ pub async fn play_crash_multi(bet_per_rocket: u64, target_multiplier: f64, rocke
     let total_bet = bet_per_rocket.checked_mul(rocket_count as u64)
         .ok_or("Total bet calculation overflow")?;
 
-    // 2. Check user balance
-    let user_balance = accounting::get_balance(caller);
-    if user_balance < total_bet {
-        return Err("INSUFFICIENT_BALANCE".to_string());
-    }
-
-    // 3. Check max payout against house limit
+    // 2. Check max payout against house limit
     // Worst case: all rockets win at target multiplier
     let max_payout_per_rocket = calculate_payout(bet_per_rocket, target_multiplier)?;
     let max_potential_payout = max_payout_per_rocket.checked_mul(rocket_count as u64)
@@ -311,7 +292,7 @@ pub async fn play_crash_multi(bet_per_rocket: u64, target_multiplier: f64, rocke
         return Err("Invalid bet: exceeds house limit for total payout".to_string());
     }
 
-    // 4. Get VRF randomness
+    // 3. Get VRF randomness (async call - execution may suspend here)
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness unavailable: {:?}", e))?;
 
@@ -319,12 +300,10 @@ pub async fn play_crash_multi(bet_per_rocket: u64, target_multiplier: f64, rocke
         return Err("Insufficient randomness".to_string());
     }
 
-    // 5. Deduct total bet
-    let balance_after_bet = user_balance.checked_sub(total_bet)
-        .ok_or("Balance underflow")?;
-    accounting::update_balance(caller, balance_after_bet)?;
+    // 4. Atomically deduct total bet AFTER await to prevent TOCTOU race condition
+    let _balance_after_bet = accounting::try_deduct_balance(caller, total_bet)?;
 
-    // 6. Record volume
+    // 5. Record volume
     crate::defi_accounting::record_bet_volume(total_bet);
 
     // 7. Process each rocket

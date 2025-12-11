@@ -583,6 +583,42 @@ pub fn update_balance(user: Principal, new_balance: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// Atomically check and deduct balance in a single operation.
+///
+/// # TOCTOU Race Condition Fix
+/// This function prevents the Time-of-Check-Time-of-Use vulnerability by performing
+/// balance check and deduction atomically. Unlike the old pattern where balance was
+/// captured before an await point and then used after, this function reads the CURRENT
+/// balance at the time of deduction.
+///
+/// # Usage
+/// Call this function AFTER any await points (like raw_rand()) to ensure the balance
+/// check uses the current state, not a stale value captured before the await.
+///
+/// # Returns
+/// - Ok(remaining_balance) on success
+/// - Err if withdrawal pending, insufficient funds, or underflow
+pub fn try_deduct_balance(user: Principal, amount: u64) -> Result<u64, String> {
+    if PENDING_WITHDRAWALS.with(|p| p.borrow().contains_key(&user)) {
+        return Err("Cannot deduct balance: withdrawal pending".to_string());
+    }
+
+    USER_BALANCES_STABLE.with(|balances| {
+        let mut balances = balances.borrow_mut();
+        let current = balances.get(&user).unwrap_or(0);
+
+        if current < amount {
+            return Err("INSUFFICIENT_BALANCE".to_string());
+        }
+
+        let new_balance = current.checked_sub(amount)
+            .ok_or("Balance underflow")?;
+
+        balances.insert(user, new_balance);
+        Ok(new_balance)
+    })
+}
+
 /// Force credit balance for internal system refunds.
 ///
 /// # Safety
