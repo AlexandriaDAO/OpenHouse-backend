@@ -6,6 +6,7 @@ import useLedgerActor from '../hooks/actors/useLedgerActor';
 import { LoadingModal, SuccessModal, ErrorModal } from '../components/modals';
 import { TransferArgs, TransferResult, decimalsToUSDT } from '../types/ledger';
 import { parseAmountToE6s } from '../utils/currency';
+import { GameBalancesOverview } from '../components/wallet/GameBalancesOverview';
 
 const CKUSDT_FEE = 10_000n; // 0.01 USDT fee (verified on mainnet)
 
@@ -222,6 +223,11 @@ export const Wallet: React.FC = () => {
             </div>
           </div>
 
+          {/* Game Balances Overview */}
+          <div className="mb-6">
+            <GameBalancesOverview />
+          </div>
+
           {/* Tabs */}
           <div className="flex mb-6 bg-gray-900 rounded-lg p-1 border border-pure-white/20">
             <button
@@ -252,7 +258,7 @@ export const Wallet: React.FC = () => {
               <h2 className="text-xl font-bold text-pure-white mb-4">Receive ckUSDT</h2>
 
               {/* Principal Display */}
-              <div className="mb-6">
+              <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-400 mb-2">
                   Your Principal ID
                 </label>
@@ -267,191 +273,185 @@ export const Wallet: React.FC = () => {
                     {copied ? 'Copied!' : 'Copy'}
                   </button>
                 </div>
+                <p className="text-xs text-yellow-500 mt-2">Only send ckUSDT to this address</p>
               </div>
 
-              {/* Warning Box */}
-              <div className="bg-yellow-500/10 border border-yellow-500/50 rounded-lg p-4 mb-6">
-                <div className="flex items-start gap-3">
-                  <svg className="w-6 h-6 text-yellow-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              {/* How to Get ckUSDT Expander */}
+              <details className="bg-gray-800 border border-pure-white/10 rounded-lg overflow-hidden">
+                <summary className="cursor-pointer px-4 py-3 font-medium text-pure-white hover:bg-gray-750 transition-colors flex items-center justify-between">
+                  <span>How to get ckUSDT</span>
+                  <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
+                </summary>
+
+                <div className="p-4 space-y-4 border-t border-pure-white/10">
+                  {/* Deposit Method Selector */}
                   <div>
-                    <h3 className="font-bold text-yellow-500 mb-1">Important: ckUSDT Only</h3>
-                    <p className="text-sm text-yellow-500/80">
-                      Only send <strong>ckUSDT</strong> (Internet Computer native USDT) to this address.
+                    <label className="block text-sm font-medium text-gray-400 mb-2">
+                      Choose deposit method:
+                    </label>
+                    <div className="flex gap-2 bg-gray-900 rounded-lg p-1">
+                      <button
+                        onClick={() => setDepositMethod('bridge')}
+                        className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                          depositMethod === 'bridge'
+                            ? 'bg-dfinity-turquoise text-pure-black'
+                            : 'text-gray-400 hover:text-pure-white'
+                        }`}
+                      >
+                        Bridge from ETH
+                      </button>
+                      <button
+                        onClick={() => setDepositMethod('cex')}
+                        className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                          depositMethod === 'cex'
+                            ? 'bg-dfinity-turquoise text-pure-black'
+                            : 'text-gray-400 hover:text-pure-white'
+                        }`}
+                      >
+                        From Exchange
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Bridge Method Instructions */}
+                  {depositMethod === 'bridge' && (
+                    <div className="space-y-3">
+                      <p className="text-sm text-gray-400">
+                        Convert your ERC-20 USDT to ckUSDT using one of these trusted bridges:
+                      </p>
+
+                      <div className="space-y-2">
+                        {/* NNS Wallet Option */}
+                        <a
+                          href="https://nns.ic0.app/wallet/?u=cngnf-vqaaa-aaaar-qag4q-cai"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-3 p-3 bg-gray-900 border border-pure-white/10 rounded-lg hover:border-dfinity-turquoise/50 transition-colors group"
+                        >
+                          <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                            <span className="text-pure-white font-bold">NNS</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-pure-white font-bold text-sm group-hover:text-dfinity-turquoise transition-colors">NNS Wallet</span>
+                              <span className="text-xs bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">Official</span>
+                            </div>
+                            <p className="text-xs text-gray-400">DFINITY's official wallet</p>
+                          </div>
+                          <svg className="w-4 h-4 text-gray-400 group-hover:text-dfinity-turquoise transition-colors flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                        </a>
+
+                        {/* ICPSwap Option */}
+                        <a
+                          href="https://app.icpswap.com/ck-bridge"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-3 p-3 bg-gray-900 border border-pure-white/10 rounded-lg hover:border-dfinity-turquoise/50 transition-colors group"
+                        >
+                          <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                            <span className="text-pure-white font-bold text-sm">ICP</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-pure-white font-bold text-sm group-hover:text-dfinity-turquoise transition-colors">ICPSwap Bridge</span>
+                              <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">DEX</span>
+                            </div>
+                            <p className="text-xs text-gray-400">Popular ICP DEX</p>
+                          </div>
+                          <svg className="w-4 h-4 text-gray-400 group-hover:text-dfinity-turquoise transition-colors flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                        </a>
+
+                        {/* Oisy Wallet Option */}
+                        <a
+                          href="https://oisy.com/"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-3 p-3 bg-gray-900 border border-pure-white/10 rounded-lg hover:border-dfinity-turquoise/50 transition-colors group"
+                        >
+                          <div className="w-10 h-10 bg-gradient-to-br from-orange-400 to-pink-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                            <span className="text-pure-white font-bold">O</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-pure-white font-bold text-sm group-hover:text-dfinity-turquoise transition-colors">Oisy Wallet</span>
+                              <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Multi-chain</span>
+                            </div>
+                            <p className="text-xs text-gray-400">ETH to ICP bridging</p>
+                          </div>
+                          <svg className="w-4 h-4 text-gray-400 group-hover:text-dfinity-turquoise transition-colors flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                        </a>
+                      </div>
+
+                      <div className="bg-gray-900 border border-pure-white/10 rounded-lg p-3 mt-3">
+                        <h4 className="font-medium text-pure-white text-sm mb-2">How it works:</h4>
+                        <div className="space-y-1.5 text-xs text-gray-400">
+                          <div className="flex items-start gap-2">
+                            <span className="w-4 h-4 rounded-full bg-dfinity-turquoise/20 text-dfinity-turquoise flex items-center justify-center text-[10px] font-bold flex-shrink-0">1</span>
+                            <span>Connect your ETH wallet to the bridge</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="w-4 h-4 rounded-full bg-dfinity-turquoise/20 text-dfinity-turquoise flex items-center justify-center text-[10px] font-bold flex-shrink-0">2</span>
+                            <span>Deposit ERC-20 USDT to receive ckUSDT</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="w-4 h-4 rounded-full bg-dfinity-turquoise/20 text-dfinity-turquoise flex items-center justify-center text-[10px] font-bold flex-shrink-0">3</span>
+                            <span>Send ckUSDT to your Principal ID above</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* CEX Method Instructions */}
+                  {depositMethod === 'cex' && (
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <div className="flex items-start gap-2">
+                          <span className="w-5 h-5 rounded-full bg-dfinity-turquoise text-pure-black flex items-center justify-center text-xs font-bold flex-shrink-0">1</span>
+                          <p className="text-gray-300 text-sm">
+                            Get ckUSDT from an exchange or swap on an ICP DEX
+                          </p>
+                        </div>
+
+                        <div className="flex items-start gap-2">
+                          <span className="w-5 h-5 rounded-full bg-dfinity-turquoise text-pure-black flex items-center justify-center text-xs font-bold flex-shrink-0">2</span>
+                          <p className="text-gray-300 text-sm">
+                            Copy your Principal ID above as destination
+                          </p>
+                        </div>
+
+                        <div className="flex items-start gap-2">
+                          <span className="w-5 h-5 rounded-full bg-dfinity-turquoise text-pure-black flex items-center justify-center text-xs font-bold flex-shrink-0">3</span>
+                          <p className="text-gray-300 text-sm">
+                            Balance updates automatically after confirmation
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Do Not Send Warning */}
+                  <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 mt-3">
+                    <h4 className="font-bold text-red-400 text-sm mb-1">Do NOT send directly:</h4>
+                    <ul className="text-xs text-red-400/80 space-y-0.5 list-disc list-inside">
+                      <li>USDT on Ethereum (ERC-20) - use a bridge instead</li>
+                      <li>USDT on Tron (TRC-20) or BSC (BEP-20)</li>
+                      <li>Any non-ICP based USDT</li>
+                    </ul>
+                    <p className="text-xs text-red-400/80 mt-1.5">
+                      Sending wrong tokens = <strong>permanent loss</strong>.
                     </p>
                   </div>
                 </div>
-              </div>
-
-              {/* Deposit Method Selector */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-400 mb-2">
-                  Choose deposit method:
-                </label>
-                <div className="flex gap-2 bg-gray-800 rounded-lg p-1">
-                  <button
-                    onClick={() => setDepositMethod('bridge')}
-                    className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
-                      depositMethod === 'bridge'
-                        ? 'bg-dfinity-turquoise text-pure-black'
-                        : 'text-gray-400 hover:text-pure-white'
-                    }`}
-                  >
-                    Bridge from ETH
-                  </button>
-                  <button
-                    onClick={() => setDepositMethod('cex')}
-                    className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
-                      depositMethod === 'cex'
-                        ? 'bg-dfinity-turquoise text-pure-black'
-                        : 'text-gray-400 hover:text-pure-white'
-                    }`}
-                  >
-                    From Exchange
-                  </button>
-                </div>
-              </div>
-
-              {/* Bridge Method Instructions */}
-              {depositMethod === 'bridge' && (
-                <div className="space-y-4">
-                  <h3 className="font-bold text-pure-white">Bridge USDT from Ethereum:</h3>
-                  <p className="text-sm text-gray-400">
-                    Convert your ERC-20 USDT to ckUSDT using one of these trusted bridges, then send to your Principal ID above.
-                  </p>
-
-                  <div className="space-y-3">
-                    {/* NNS Wallet Option */}
-                    <a
-                      href="https://nns.ic0.app/wallet/?u=cngnf-vqaaa-aaaar-qag4q-cai"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-4 p-4 bg-gray-800 border border-pure-white/10 rounded-lg hover:border-dfinity-turquoise/50 transition-colors group"
-                    >
-                      <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <span className="text-pure-white font-bold text-lg">NNS</span>
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-pure-white font-bold group-hover:text-dfinity-turquoise transition-colors">NNS Wallet</span>
-                          <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded">Official</span>
-                        </div>
-                        <p className="text-sm text-gray-400">DFINITY's official wallet with built-in ckToken bridge</p>
-                      </div>
-                      <svg className="w-5 h-5 text-gray-400 group-hover:text-dfinity-turquoise transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                      </svg>
-                    </a>
-
-                    {/* ICPSwap Option */}
-                    <a
-                      href="https://app.icpswap.com/ck-bridge"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-4 p-4 bg-gray-800 border border-pure-white/10 rounded-lg hover:border-dfinity-turquoise/50 transition-colors group"
-                    >
-                      <div className="w-12 h-12 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <span className="text-pure-white font-bold text-sm">ICP</span>
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-pure-white font-bold group-hover:text-dfinity-turquoise transition-colors">ICPSwap Bridge</span>
-                          <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">DEX</span>
-                        </div>
-                        <p className="text-sm text-gray-400">Popular ICP DEX with ckToken bridge functionality</p>
-                      </div>
-                      <svg className="w-5 h-5 text-gray-400 group-hover:text-dfinity-turquoise transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                      </svg>
-                    </a>
-
-                    {/* Oisy Wallet Option */}
-                    <a
-                      href="https://oisy.com/"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-4 p-4 bg-gray-800 border border-pure-white/10 rounded-lg hover:border-dfinity-turquoise/50 transition-colors group"
-                    >
-                      <div className="w-12 h-12 bg-gradient-to-br from-orange-400 to-pink-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <span className="text-pure-white font-bold text-lg">O</span>
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-pure-white font-bold group-hover:text-dfinity-turquoise transition-colors">Oisy Wallet</span>
-                          <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">Multi-chain</span>
-                        </div>
-                        <p className="text-sm text-gray-400">Multi-chain wallet with seamless ETH to ICP bridging</p>
-                      </div>
-                      <svg className="w-5 h-5 text-gray-400 group-hover:text-dfinity-turquoise transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                      </svg>
-                    </a>
-                  </div>
-
-                  <div className="bg-gray-800 border border-pure-white/10 rounded-lg p-4 mt-4">
-                    <h4 className="font-medium text-pure-white mb-2">How bridge works:</h4>
-                    <div className="space-y-2 text-sm text-gray-400">
-                      <div className="flex items-start gap-2">
-                        <span className="w-5 h-5 rounded-full bg-dfinity-turquoise/20 text-dfinity-turquoise flex items-center justify-center text-xs font-bold flex-shrink-0">1</span>
-                        <span>Connect your ETH wallet (MetaMask, etc.) to the bridge</span>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <span className="w-5 h-5 rounded-full bg-dfinity-turquoise/20 text-dfinity-turquoise flex items-center justify-center text-xs font-bold flex-shrink-0">2</span>
-                        <span>Deposit ERC-20 USDT to receive ckUSDT on ICP</span>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <span className="w-5 h-5 rounded-full bg-dfinity-turquoise/20 text-dfinity-turquoise flex items-center justify-center text-xs font-bold flex-shrink-0">3</span>
-                        <span>Send the ckUSDT to your Principal ID above</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* CEX Method Instructions */}
-              {depositMethod === 'cex' && (
-                <div className="space-y-4">
-                  <h3 className="font-bold text-pure-white">How to deposit from exchange:</h3>
-
-                  <div className="space-y-3">
-                    <div className="flex items-start gap-3">
-                      <span className="w-6 h-6 rounded-full bg-dfinity-turquoise text-pure-black flex items-center justify-center text-sm font-bold flex-shrink-0">1</span>
-                      <p className="text-gray-300 text-sm">
-                        Get ckUSDT from an exchange that supports ICP withdrawals (e.g., Binance, Coinbase) or swap on an ICP DEX.
-                      </p>
-                    </div>
-
-                    <div className="flex items-start gap-3">
-                      <span className="w-6 h-6 rounded-full bg-dfinity-turquoise text-pure-black flex items-center justify-center text-sm font-bold flex-shrink-0">2</span>
-                      <p className="text-gray-300 text-sm">
-                        Copy your Principal ID above and use it as the destination address.
-                      </p>
-                    </div>
-
-                    <div className="flex items-start gap-3">
-                      <span className="w-6 h-6 rounded-full bg-dfinity-turquoise text-pure-black flex items-center justify-center text-sm font-bold flex-shrink-0">3</span>
-                      <p className="text-gray-300 text-sm">
-                        Your balance will update automatically once the transfer is confirmed.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Do Not Send Warning - Always visible */}
-              <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-4 mt-6">
-                <h4 className="font-bold text-red-400 mb-2">Do NOT send directly:</h4>
-                <ul className="text-sm text-red-400/80 space-y-1 list-disc list-inside">
-                  <li>USDT on Ethereum (ERC-20) - use a bridge above instead</li>
-                  <li>USDT on Tron (TRC-20)</li>
-                  <li>USDT on BSC (BEP-20)</li>
-                  <li>Any non-ICP based USDT</li>
-                </ul>
-                <p className="text-sm text-red-400/80 mt-2">
-                  Sending non-ckUSDT tokens directly to this address will result in <strong>permanent loss</strong> of funds.
-                </p>
-              </div>
+              </details>
             </div>
           )}
 

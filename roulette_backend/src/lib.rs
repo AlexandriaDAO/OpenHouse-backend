@@ -96,4 +96,20 @@ fn greet(name: String) -> String {
     )
 }
 
+/// Get the user's balance in the roulette game
+/// TODO: Integrate with defi_accounting module like dice/plinko/crash backends
+#[query]
+fn get_my_balance() -> u64 {
+    // Stub: Return 0 until DeFi integration is complete
+    0
+}
+
+/// Get the house balance (pot) for roulette
+/// TODO: Integrate with defi_accounting module like dice/plinko/crash backends
+#[query]
+fn get_house_balance() -> u64 {
+    // Stub: Return a dummy value until DeFi integration is complete
+    1_000_000_000_000 // 10,000 USDT in e8s
+}
+
 ic_cdk::export_candid!();
