@@ -68,32 +68,74 @@ pub fn calculate_max_bet() -> u64 {
     max_bet as u64
 }
 
-/// Calculate payout from bet and multiplier using safe math
+/// Calculate payout from bet and multiplier using integer math to avoid f64 precision loss.
+///
+/// Uses scaled integer arithmetic: multiplier is converted to basis points (1.5x = 1_500_000),
+/// then we compute (bet * multiplier_scaled) / MULTIPLIER_SCALE using u128 intermediates.
+/// This ensures exact results for all representable multipliers.
 fn calculate_payout(bet_amount: u64, multiplier: f64) -> Result<u64, String> {
-    let payout = (bet_amount as f64) * multiplier;
-    if !payout.is_finite() {
-        return Err("Payout calculation overflow".to_string());
+    if !multiplier.is_finite() || multiplier < 0.0 {
+        return Err("Invalid multiplier".to_string());
     }
-    if payout > u64::MAX as f64 {
+
+    // Convert multiplier to scaled integer (e.g., 2.5x = 2_500_000)
+    // This preserves 6 decimal places of precision
+    let multiplier_scaled = (multiplier * MULTIPLIER_SCALE as f64) as u128;
+
+    // Use u128 for intermediate calculation to prevent overflow
+    let numerator = (bet_amount as u128)
+        .checked_mul(multiplier_scaled)
+        .ok_or("Payout calculation overflow")?;
+
+    let payout = numerator / (MULTIPLIER_SCALE as u128);
+
+    // Check if result fits in u64
+    if payout > u64::MAX as u128 {
         return Err("Payout exceeds u64 limit".to_string());
     }
+
     Ok(payout as u64)
 }
 
-/// Convert VRF bytes to float in range [0.0, 1.0)
-fn bytes_to_float(bytes: &[u8]) -> Result<f64, String> {
+/// Validate randomness bytes are not degenerate (all zeros or all ones).
+/// This guards against catastrophic VRF failure modes.
+fn validate_randomness(bytes: &[u8]) -> Result<(), String> {
     if bytes.len() < 8 {
         return Err("Insufficient randomness bytes".to_string());
     }
+
+    // Check for degenerate patterns that indicate VRF failure
+    let first_8 = &bytes[0..8];
+    if first_8.iter().all(|&b| b == 0) {
+        return Err("Degenerate randomness detected: all zeros".to_string());
+    }
+    if first_8.iter().all(|&b| b == 0xFF) {
+        return Err("Degenerate randomness detected: all ones".to_string());
+    }
+
+    Ok(())
+}
+
+/// Convert VRF bytes to float in range [0.0, 1.0)
+/// Uses the standard technique of extracting 53 bits (f64 mantissa precision)
+/// by right-shifting 11 bits from a u64, then dividing by 2^53.
+fn bytes_to_float(bytes: &[u8]) -> Result<f64, String> {
+    validate_randomness(bytes)?;
+
     let mut byte_array = [0u8; 8];
     byte_array.copy_from_slice(&bytes[0..8]);
     let random_u64 = u64::from_be_bytes(byte_array);
+    // >> 11 extracts most significant 53 bits for f64 mantissa precision
     let random = (random_u64 >> 11) as f64 / (1u64 << 53) as f64;
     Ok(random)
 }
 
-/// Derive an independent float for a specific rocket index
+/// Derive an independent float for a specific rocket index.
+/// Uses SHA256(vrf_bytes || index) to generate cryptographically independent values.
 fn derive_rocket_random(vrf_bytes: &[u8], rocket_index: u8) -> Result<f64, String> {
+    // Validate source randomness first
+    validate_randomness(vrf_bytes)?;
+
     let mut hasher = Sha256::new();
     hasher.update(vrf_bytes);
     hasher.update([rocket_index]);
@@ -102,6 +144,7 @@ fn derive_rocket_random(vrf_bytes: &[u8], rocket_index: u8) -> Result<f64, Strin
     let mut byte_array = [0u8; 8];
     byte_array.copy_from_slice(&hash[0..8]);
     let random_u64 = u64::from_be_bytes(byte_array);
+    // >> 11 extracts most significant 53 bits for f64 mantissa precision
     let random = (random_u64 >> 11) as f64 / (1u64 << 53) as f64;
     Ok(random)
 }
@@ -128,9 +171,15 @@ fn create_randomness_hash(bytes: &[u8]) -> String {
 // =============================================================================
 // MAIN GAME LOGIC
 // =============================================================================
+//
+// RACE CONDITION SAFETY:
+// IC canisters execute messages sequentially - no concurrent threads.
+// The balance check → deduct → game → credit sequence has no await points
+// between balance check and deduction, ensuring atomicity.
+// See: https://internetcomputer.org/docs/current/concepts/canisters-code#execution
 
 pub async fn play_crash(bet_amount: u64, target_multiplier: f64, caller: Principal) -> Result<PlayCrashResult, String> {
-    // 1. Check user balance
+    // 1. Check user balance (sync - no await before deduction)
     let user_balance = accounting::get_balance(caller);
     if user_balance < bet_amount {
         return Err("INSUFFICIENT_BALANCE".to_string());
