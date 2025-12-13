@@ -1,0 +1,56 @@
+type Placement = record {
+    player: principal;
+    pattern_name: text;
+    x: int32;
+    y: int32;
+    generation: nat64;
+    timestamp: nat64;
+};
+
+type GameStatus = variant {
+    Waiting;
+    Active;
+    Finished;
+};
+
+type GameConfig = record {
+    width: nat32;
+    height: nat32;
+    max_players: nat8;
+    generations_limit: opt nat64;
+};
+
+type GameRoom = record {
+    id: nat64;
+    name: text;
+    width: nat32;
+    height: nat32;
+    created_at: nat64;
+    placements: vec Placement;
+    current_generation: nat64;
+    players: vec principal;
+    territory: vec record { principal; nat64 };
+    status: GameStatus;
+};
+
+service : {
+    // Game management
+    create_game: (text, GameConfig) -> (variant { Ok: nat64; Err: text });
+    join_game: (nat64) -> (variant { Ok; Err: text });
+    start_game: (nat64) -> (variant { Ok; Err: text });
+
+    // Placements (multiplayer sync)
+    place_pattern: (nat64, text, int32, int32, nat64) -> (variant { Ok: nat64; Err: text });
+    get_placements_since: (nat64, nat64) -> (variant { Ok: vec Placement; Err: text }) query;
+    report_generation: (nat64, nat64) -> (variant { Ok; Err: text });
+
+    // Territory / Scoring
+    submit_territory_snapshot: (nat64, vec record { principal; nat64 }) -> (variant { Ok; Err: text });
+    get_territory: (nat64) -> (variant { Ok: vec record { principal; nat64 }; Err: text }) query;
+
+    // Queries
+    list_games: () -> (vec record { nat64; text; GameStatus; nat32 }) query;
+    get_game: (nat64) -> (variant { Ok: GameRoom; Err: text }) query;
+    get_game_info: (nat64) -> (variant { Ok: record { text; GameStatus; nat32; nat64; nat64 }; Err: text }) query;
+    greet: (text) -> (text) query;
+}

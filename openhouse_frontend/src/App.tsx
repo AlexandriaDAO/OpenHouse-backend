@@ -15,6 +15,7 @@ import { Admin } from './pages/Admin';
 import { Wallet } from './pages/Wallet';
 import { Liquidity } from './pages/Liquidity';
 import { Predict } from './pages/Predict';
+import { Life } from './pages/Life';
 
 function App() {
   return (
@@ -34,6 +35,7 @@ function App() {
                   <Route path="/wallet" element={<Wallet />} />
                   <Route path="/liquidity" element={<Liquidity />} />
                   <Route path="/predict" element={<Predict />} />
+                  <Route path="/life" element={<Life />} />
                   <Route path="/admin" element={<Admin />} />
                 </Routes>
               </Layout>

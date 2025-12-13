@@ -29,11 +29,17 @@
         }
       ]
     },
+    "life1_backend": {
+      "type": "rust",
+      "package": "life1_backend",
+      "candid": "life1_backend/life1_backend.did",
+      "specified_id": "pijnb-7yaaa-aaaae-qgcuq-cai"
+    },
     "openhouse_frontend": {
       "type": "assets",
       "source": ["openhouse_frontend/dist"],
       "specified_id": "pezw3-laaaa-aaaal-qssoa-cai",
-      "dependencies": ["crash_backend", "plinko_backend", "roulette_backend", "dice_backend"]
+      "dependencies": ["crash_backend", "plinko_backend", "roulette_backend", "dice_backend", "life1_backend"]
     }
   },
   "defaults": {
