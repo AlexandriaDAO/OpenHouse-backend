@@ -1,10 +1,17 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Actor, HttpAgent } from '@dfinity/agent';
-import { idlFactory } from '../declarations/life1_backend';
+import { AuthClient } from '@dfinity/auth-client';
+import { Actor, HttpAgent, ActorSubclass } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
+import { idlFactory } from '../declarations/life1_backend';
+import type { _SERVICE, Placement, GameStatus } from '../declarations/life1_backend/life1_backend.did.d';
 
-// Cell size in pixels
-const CELL_SIZE = 10;
+const LIFE1_CANISTER_ID = 'pijnb-7yaaa-aaaae-qgcuq-cai';
+
+// Base cell size in pixels (before zoom)
+const BASE_CELL_SIZE = 10;
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 4;
+const ZOOM_STEP = 0.25;
 const GRID_COLOR = 'rgba(255, 255, 255, 0.08)';
 const DEAD_COLOR = '#000000';
 
@@ -376,40 +383,370 @@ export const Life: React.FC = () => {
   const lastUpdateRef = useRef<number>(0);
   const [parsedPattern, setParsedPattern] = useState<number[][]>([]);
 
+  // Zoom and pan state
+  const [zoom, setZoom] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Auth & Multiplayer state
+  const [mode, setMode] = useState<'lobby' | 'game'>('lobby');
+  const [authClient, setAuthClient] = useState<AuthClient | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [actor, setActor] = useState<ActorSubclass<_SERVICE> | null>(null);
+  const [myPrincipal, setMyPrincipal] = useState<Principal | null>(null);
+
+  // Lobby state
+  const [games, setGames] = useState<Array<[bigint, string, GameStatus, number]>>([]);
+  const [currentGameId, setCurrentGameId] = useState<bigint | null>(null);
+  const [newGameName, setNewGameName] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Multiplayer sync state
+  const [placementIndex, setPlacementIndex] = useState<bigint>(BigInt(0));
+  const placementIndexRef = useRef<bigint>(BigInt(0));
+  const [playerColorMap, setPlayerColorMap] = useState<Map<string, number>>(new Map());
+  const playerColorMapRef = useRef<Map<string, number>>(new Map());
+
   // Parse pattern when selection changes
   useEffect(() => {
     const coords = parseRLE(selectedPattern.rle);
     setParsedPattern(coords);
   }, [selectedPattern]);
 
-  // Initialize grid based on canvas size
+  // Initialize grid with fixed size (200x150 cells)
   useEffect(() => {
-    const updateGridSize = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
+    const FIXED_COLS = 200;
+    const FIXED_ROWS = 150;
 
-      const container = canvas.parentElement;
-      if (!container) return;
+    if (gridSize.rows === 0 && gridSize.cols === 0) {
+      setGridSize({ rows: FIXED_ROWS, cols: FIXED_COLS });
+      setGrid(createEmptyGrid(FIXED_ROWS, FIXED_COLS));
+      setTerritory(createEmptyGrid(FIXED_ROWS, FIXED_COLS));
+    }
+  }, [gridSize.rows, gridSize.cols]);
 
-      const width = container.clientWidth;
-      const height = container.clientHeight;
+  // Canvas sizing ref to avoid state dependencies in draw
+  const canvasSizeRef = useRef({ width: 0, height: 0 });
+  const [, forceRender] = useState(0);
 
-      canvas.width = width;
-      canvas.height = height;
+  // Handle canvas sizing with devicePixelRatio for crisp rendering
+  useEffect(() => {
+    // Only set up canvas sizing when in game mode
+    if (mode !== 'game') return;
 
-      const cols = Math.floor(width / CELL_SIZE);
-      const rows = Math.floor(height / CELL_SIZE);
+    const container = containerRef.current;
+    const canvas = canvasRef.current;
+    if (!container || !canvas) return;
 
-      setGridSize({ rows, cols });
-      setGrid(createEmptyGrid(rows, cols));
-      setTerritory(createEmptyGrid(rows, cols));
-      setGeneration(0);
+    const updateCanvasSize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = container.getBoundingClientRect();
+      const width = Math.floor(rect.width);
+      const height = Math.floor(rect.height);
+
+      if (width === 0 || height === 0) return;
+
+      // Only update if size changed
+      if (canvasSizeRef.current.width === width && canvasSizeRef.current.height === height) return;
+
+      // Set actual canvas size in memory (scaled for crisp rendering)
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+
+      // Set display size (CSS pixels)
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+
+      canvasSizeRef.current = { width, height };
+      forceRender(n => n + 1); // Trigger redraw
     };
 
-    updateGridSize();
-    window.addEventListener('resize', updateGridSize);
-    return () => window.removeEventListener('resize', updateGridSize);
+    // Use ResizeObserver for reliable sizing
+    const resizeObserver = new ResizeObserver(updateCanvasSize);
+    resizeObserver.observe(container);
+
+    // Initial sizing
+    updateCanvasSize();
+
+    // Retry sizing after layout settles
+    const timeoutId = setTimeout(updateCanvasSize, 50);
+    const timeoutId2 = setTimeout(updateCanvasSize, 200);
+
+    return () => {
+      resizeObserver.disconnect();
+      clearTimeout(timeoutId);
+      clearTimeout(timeoutId2);
+    };
+  }, [mode]);
+
+  // Auth initialization
+  useEffect(() => {
+    AuthClient.create().then(client => {
+      setAuthClient(client);
+      if (client.isAuthenticated()) {
+        setupActor(client);
+      }
+    });
   }, []);
+
+  const handleLogin = async () => {
+    if (!authClient) return;
+    setIsLoading(true);
+    try {
+      await authClient.login({
+        identityProvider: 'https://identity.ic0.app',
+        onSuccess: () => setupActor(authClient),
+        onError: (err) => {
+          setError(`Login failed: ${err}`);
+          setIsLoading(false);
+        }
+      });
+    } catch (err) {
+      setError(`Login failed: ${err}`);
+      setIsLoading(false);
+    }
+  };
+
+  const setupActor = (client: AuthClient) => {
+    const identity = client.getIdentity();
+    const agent = new HttpAgent({ identity, host: 'https://icp-api.io' });
+    const newActor = Actor.createActor<_SERVICE>(idlFactory, {
+      agent,
+      canisterId: LIFE1_CANISTER_ID
+    });
+    setActor(newActor);
+    setMyPrincipal(identity.getPrincipal());
+    setIsAuthenticated(true);
+    setIsLoading(false);
+  };
+
+  // Lobby functions
+  const fetchGames = async () => {
+    if (!actor) return;
+    setIsLoading(true);
+    try {
+      const gamesList = await actor.list_games();
+      setGames(gamesList);
+      setError(null);
+    } catch (err) {
+      setError(`Failed to fetch games: ${err}`);
+    }
+    setIsLoading(false);
+  };
+
+  // Fetch games on auth
+  useEffect(() => {
+    if (isAuthenticated && actor) {
+      fetchGames();
+    }
+  }, [isAuthenticated, actor]);
+
+  const handleCreateGame = async () => {
+    if (!actor || !newGameName.trim()) return;
+
+    // Validate game name
+    const trimmedName = newGameName.trim();
+    if (trimmedName.length > 50) {
+      setError('Game name must be 50 characters or less');
+      return;
+    }
+    if (!/^[a-zA-Z0-9\s\-_]+$/.test(trimmedName)) {
+      setError('Game name can only contain letters, numbers, spaces, hyphens, and underscores');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await actor.create_game(trimmedName, {
+        width: 200,
+        height: 150,
+        max_players: 4,
+        generations_limit: []
+      });
+      if ('Ok' in result) {
+        const gameId = result.Ok;
+        await actor.start_game(gameId);
+        setCurrentGameId(gameId);
+        // Initialize player color map with self as player 1
+        if (myPrincipal) {
+          const colorMap = new Map<string, number>();
+          colorMap.set(myPrincipal.toText(), 1);
+          setPlayerColorMap(colorMap);
+          playerColorMapRef.current = colorMap;
+          setCurrentPlayer(1);
+        }
+        // Reset grid to fresh state for new game
+        setGridSize({ rows: 150, cols: 200 });
+        setGrid(createEmptyGrid(150, 200));
+        setTerritory(createEmptyGrid(150, 200));
+        setGeneration(0);
+        placementIndexRef.current = BigInt(0);
+        setPlacementIndex(BigInt(0));
+        setMode('game');
+        setNewGameName('');
+      } else {
+        setError(`Failed to create game: ${result.Err}`);
+      }
+    } catch (err) {
+      setError(`Failed to create game: ${err}`);
+    }
+    setIsLoading(false);
+  };
+
+  const handleJoinGame = async (gameId: bigint) => {
+    if (!actor) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await actor.join_game(gameId);
+      if ('Ok' in result) {
+        setCurrentGameId(gameId);
+        // Load game state and init player color map from game.players
+        const gameResult = await actor.get_game(gameId);
+        if ('Ok' in gameResult) {
+          const game = gameResult.Ok;
+          const colorMap = new Map<string, number>();
+          game.players.forEach((p, i) => colorMap.set(p.toText(), i + 1));
+          setPlayerColorMap(colorMap);
+          playerColorMapRef.current = colorMap;
+          // Set current player to own color
+          if (myPrincipal) {
+            const myColor = colorMap.get(myPrincipal.toText()) || 1;
+            setCurrentPlayer(myColor);
+          }
+          // Sync grid size from game
+          const gameWidth = game.width > 0 ? game.width : 200;
+          const gameHeight = game.height > 0 ? game.height : 150;
+          setGridSize({ rows: gameHeight, cols: gameWidth });
+
+          // Create new grids and apply all existing placements
+          const newGrid = createEmptyGrid(gameHeight, gameWidth);
+          const newTerritory = createEmptyGrid(gameHeight, gameWidth);
+
+          // Apply all existing placements from the game
+          for (const placement of game.placements) {
+            const pattern = PATTERNS.find(p => p.name === placement.pattern_name);
+            if (pattern) {
+              const coords = parseRLE(pattern.rle);
+              const playerNum = colorMap.get(placement.player.toText()) || 1;
+              coords.forEach(([dx, dy]) => {
+                const newRow = (placement.y + dy + gameHeight) % gameHeight;
+                const newCol = (placement.x + dx + gameWidth) % gameWidth;
+                if (newGrid[newRow]) {
+                  newGrid[newRow][newCol] = playerNum;
+                  newTerritory[newRow][newCol] = playerNum;
+                }
+              });
+            }
+          }
+
+          setGrid(newGrid);
+          setTerritory(newTerritory);
+          setGeneration(0);
+          // Start polling from after existing placements
+          const startIndex = BigInt(game.placements.length);
+          placementIndexRef.current = startIndex;
+          setPlacementIndex(startIndex);
+          console.log(`Joined game with ${game.placements.length} existing placements, starting poll from index ${startIndex}`);
+        }
+        setMode('game');
+      } else {
+        setError(`Failed to join game: ${result.Err}`);
+      }
+    } catch (err) {
+      setError(`Failed to join game: ${err}`);
+    }
+    setIsLoading(false);
+  };
+
+  const handleLeaveGame = () => {
+    setMode('lobby');
+    setCurrentGameId(null);
+    placementIndexRef.current = BigInt(0);
+    setPlacementIndex(BigInt(0));
+    setPlayerColorMap(new Map());
+    playerColorMapRef.current = new Map();
+    setGrid(createEmptyGrid(gridSize.rows, gridSize.cols));
+    setTerritory(createEmptyGrid(gridSize.rows, gridSize.cols));
+    setGeneration(0);
+    setIsRunning(false);
+    fetchGames();
+  };
+
+  // Get player number from principal
+  const getPlayerNumber = useCallback((principal: Principal): number => {
+    const key = principal.toText();
+    if (playerColorMapRef.current.has(key)) {
+      return playerColorMapRef.current.get(key)!;
+    }
+    const nextNum = playerColorMapRef.current.size + 1;
+    const newMap = new Map(playerColorMapRef.current);
+    newMap.set(key, nextNum);
+    playerColorMapRef.current = newMap;
+    setPlayerColorMap(newMap);
+    return nextNum;
+  }, []);
+
+  // Apply remote placement
+  const applyPlacement = useCallback((placement: Placement) => {
+    // Skip own placements (already applied locally)
+    if (myPrincipal && placement.player.toText() === myPrincipal.toText()) return;
+
+    const pattern = PATTERNS.find(p => p.name === placement.pattern_name);
+    if (!pattern) return;
+
+    const coords = parseRLE(pattern.rle);
+    const playerNum = getPlayerNumber(placement.player);
+
+    setGrid(currentGrid => {
+      const newGrid = currentGrid.map(r => [...r]);
+      coords.forEach(([dx, dy]) => {
+        const newRow = (placement.y + dy + gridSize.rows) % gridSize.rows;
+        const newCol = (placement.x + dx + gridSize.cols) % gridSize.cols;
+        if (newGrid[newRow]) newGrid[newRow][newCol] = playerNum;
+      });
+      return newGrid;
+    });
+
+    setTerritory(currentTerritory => {
+      const newTerritory = currentTerritory.map(r => [...r]);
+      coords.forEach(([dx, dy]) => {
+        const newRow = (placement.y + dy + gridSize.rows) % gridSize.rows;
+        const newCol = (placement.x + dx + gridSize.cols) % gridSize.cols;
+        if (newTerritory[newRow]) newTerritory[newRow][newCol] = playerNum;
+      });
+      return newTerritory;
+    });
+  }, [myPrincipal, gridSize, getPlayerNumber]);
+
+  // Polling loop for multiplayer sync
+  useEffect(() => {
+    if (!actor || currentGameId === null || mode !== 'game') return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const currentIndex = placementIndexRef.current;
+        const result = await actor.get_placements_since(currentGameId, currentIndex);
+        if ('Ok' in result && result.Ok.length > 0) {
+          console.log(`Received ${result.Ok.length} new placements from index ${currentIndex}`);
+          for (const placement of result.Ok) {
+            applyPlacement(placement);
+          }
+          const newIndex = currentIndex + BigInt(result.Ok.length);
+          placementIndexRef.current = newIndex;
+          setPlacementIndex(newIndex);
+        }
+      } catch (err) {
+        console.error('Polling error:', err);
+      }
+    }, 1000);
+
+    return () => clearInterval(pollInterval);
+  }, [actor, currentGameId, mode, applyPlacement]);
 
   const createEmptyGrid = (rows: number, cols: number): number[][] => {
     return Array(rows)
@@ -417,66 +754,94 @@ export const Life: React.FC = () => {
       .map(() => Array(cols).fill(0));
   };
 
-  // Draw the grid with territory colors
+  // Draw the grid with territory colors (with zoom and pan)
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const { width: displayWidth, height: displayHeight } = canvasSizeRef.current;
+    if (!canvas || displayWidth === 0 || displayHeight === 0) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.fillStyle = DEAD_COLOR;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const dpr = window.devicePixelRatio || 1;
 
-    // Draw territory (faded background for claimed squares)
-    for (let row = 0; row < gridSize.rows; row++) {
-      for (let col = 0; col < gridSize.cols; col++) {
+    // Reset transform and clear
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = DEAD_COLOR;
+    ctx.fillRect(0, 0, displayWidth, displayHeight);
+
+    // Apply pan offset
+    ctx.save();
+    ctx.translate(panOffset.x, panOffset.y);
+
+    const cellSize = BASE_CELL_SIZE * zoom;
+
+    // Calculate visible range for optimization
+    const startCol = Math.max(0, Math.floor(-panOffset.x / cellSize));
+    const endCol = Math.min(gridSize.cols, Math.ceil((displayWidth - panOffset.x) / cellSize));
+    const startRow = Math.max(0, Math.floor(-panOffset.y / cellSize));
+    const endRow = Math.min(gridSize.rows, Math.ceil((displayHeight - panOffset.y) / cellSize));
+
+    // Draw territory (faded background for claimed squares) - only visible cells
+    for (let row = startRow; row < endRow; row++) {
+      for (let col = startCol; col < endCol; col++) {
         const owner = territory[row]?.[col];
         if (owner > 0) {
           ctx.fillStyle = TERRITORY_COLORS[owner] || 'rgba(255,255,255,0.1)';
           ctx.fillRect(
-            col * CELL_SIZE,
-            row * CELL_SIZE,
-            CELL_SIZE,
-            CELL_SIZE
+            col * cellSize,
+            row * cellSize,
+            cellSize,
+            cellSize
           );
         }
       }
     }
 
-    ctx.strokeStyle = GRID_COLOR;
-    ctx.lineWidth = 1;
+    // Draw grid lines (only if zoomed in enough)
+    if (zoom >= 0.5) {
+      ctx.strokeStyle = GRID_COLOR;
+      ctx.lineWidth = 1;
 
-    for (let i = 0; i <= gridSize.cols; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * CELL_SIZE, 0);
-      ctx.lineTo(i * CELL_SIZE, gridSize.rows * CELL_SIZE);
-      ctx.stroke();
-    }
+      for (let i = startCol; i <= endCol; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * cellSize, startRow * cellSize);
+        ctx.lineTo(i * cellSize, endRow * cellSize);
+        ctx.stroke();
+      }
 
-    for (let i = 0; i <= gridSize.rows; i++) {
-      ctx.beginPath();
-      ctx.moveTo(0, i * CELL_SIZE);
-      ctx.lineTo(gridSize.cols * CELL_SIZE, i * CELL_SIZE);
-      ctx.stroke();
+      for (let i = startRow; i <= endRow; i++) {
+        ctx.beginPath();
+        ctx.moveTo(startCol * cellSize, i * cellSize);
+        ctx.lineTo(endCol * cellSize, i * cellSize);
+        ctx.stroke();
+      }
     }
 
     // Draw living cells with owner colors (on top of territory)
-    for (let row = 0; row < gridSize.rows; row++) {
-      for (let col = 0; col < gridSize.cols; col++) {
+    const cellPadding = Math.max(1, zoom * 0.5);
+    for (let row = startRow; row < endRow; row++) {
+      for (let col = startCol; col < endCol; col++) {
         const owner = grid[row]?.[col];
         if (owner > 0) {
           ctx.fillStyle = PLAYER_COLORS[owner] || '#FFFFFF';
           ctx.fillRect(
-            col * CELL_SIZE + 1,
-            row * CELL_SIZE + 1,
-            CELL_SIZE - 2,
-            CELL_SIZE - 2
+            col * cellSize + cellPadding,
+            row * cellSize + cellPadding,
+            cellSize - cellPadding * 2,
+            cellSize - cellPadding * 2
           );
         }
       }
     }
-  }, [grid, territory, gridSize]);
+
+    // Draw grid boundary indicator
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, 0, gridSize.cols * cellSize, gridSize.rows * cellSize);
+
+    ctx.restore();
+  }, [grid, territory, gridSize, zoom, panOffset]);
 
   useEffect(() => {
     draw();
@@ -579,7 +944,57 @@ export const Life: React.FC = () => {
     };
   }, [isRunning, speed, nextGeneration]);
 
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Zoom controls
+  const handleZoomIn = () => {
+    setZoom(z => Math.min(MAX_ZOOM, z + ZOOM_STEP));
+  };
+
+  const handleZoomOut = () => {
+    setZoom(z => Math.max(MIN_ZOOM, z - ZOOM_STEP));
+  };
+
+  const handleResetView = () => {
+    setZoom(1);
+    setPanOffset({ x: 0, y: 0 });
+  };
+
+  // Mouse wheel zoom
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+    setZoom(z => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z + delta)));
+  }, []);
+
+  // Pan handlers
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e.button === 1 || e.button === 2 || e.shiftKey) {
+      // Middle click, right click, or shift+click to pan
+      e.preventDefault();
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isPanning) {
+      setPanOffset({
+        x: e.clientX - panStart.x,
+        y: e.clientY - panStart.y
+      });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsPanning(false);
+  };
+
+  const handleMouseLeave = () => {
+    setIsPanning(false);
+  };
+
+  const handleCanvasClick = async (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isPanning) return; // Don't place when panning
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -587,8 +1002,15 @@ export const Life: React.FC = () => {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    const col = Math.floor(x / CELL_SIZE);
-    const row = Math.floor(y / CELL_SIZE);
+    // Account for zoom and pan
+    const cellSize = BASE_CELL_SIZE * zoom;
+    const col = Math.floor((x - panOffset.x) / cellSize);
+    const row = Math.floor((y - panOffset.y) / cellSize);
+
+    // Check bounds
+    if (col < 0 || col >= gridSize.cols || row < 0 || row >= gridSize.rows) {
+      return;
+    }
 
     const cellPositions: Array<[number, number]> = [];
 
@@ -615,6 +1037,23 @@ export const Life: React.FC = () => {
       });
       return newTerritory;
     });
+
+    // Send placement to backend if in multiplayer game
+    if (actor && currentGameId !== null) {
+      try {
+        console.log(`Sending placement: ${selectedPattern.name} at (${col}, ${row}) to game ${currentGameId}`);
+        const result = await actor.place_pattern(
+          currentGameId,
+          selectedPattern.name,
+          col,
+          row,
+          BigInt(generation)
+        );
+        console.log('Placement result:', result);
+      } catch (err) {
+        console.error('Failed to send placement:', err);
+      }
+    }
   };
 
   const handleClear = () => {
@@ -655,13 +1094,146 @@ export const Life: React.FC = () => {
     ? PATTERNS
     : PATTERNS.filter(p => p.category === selectedCategory);
 
+  // Helper to format game status
+  const formatStatus = (status: GameStatus): string => {
+    if ('Active' in status) return 'Active';
+    if ('Waiting' in status) return 'Waiting';
+    if ('Finished' in status) return 'Finished';
+    return 'Unknown';
+  };
+
+  // Not authenticated - show login
+  if (!isAuthenticated) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-120px)] gap-6">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-white mb-2">Conway's Game of Life</h1>
+          <p className="text-gray-400">Multiplayer Territory Mode</p>
+        </div>
+        <button
+          onClick={handleLogin}
+          disabled={isLoading}
+          className="px-6 py-3 rounded-lg font-mono text-lg bg-dfinity-turquoise/20 text-dfinity-turquoise border border-dfinity-turquoise/50 hover:bg-dfinity-turquoise/30 transition-all disabled:opacity-50"
+        >
+          {isLoading ? 'Connecting...' : 'Login with Internet Identity'}
+        </button>
+        {error && <p className="text-red-400 text-sm">{error}</p>}
+      </div>
+    );
+  }
+
+  // Lobby mode
+  if (mode === 'lobby') {
+    return (
+      <div className="flex flex-col h-[calc(100vh-120px)] p-6">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-white mb-1">Game Lobby</h1>
+          <p className="text-gray-500 text-sm font-mono">
+            Principal: {myPrincipal?.toText().slice(0, 15)}...
+          </p>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+
+        {/* Create game */}
+        <div className="mb-6 p-4 bg-white/5 rounded-lg">
+          <h2 className="text-lg font-semibold text-white mb-3">Create New Game</h2>
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={newGameName}
+              onChange={(e) => setNewGameName(e.target.value)}
+              placeholder="Enter game name..."
+              maxLength={50}
+              className="flex-1 px-4 py-2 rounded-lg bg-black border border-white/20 text-white placeholder-gray-500 focus:border-dfinity-turquoise/50 focus:outline-none"
+            />
+            <button
+              onClick={handleCreateGame}
+              disabled={isLoading || !newGameName.trim()}
+              className="px-6 py-2 rounded-lg font-mono bg-green-500/20 text-green-400 border border-green-500/50 hover:bg-green-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? 'Creating...' : 'Create Game'}
+            </button>
+          </div>
+        </div>
+
+        {/* Games list */}
+        <div className="flex-1 overflow-auto">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-white">Available Games</h2>
+            <button
+              onClick={fetchGames}
+              disabled={isLoading}
+              className="px-4 py-1.5 rounded font-mono text-sm bg-white/10 text-white border border-white/20 hover:bg-white/20 transition-all disabled:opacity-50"
+            >
+              {isLoading ? 'Loading...' : 'Refresh'}
+            </button>
+          </div>
+
+          {games.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              <p>No games available. Create one to start playing!</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {games.map(([id, name, status, playerCount]) => (
+                <div
+                  key={id.toString()}
+                  className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10 hover:border-white/20 transition-all"
+                >
+                  <div className="flex items-center gap-4">
+                    <div>
+                      <h3 className="font-semibold text-white">{name}</h3>
+                      <p className="text-gray-500 text-sm font-mono">
+                        Game #{id.toString()} • {playerCount}/4 players
+                      </p>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded text-xs font-mono ${
+                      'Active' in status ? 'bg-green-500/20 text-green-400' :
+                      'Waiting' in status ? 'bg-yellow-500/20 text-yellow-400' :
+                      'bg-gray-500/20 text-gray-400'
+                    }`}>
+                      {formatStatus(status)}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleJoinGame(id)}
+                    disabled={isLoading || 'Finished' in status}
+                    className="px-4 py-2 rounded font-mono text-sm bg-dfinity-turquoise/20 text-dfinity-turquoise border border-dfinity-turquoise/50 hover:bg-dfinity-turquoise/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Join
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Game mode
   return (
     <div className="flex flex-col h-[calc(100vh-120px)]">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
-        <div>
-          <h1 className="text-xl font-bold text-white">Conway's Game of Life</h1>
-          <p className="text-gray-500 text-xs">Territory mode - cells spread your color</p>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={handleLeaveGame}
+            className="px-3 py-1 rounded font-mono text-xs bg-white/10 text-gray-400 border border-white/20 hover:bg-white/20 hover:text-white transition-all"
+          >
+            ← Lobby
+          </button>
+          <div>
+            <h1 className="text-xl font-bold text-white">Conway's Game of Life</h1>
+            <p className="text-gray-500 text-xs">
+              Multiplayer • Game #{currentGameId?.toString()} • You are Player {currentPlayer}
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-4 text-sm font-mono">
@@ -739,22 +1311,14 @@ export const Life: React.FC = () => {
           <span className="text-gray-600 text-xs w-12">{Math.round(1000 / speed)}/s</span>
         </div>
 
-        {/* Player selector */}
+        {/* Your color indicator */}
         <div className="flex items-center gap-2 ml-4 pl-4 border-l border-white/10">
-          <span className="text-gray-500 text-xs">Player:</span>
-          {[1, 2, 3, 4].map((player) => (
-            <button
-              key={player}
-              onClick={() => setCurrentPlayer(player)}
-              className={`w-6 h-6 rounded transition-all ${
-                currentPlayer === player
-                  ? 'ring-2 ring-white ring-offset-2 ring-offset-black'
-                  : 'opacity-50 hover:opacity-75'
-              }`}
-              style={{ backgroundColor: PLAYER_COLORS[player] }}
-              title={`Player ${player}`}
-            />
-          ))}
+          <span className="text-gray-500 text-xs">Your color:</span>
+          <div
+            className="w-6 h-6 rounded ring-2 ring-white ring-offset-2 ring-offset-black"
+            style={{ backgroundColor: PLAYER_COLORS[currentPlayer] }}
+            title={`Player ${currentPlayer}`}
+          />
         </div>
       </div>
 
@@ -831,14 +1395,58 @@ export const Life: React.FC = () => {
         </div>
       </div>
 
-      {/* Canvas container */}
-      <div className="flex-1 border border-white/20 rounded-lg overflow-hidden bg-black">
-        <canvas
-          ref={canvasRef}
-          onClick={handleCanvasClick}
-          className="cursor-crosshair"
-          style={{ display: 'block', width: '100%', height: '100%' }}
-        />
+      {/* Canvas container with zoom controls */}
+      <div className="flex-1 flex flex-col border border-white/20 rounded-lg overflow-hidden bg-black relative">
+        {/* Zoom controls overlay */}
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-2 bg-black/70 rounded-lg p-2">
+          <button
+            onClick={handleZoomOut}
+            disabled={zoom <= MIN_ZOOM}
+            className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all font-bold"
+            title="Zoom out"
+          >
+            -
+          </button>
+          <span className="text-white text-xs font-mono w-12 text-center">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            onClick={handleZoomIn}
+            disabled={zoom >= MAX_ZOOM}
+            className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all font-bold"
+            title="Zoom in"
+          >
+            +
+          </button>
+          <button
+            onClick={handleResetView}
+            className="px-2 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 transition-all text-xs font-mono"
+            title="Reset view"
+          >
+            Reset
+          </button>
+        </div>
+
+        {/* Grid info overlay */}
+        <div className="absolute bottom-2 left-2 z-10 bg-black/70 rounded px-2 py-1 text-xs text-gray-400 font-mono">
+          Grid: {gridSize.cols}x{gridSize.rows} | Shift+drag or scroll wheel to navigate
+        </div>
+
+        {/* Canvas */}
+        <div ref={containerRef} className="flex-1 w-full h-full min-h-0">
+          <canvas
+            ref={canvasRef}
+            onClick={handleCanvasClick}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+            onWheel={handleWheel}
+            onContextMenu={(e) => e.preventDefault()}
+            className={`w-full h-full ${isPanning ? 'cursor-grabbing' : 'cursor-crosshair'}`}
+            style={{ display: 'block' }}
+          />
+        </div>
       </div>
     </div>
   );
