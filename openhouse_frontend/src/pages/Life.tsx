@@ -1,7 +1,11 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Actor, HttpAgent } from '@dfinity/agent';
-import { idlFactory } from '../declarations/life1_backend';
+import { AuthClient } from '@dfinity/auth-client';
+import { Actor, HttpAgent, ActorSubclass } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
+import { idlFactory } from '../declarations/life1_backend';
+import type { _SERVICE, Placement, GameStatus } from '../declarations/life1_backend/life1_backend.did.d';
+
+const LIFE1_CANISTER_ID = 'pijnb-7yaaa-aaaae-qgcuq-cai';
 
 // Cell size in pixels
 const CELL_SIZE = 10;
@@ -376,6 +380,25 @@ export const Life: React.FC = () => {
   const lastUpdateRef = useRef<number>(0);
   const [parsedPattern, setParsedPattern] = useState<number[][]>([]);
 
+  // Auth & Multiplayer state
+  const [mode, setMode] = useState<'lobby' | 'game'>('lobby');
+  const [authClient, setAuthClient] = useState<AuthClient | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [actor, setActor] = useState<ActorSubclass<_SERVICE> | null>(null);
+  const [myPrincipal, setMyPrincipal] = useState<Principal | null>(null);
+
+  // Lobby state
+  const [games, setGames] = useState<Array<[bigint, string, GameStatus, number]>>([]);
+  const [currentGameId, setCurrentGameId] = useState<bigint | null>(null);
+  const [newGameName, setNewGameName] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Multiplayer sync state
+  const [placementIndex, setPlacementIndex] = useState<bigint>(BigInt(0));
+  const [playerColorMap, setPlayerColorMap] = useState<Map<string, number>>(new Map());
+  const playerColorMapRef = useRef<Map<string, number>>(new Map());
+
   // Parse pattern when selection changes
   useEffect(() => {
     const coords = parseRLE(selectedPattern.rle);
@@ -410,6 +433,222 @@ export const Life: React.FC = () => {
     window.addEventListener('resize', updateGridSize);
     return () => window.removeEventListener('resize', updateGridSize);
   }, []);
+
+  // Auth initialization
+  useEffect(() => {
+    AuthClient.create().then(client => {
+      setAuthClient(client);
+      if (client.isAuthenticated()) {
+        setupActor(client);
+      }
+    });
+  }, []);
+
+  const handleLogin = async () => {
+    if (!authClient) return;
+    setIsLoading(true);
+    try {
+      await authClient.login({
+        identityProvider: 'https://identity.ic0.app',
+        onSuccess: () => setupActor(authClient),
+        onError: (err) => {
+          setError(`Login failed: ${err}`);
+          setIsLoading(false);
+        }
+      });
+    } catch (err) {
+      setError(`Login failed: ${err}`);
+      setIsLoading(false);
+    }
+  };
+
+  const setupActor = (client: AuthClient) => {
+    const identity = client.getIdentity();
+    const agent = new HttpAgent({ identity, host: 'https://icp0.io' });
+    const newActor = Actor.createActor<_SERVICE>(idlFactory, {
+      agent,
+      canisterId: LIFE1_CANISTER_ID
+    });
+    setActor(newActor);
+    setMyPrincipal(identity.getPrincipal());
+    setIsAuthenticated(true);
+    setIsLoading(false);
+  };
+
+  // Lobby functions
+  const fetchGames = async () => {
+    if (!actor) return;
+    setIsLoading(true);
+    try {
+      const gamesList = await actor.list_games();
+      setGames(gamesList);
+      setError(null);
+    } catch (err) {
+      setError(`Failed to fetch games: ${err}`);
+    }
+    setIsLoading(false);
+  };
+
+  // Fetch games on auth
+  useEffect(() => {
+    if (isAuthenticated && actor) {
+      fetchGames();
+    }
+  }, [isAuthenticated, actor]);
+
+  const handleCreateGame = async () => {
+    if (!actor || !newGameName.trim()) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await actor.create_game(newGameName, {
+        width: gridSize.cols || 100,
+        height: gridSize.rows || 60,
+        max_players: 4,
+        generations_limit: []
+      });
+      if ('Ok' in result) {
+        const gameId = result.Ok;
+        await actor.start_game(gameId);
+        setCurrentGameId(gameId);
+        // Initialize player color map with self as player 1
+        if (myPrincipal) {
+          const colorMap = new Map<string, number>();
+          colorMap.set(myPrincipal.toText(), 1);
+          setPlayerColorMap(colorMap);
+          playerColorMapRef.current = colorMap;
+          setCurrentPlayer(1);
+        }
+        setPlacementIndex(BigInt(0));
+        setMode('game');
+        setNewGameName('');
+      } else {
+        setError(`Failed to create game: ${result.Err}`);
+      }
+    } catch (err) {
+      setError(`Failed to create game: ${err}`);
+    }
+    setIsLoading(false);
+  };
+
+  const handleJoinGame = async (gameId: bigint) => {
+    if (!actor) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await actor.join_game(gameId);
+      if ('Ok' in result) {
+        setCurrentGameId(gameId);
+        // Load game state and init player color map from game.players
+        const gameResult = await actor.get_game(gameId);
+        if ('Ok' in gameResult) {
+          const game = gameResult.Ok;
+          const colorMap = new Map<string, number>();
+          game.players.forEach((p, i) => colorMap.set(p.toText(), i + 1));
+          setPlayerColorMap(colorMap);
+          playerColorMapRef.current = colorMap;
+          // Set current player to own color
+          if (myPrincipal) {
+            const myColor = colorMap.get(myPrincipal.toText()) || 1;
+            setCurrentPlayer(myColor);
+          }
+          // Sync grid size from game
+          if (game.width > 0 && game.height > 0) {
+            setGridSize({ rows: game.height, cols: game.width });
+            setGrid(createEmptyGrid(game.height, game.width));
+            setTerritory(createEmptyGrid(game.height, game.width));
+          }
+        }
+        setPlacementIndex(BigInt(0));
+        setMode('game');
+      } else {
+        setError(`Failed to join game: ${result.Err}`);
+      }
+    } catch (err) {
+      setError(`Failed to join game: ${err}`);
+    }
+    setIsLoading(false);
+  };
+
+  const handleLeaveGame = () => {
+    setMode('lobby');
+    setCurrentGameId(null);
+    setPlacementIndex(BigInt(0));
+    setPlayerColorMap(new Map());
+    playerColorMapRef.current = new Map();
+    setGrid(createEmptyGrid(gridSize.rows, gridSize.cols));
+    setTerritory(createEmptyGrid(gridSize.rows, gridSize.cols));
+    setGeneration(0);
+    setIsRunning(false);
+    fetchGames();
+  };
+
+  // Get player number from principal
+  const getPlayerNumber = useCallback((principal: Principal): number => {
+    const key = principal.toText();
+    if (playerColorMapRef.current.has(key)) {
+      return playerColorMapRef.current.get(key)!;
+    }
+    const nextNum = playerColorMapRef.current.size + 1;
+    const newMap = new Map(playerColorMapRef.current);
+    newMap.set(key, nextNum);
+    playerColorMapRef.current = newMap;
+    setPlayerColorMap(newMap);
+    return nextNum;
+  }, []);
+
+  // Apply remote placement
+  const applyPlacement = useCallback((placement: Placement) => {
+    // Skip own placements (already applied locally)
+    if (myPrincipal && placement.player.toText() === myPrincipal.toText()) return;
+
+    const pattern = PATTERNS.find(p => p.name === placement.pattern_name);
+    if (!pattern) return;
+
+    const coords = parseRLE(pattern.rle);
+    const playerNum = getPlayerNumber(placement.player);
+
+    setGrid(currentGrid => {
+      const newGrid = currentGrid.map(r => [...r]);
+      coords.forEach(([dx, dy]) => {
+        const newRow = (placement.y + dy + gridSize.rows) % gridSize.rows;
+        const newCol = (placement.x + dx + gridSize.cols) % gridSize.cols;
+        if (newGrid[newRow]) newGrid[newRow][newCol] = playerNum;
+      });
+      return newGrid;
+    });
+
+    setTerritory(currentTerritory => {
+      const newTerritory = currentTerritory.map(r => [...r]);
+      coords.forEach(([dx, dy]) => {
+        const newRow = (placement.y + dy + gridSize.rows) % gridSize.rows;
+        const newCol = (placement.x + dx + gridSize.cols) % gridSize.cols;
+        if (newTerritory[newRow]) newTerritory[newRow][newCol] = playerNum;
+      });
+      return newTerritory;
+    });
+  }, [myPrincipal, gridSize, getPlayerNumber]);
+
+  // Polling loop for multiplayer sync
+  useEffect(() => {
+    if (!actor || currentGameId === null || mode !== 'game') return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const result = await actor.get_placements_since(currentGameId, placementIndex);
+        if ('Ok' in result && result.Ok.length > 0) {
+          for (const placement of result.Ok) {
+            applyPlacement(placement);
+          }
+          setPlacementIndex(prev => prev + BigInt(result.Ok.length));
+        }
+      } catch (err) {
+        console.error('Polling error:', err);
+      }
+    }, 1000);
+
+    return () => clearInterval(pollInterval);
+  }, [actor, currentGameId, placementIndex, mode, applyPlacement]);
 
   const createEmptyGrid = (rows: number, cols: number): number[][] => {
     return Array(rows)
@@ -579,7 +818,7 @@ export const Life: React.FC = () => {
     };
   }, [isRunning, speed, nextGeneration]);
 
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleCanvasClick = async (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -615,6 +854,21 @@ export const Life: React.FC = () => {
       });
       return newTerritory;
     });
+
+    // Send placement to backend if in multiplayer game
+    if (actor && currentGameId !== null) {
+      try {
+        await actor.place_pattern(
+          currentGameId,
+          selectedPattern.name,
+          col,
+          row,
+          BigInt(generation)
+        );
+      } catch (err) {
+        console.error('Failed to send placement:', err);
+      }
+    }
   };
 
   const handleClear = () => {
@@ -655,13 +909,145 @@ export const Life: React.FC = () => {
     ? PATTERNS
     : PATTERNS.filter(p => p.category === selectedCategory);
 
+  // Helper to format game status
+  const formatStatus = (status: GameStatus): string => {
+    if ('Active' in status) return 'Active';
+    if ('Waiting' in status) return 'Waiting';
+    if ('Finished' in status) return 'Finished';
+    return 'Unknown';
+  };
+
+  // Not authenticated - show login
+  if (!isAuthenticated) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-120px)] gap-6">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-white mb-2">Conway's Game of Life</h1>
+          <p className="text-gray-400">Multiplayer Territory Mode</p>
+        </div>
+        <button
+          onClick={handleLogin}
+          disabled={isLoading}
+          className="px-6 py-3 rounded-lg font-mono text-lg bg-dfinity-turquoise/20 text-dfinity-turquoise border border-dfinity-turquoise/50 hover:bg-dfinity-turquoise/30 transition-all disabled:opacity-50"
+        >
+          {isLoading ? 'Connecting...' : 'Login with Internet Identity'}
+        </button>
+        {error && <p className="text-red-400 text-sm">{error}</p>}
+      </div>
+    );
+  }
+
+  // Lobby mode
+  if (mode === 'lobby') {
+    return (
+      <div className="flex flex-col h-[calc(100vh-120px)] p-6">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-white mb-1">Game Lobby</h1>
+          <p className="text-gray-500 text-sm font-mono">
+            Principal: {myPrincipal?.toText().slice(0, 15)}...
+          </p>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+
+        {/* Create game */}
+        <div className="mb-6 p-4 bg-white/5 rounded-lg">
+          <h2 className="text-lg font-semibold text-white mb-3">Create New Game</h2>
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={newGameName}
+              onChange={(e) => setNewGameName(e.target.value)}
+              placeholder="Enter game name..."
+              className="flex-1 px-4 py-2 rounded-lg bg-black border border-white/20 text-white placeholder-gray-500 focus:border-dfinity-turquoise/50 focus:outline-none"
+            />
+            <button
+              onClick={handleCreateGame}
+              disabled={isLoading || !newGameName.trim()}
+              className="px-6 py-2 rounded-lg font-mono bg-green-500/20 text-green-400 border border-green-500/50 hover:bg-green-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? 'Creating...' : 'Create Game'}
+            </button>
+          </div>
+        </div>
+
+        {/* Games list */}
+        <div className="flex-1 overflow-auto">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-white">Available Games</h2>
+            <button
+              onClick={fetchGames}
+              disabled={isLoading}
+              className="px-4 py-1.5 rounded font-mono text-sm bg-white/10 text-white border border-white/20 hover:bg-white/20 transition-all disabled:opacity-50"
+            >
+              {isLoading ? 'Loading...' : 'Refresh'}
+            </button>
+          </div>
+
+          {games.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              <p>No games available. Create one to start playing!</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {games.map(([id, name, status, playerCount]) => (
+                <div
+                  key={id.toString()}
+                  className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10 hover:border-white/20 transition-all"
+                >
+                  <div className="flex items-center gap-4">
+                    <div>
+                      <h3 className="font-semibold text-white">{name}</h3>
+                      <p className="text-gray-500 text-sm font-mono">
+                        Game #{id.toString()} • {playerCount}/4 players
+                      </p>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded text-xs font-mono ${
+                      'Active' in status ? 'bg-green-500/20 text-green-400' :
+                      'Waiting' in status ? 'bg-yellow-500/20 text-yellow-400' :
+                      'bg-gray-500/20 text-gray-400'
+                    }`}>
+                      {formatStatus(status)}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleJoinGame(id)}
+                    disabled={isLoading || 'Finished' in status}
+                    className="px-4 py-2 rounded font-mono text-sm bg-dfinity-turquoise/20 text-dfinity-turquoise border border-dfinity-turquoise/50 hover:bg-dfinity-turquoise/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Join
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Game mode
   return (
     <div className="flex flex-col h-[calc(100vh-120px)]">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
-        <div>
-          <h1 className="text-xl font-bold text-white">Conway's Game of Life</h1>
-          <p className="text-gray-500 text-xs">Territory mode - cells spread your color</p>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={handleLeaveGame}
+            className="px-3 py-1 rounded font-mono text-xs bg-white/10 text-gray-400 border border-white/20 hover:bg-white/20 hover:text-white transition-all"
+          >
+            ← Lobby
+          </button>
+          <div>
+            <h1 className="text-xl font-bold text-white">Conway's Game of Life</h1>
+            <p className="text-gray-500 text-xs">
+              Multiplayer • Game #{currentGameId?.toString()} • You are Player {currentPlayer}
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-4 text-sm font-mono">
@@ -739,22 +1125,14 @@ export const Life: React.FC = () => {
           <span className="text-gray-600 text-xs w-12">{Math.round(1000 / speed)}/s</span>
         </div>
 
-        {/* Player selector */}
+        {/* Your color indicator */}
         <div className="flex items-center gap-2 ml-4 pl-4 border-l border-white/10">
-          <span className="text-gray-500 text-xs">Player:</span>
-          {[1, 2, 3, 4].map((player) => (
-            <button
-              key={player}
-              onClick={() => setCurrentPlayer(player)}
-              className={`w-6 h-6 rounded transition-all ${
-                currentPlayer === player
-                  ? 'ring-2 ring-white ring-offset-2 ring-offset-black'
-                  : 'opacity-50 hover:opacity-75'
-              }`}
-              style={{ backgroundColor: PLAYER_COLORS[player] }}
-              title={`Player ${player}`}
-            />
-          ))}
+          <span className="text-gray-500 text-xs">Your color:</span>
+          <div
+            className="w-6 h-6 rounded ring-2 ring-white ring-offset-2 ring-offset-black"
+            style={{ backgroundColor: PLAYER_COLORS[currentPlayer] }}
+            title={`Player ${currentPlayer}`}
+          />
         </div>
       </div>
 

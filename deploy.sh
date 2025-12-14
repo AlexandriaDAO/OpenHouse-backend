@@ -205,6 +205,7 @@ deploy_frontend() {
     dfx generate plinko_backend 2>/dev/null || echo "Warning: Could not generate plinko_backend declarations"
     dfx generate roulette_backend 2>/dev/null || echo "Warning: Could not generate roulette_backend declarations"
     dfx generate dice_backend 2>/dev/null || echo "Warning: Could not generate dice_backend declarations"
+    dfx generate life1_backend 2>/dev/null || echo "Warning: Could not generate life1_backend declarations"
 
     # Sync declarations
     echo "Copying fresh declarations to frontend..."
