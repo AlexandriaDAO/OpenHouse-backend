@@ -7,8 +7,11 @@ import type { _SERVICE, Placement, GameStatus } from '../declarations/life1_back
 
 const LIFE1_CANISTER_ID = 'pijnb-7yaaa-aaaae-qgcuq-cai';
 
-// Cell size in pixels
-const CELL_SIZE = 10;
+// Base cell size in pixels (before zoom)
+const BASE_CELL_SIZE = 10;
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 4;
+const ZOOM_STEP = 0.25;
 const GRID_COLOR = 'rgba(255, 255, 255, 0.08)';
 const DEAD_COLOR = '#000000';
 
@@ -380,6 +383,13 @@ export const Life: React.FC = () => {
   const lastUpdateRef = useRef<number>(0);
   const [parsedPattern, setParsedPattern] = useState<number[][]>([]);
 
+  // Zoom and pan state
+  const [zoom, setZoom] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+
   // Auth & Multiplayer state
   const [mode, setMode] = useState<'lobby' | 'game'>('lobby');
   const [authClient, setAuthClient] = useState<AuthClient | null>(null);
@@ -396,6 +406,7 @@ export const Life: React.FC = () => {
 
   // Multiplayer sync state
   const [placementIndex, setPlacementIndex] = useState<bigint>(BigInt(0));
+  const placementIndexRef = useRef<bigint>(BigInt(0));
   const [playerColorMap, setPlayerColorMap] = useState<Map<string, number>>(new Map());
   const playerColorMapRef = useRef<Map<string, number>>(new Map());
 
@@ -405,33 +416,56 @@ export const Life: React.FC = () => {
     setParsedPattern(coords);
   }, [selectedPattern]);
 
-  // Initialize grid based on canvas size
+  // Initialize grid with fixed size (200x150 cells)
   useEffect(() => {
-    const updateGridSize = () => {
+    const FIXED_COLS = 200;
+    const FIXED_ROWS = 150;
+
+    if (gridSize.rows === 0 && gridSize.cols === 0) {
+      setGridSize({ rows: FIXED_ROWS, cols: FIXED_COLS });
+      setGrid(createEmptyGrid(FIXED_ROWS, FIXED_COLS));
+      setTerritory(createEmptyGrid(FIXED_ROWS, FIXED_COLS));
+    }
+  }, [gridSize.rows, gridSize.cols]);
+
+  // Handle canvas sizing with devicePixelRatio for crisp rendering
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateCanvasSize = () => {
       const canvas = canvasRef.current;
-      if (!canvas) return;
+      if (!canvas || !container) return;
 
-      const container = canvas.parentElement;
-      if (!container) return;
+      const dpr = window.devicePixelRatio || 1;
+      const rect = container.getBoundingClientRect();
+      const width = rect.width;
+      const height = rect.height;
 
-      const width = container.clientWidth;
-      const height = container.clientHeight;
+      if (width === 0 || height === 0) return; // Skip if container not sized yet
 
-      canvas.width = width;
-      canvas.height = height;
+      // Set actual canvas size in memory (scaled for crisp rendering)
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
 
-      const cols = Math.floor(width / CELL_SIZE);
-      const rows = Math.floor(height / CELL_SIZE);
+      // Set display size (CSS pixels)
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
 
-      setGridSize({ rows, cols });
-      setGrid(createEmptyGrid(rows, cols));
-      setTerritory(createEmptyGrid(rows, cols));
-      setGeneration(0);
+      setCanvasSize({ width, height });
     };
 
-    updateGridSize();
-    window.addEventListener('resize', updateGridSize);
-    return () => window.removeEventListener('resize', updateGridSize);
+    // Use ResizeObserver for reliable sizing
+    const resizeObserver = new ResizeObserver(() => {
+      updateCanvasSize();
+    });
+
+    resizeObserver.observe(container);
+    updateCanvasSize();
+
+    return () => resizeObserver.disconnect();
   }, []);
 
   // Auth initialization
@@ -502,8 +536,8 @@ export const Life: React.FC = () => {
     setError(null);
     try {
       const result = await actor.create_game(newGameName, {
-        width: gridSize.cols || 100,
-        height: gridSize.rows || 60,
+        width: 200,
+        height: 150,
         max_players: 4,
         generations_limit: []
       });
@@ -519,6 +553,12 @@ export const Life: React.FC = () => {
           playerColorMapRef.current = colorMap;
           setCurrentPlayer(1);
         }
+        // Reset grid to fresh state for new game
+        setGridSize({ rows: 150, cols: 200 });
+        setGrid(createEmptyGrid(150, 200));
+        setTerritory(createEmptyGrid(150, 200));
+        setGeneration(0);
+        placementIndexRef.current = BigInt(0);
         setPlacementIndex(BigInt(0));
         setMode('game');
         setNewGameName('');
@@ -553,13 +593,40 @@ export const Life: React.FC = () => {
             setCurrentPlayer(myColor);
           }
           // Sync grid size from game
-          if (game.width > 0 && game.height > 0) {
-            setGridSize({ rows: game.height, cols: game.width });
-            setGrid(createEmptyGrid(game.height, game.width));
-            setTerritory(createEmptyGrid(game.height, game.width));
+          const gameWidth = game.width > 0 ? game.width : 200;
+          const gameHeight = game.height > 0 ? game.height : 150;
+          setGridSize({ rows: gameHeight, cols: gameWidth });
+
+          // Create new grids and apply all existing placements
+          const newGrid = createEmptyGrid(gameHeight, gameWidth);
+          const newTerritory = createEmptyGrid(gameHeight, gameWidth);
+
+          // Apply all existing placements from the game
+          for (const placement of game.placements) {
+            const pattern = PATTERNS.find(p => p.name === placement.pattern_name);
+            if (pattern) {
+              const coords = parseRLE(pattern.rle);
+              const playerNum = colorMap.get(placement.player.toText()) || 1;
+              coords.forEach(([dx, dy]) => {
+                const newRow = (placement.y + dy + gameHeight) % gameHeight;
+                const newCol = (placement.x + dx + gameWidth) % gameWidth;
+                if (newGrid[newRow]) {
+                  newGrid[newRow][newCol] = playerNum;
+                  newTerritory[newRow][newCol] = playerNum;
+                }
+              });
+            }
           }
+
+          setGrid(newGrid);
+          setTerritory(newTerritory);
+          setGeneration(0);
+          // Start polling from after existing placements
+          const startIndex = BigInt(game.placements.length);
+          placementIndexRef.current = startIndex;
+          setPlacementIndex(startIndex);
+          console.log(`Joined game with ${game.placements.length} existing placements, starting poll from index ${startIndex}`);
         }
-        setPlacementIndex(BigInt(0));
         setMode('game');
       } else {
         setError(`Failed to join game: ${result.Err}`);
@@ -573,6 +640,7 @@ export const Life: React.FC = () => {
   const handleLeaveGame = () => {
     setMode('lobby');
     setCurrentGameId(null);
+    placementIndexRef.current = BigInt(0);
     setPlacementIndex(BigInt(0));
     setPlayerColorMap(new Map());
     playerColorMapRef.current = new Map();
@@ -635,12 +703,16 @@ export const Life: React.FC = () => {
 
     const pollInterval = setInterval(async () => {
       try {
-        const result = await actor.get_placements_since(currentGameId, placementIndex);
+        const currentIndex = placementIndexRef.current;
+        const result = await actor.get_placements_since(currentGameId, currentIndex);
         if ('Ok' in result && result.Ok.length > 0) {
+          console.log(`Received ${result.Ok.length} new placements from index ${currentIndex}`);
           for (const placement of result.Ok) {
             applyPlacement(placement);
           }
-          setPlacementIndex(prev => prev + BigInt(result.Ok.length));
+          const newIndex = currentIndex + BigInt(result.Ok.length);
+          placementIndexRef.current = newIndex;
+          setPlacementIndex(newIndex);
         }
       } catch (err) {
         console.error('Polling error:', err);
@@ -648,7 +720,7 @@ export const Life: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(pollInterval);
-  }, [actor, currentGameId, placementIndex, mode, applyPlacement]);
+  }, [actor, currentGameId, mode, applyPlacement]);
 
   const createEmptyGrid = (rows: number, cols: number): number[][] => {
     return Array(rows)
@@ -656,66 +728,95 @@ export const Life: React.FC = () => {
       .map(() => Array(cols).fill(0));
   };
 
-  // Draw the grid with territory colors
+  // Draw the grid with territory colors (with zoom and pan)
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || canvasSize.width === 0 || canvasSize.height === 0) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.fillStyle = DEAD_COLOR;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const dpr = window.devicePixelRatio || 1;
+    const displayWidth = canvasSize.width;
+    const displayHeight = canvasSize.height;
 
-    // Draw territory (faded background for claimed squares)
-    for (let row = 0; row < gridSize.rows; row++) {
-      for (let col = 0; col < gridSize.cols; col++) {
+    // Reset transform and clear
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = DEAD_COLOR;
+    ctx.fillRect(0, 0, displayWidth, displayHeight);
+
+    // Apply pan offset
+    ctx.save();
+    ctx.translate(panOffset.x, panOffset.y);
+
+    const cellSize = BASE_CELL_SIZE * zoom;
+
+    // Calculate visible range for optimization
+    const startCol = Math.max(0, Math.floor(-panOffset.x / cellSize));
+    const endCol = Math.min(gridSize.cols, Math.ceil((displayWidth - panOffset.x) / cellSize));
+    const startRow = Math.max(0, Math.floor(-panOffset.y / cellSize));
+    const endRow = Math.min(gridSize.rows, Math.ceil((displayHeight - panOffset.y) / cellSize));
+
+    // Draw territory (faded background for claimed squares) - only visible cells
+    for (let row = startRow; row < endRow; row++) {
+      for (let col = startCol; col < endCol; col++) {
         const owner = territory[row]?.[col];
         if (owner > 0) {
           ctx.fillStyle = TERRITORY_COLORS[owner] || 'rgba(255,255,255,0.1)';
           ctx.fillRect(
-            col * CELL_SIZE,
-            row * CELL_SIZE,
-            CELL_SIZE,
-            CELL_SIZE
+            col * cellSize,
+            row * cellSize,
+            cellSize,
+            cellSize
           );
         }
       }
     }
 
-    ctx.strokeStyle = GRID_COLOR;
-    ctx.lineWidth = 1;
+    // Draw grid lines (only if zoomed in enough)
+    if (zoom >= 0.5) {
+      ctx.strokeStyle = GRID_COLOR;
+      ctx.lineWidth = 1;
 
-    for (let i = 0; i <= gridSize.cols; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * CELL_SIZE, 0);
-      ctx.lineTo(i * CELL_SIZE, gridSize.rows * CELL_SIZE);
-      ctx.stroke();
-    }
+      for (let i = startCol; i <= endCol; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * cellSize, startRow * cellSize);
+        ctx.lineTo(i * cellSize, endRow * cellSize);
+        ctx.stroke();
+      }
 
-    for (let i = 0; i <= gridSize.rows; i++) {
-      ctx.beginPath();
-      ctx.moveTo(0, i * CELL_SIZE);
-      ctx.lineTo(gridSize.cols * CELL_SIZE, i * CELL_SIZE);
-      ctx.stroke();
+      for (let i = startRow; i <= endRow; i++) {
+        ctx.beginPath();
+        ctx.moveTo(startCol * cellSize, i * cellSize);
+        ctx.lineTo(endCol * cellSize, i * cellSize);
+        ctx.stroke();
+      }
     }
 
     // Draw living cells with owner colors (on top of territory)
-    for (let row = 0; row < gridSize.rows; row++) {
-      for (let col = 0; col < gridSize.cols; col++) {
+    const cellPadding = Math.max(1, zoom * 0.5);
+    for (let row = startRow; row < endRow; row++) {
+      for (let col = startCol; col < endCol; col++) {
         const owner = grid[row]?.[col];
         if (owner > 0) {
           ctx.fillStyle = PLAYER_COLORS[owner] || '#FFFFFF';
           ctx.fillRect(
-            col * CELL_SIZE + 1,
-            row * CELL_SIZE + 1,
-            CELL_SIZE - 2,
-            CELL_SIZE - 2
+            col * cellSize + cellPadding,
+            row * cellSize + cellPadding,
+            cellSize - cellPadding * 2,
+            cellSize - cellPadding * 2
           );
         }
       }
     }
-  }, [grid, territory, gridSize]);
+
+    // Draw grid boundary indicator
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, 0, gridSize.cols * cellSize, gridSize.rows * cellSize);
+
+    ctx.restore();
+  }, [grid, territory, gridSize, zoom, panOffset, canvasSize]);
 
   useEffect(() => {
     draw();
@@ -818,7 +919,57 @@ export const Life: React.FC = () => {
     };
   }, [isRunning, speed, nextGeneration]);
 
+  // Zoom controls
+  const handleZoomIn = () => {
+    setZoom(z => Math.min(MAX_ZOOM, z + ZOOM_STEP));
+  };
+
+  const handleZoomOut = () => {
+    setZoom(z => Math.max(MIN_ZOOM, z - ZOOM_STEP));
+  };
+
+  const handleResetView = () => {
+    setZoom(1);
+    setPanOffset({ x: 0, y: 0 });
+  };
+
+  // Mouse wheel zoom
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+    setZoom(z => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z + delta)));
+  }, []);
+
+  // Pan handlers
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e.button === 1 || e.button === 2 || e.shiftKey) {
+      // Middle click, right click, or shift+click to pan
+      e.preventDefault();
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isPanning) {
+      setPanOffset({
+        x: e.clientX - panStart.x,
+        y: e.clientY - panStart.y
+      });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsPanning(false);
+  };
+
+  const handleMouseLeave = () => {
+    setIsPanning(false);
+  };
+
   const handleCanvasClick = async (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isPanning) return; // Don't place when panning
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -826,8 +977,15 @@ export const Life: React.FC = () => {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    const col = Math.floor(x / CELL_SIZE);
-    const row = Math.floor(y / CELL_SIZE);
+    // Account for zoom and pan
+    const cellSize = BASE_CELL_SIZE * zoom;
+    const col = Math.floor((x - panOffset.x) / cellSize);
+    const row = Math.floor((y - panOffset.y) / cellSize);
+
+    // Check bounds
+    if (col < 0 || col >= gridSize.cols || row < 0 || row >= gridSize.rows) {
+      return;
+    }
 
     const cellPositions: Array<[number, number]> = [];
 
@@ -858,13 +1016,15 @@ export const Life: React.FC = () => {
     // Send placement to backend if in multiplayer game
     if (actor && currentGameId !== null) {
       try {
-        await actor.place_pattern(
+        console.log(`Sending placement: ${selectedPattern.name} at (${col}, ${row}) to game ${currentGameId}`);
+        const result = await actor.place_pattern(
           currentGameId,
           selectedPattern.name,
           col,
           row,
           BigInt(generation)
         );
+        console.log('Placement result:', result);
       } catch (err) {
         console.error('Failed to send placement:', err);
       }
@@ -1209,14 +1369,58 @@ export const Life: React.FC = () => {
         </div>
       </div>
 
-      {/* Canvas container */}
-      <div className="flex-1 border border-white/20 rounded-lg overflow-hidden bg-black">
-        <canvas
-          ref={canvasRef}
-          onClick={handleCanvasClick}
-          className="cursor-crosshair"
-          style={{ display: 'block', width: '100%', height: '100%' }}
-        />
+      {/* Canvas container with zoom controls */}
+      <div className="flex-1 flex flex-col border border-white/20 rounded-lg overflow-hidden bg-black relative">
+        {/* Zoom controls overlay */}
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-2 bg-black/70 rounded-lg p-2">
+          <button
+            onClick={handleZoomOut}
+            disabled={zoom <= MIN_ZOOM}
+            className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all font-bold"
+            title="Zoom out"
+          >
+            -
+          </button>
+          <span className="text-white text-xs font-mono w-12 text-center">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            onClick={handleZoomIn}
+            disabled={zoom >= MAX_ZOOM}
+            className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all font-bold"
+            title="Zoom in"
+          >
+            +
+          </button>
+          <button
+            onClick={handleResetView}
+            className="px-2 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 transition-all text-xs font-mono"
+            title="Reset view"
+          >
+            Reset
+          </button>
+        </div>
+
+        {/* Grid info overlay */}
+        <div className="absolute bottom-2 left-2 z-10 bg-black/70 rounded px-2 py-1 text-xs text-gray-400 font-mono">
+          Grid: {gridSize.cols}x{gridSize.rows} | Shift+drag or scroll wheel to navigate
+        </div>
+
+        {/* Canvas */}
+        <div ref={containerRef} className="flex-1 w-full h-full min-h-0">
+          <canvas
+            ref={canvasRef}
+            onClick={handleCanvasClick}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+            onWheel={handleWheel}
+            onContextMenu={(e) => e.preventDefault()}
+            className={`w-full h-full ${isPanning ? 'cursor-grabbing' : 'cursor-crosshair'}`}
+            style={{ display: 'block' }}
+          />
+        </div>
       </div>
     </div>
   );
