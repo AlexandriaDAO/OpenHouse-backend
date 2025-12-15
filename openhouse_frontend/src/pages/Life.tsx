@@ -3,11 +3,11 @@ import { AuthClient } from '@dfinity/auth-client';
 import { Actor, HttpAgent, ActorSubclass } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
 import { idlFactory } from '../declarations/life1_backend';
-import type { _SERVICE, Placement, GameStatus } from '../declarations/life1_backend/life1_backend.did.d';
+import type { _SERVICE, GameState, GameInfo, GameStatus } from '../declarations/life1_backend/life1_backend.did.d';
 
 const LIFE1_CANISTER_ID = 'pijnb-7yaaa-aaaae-qgcuq-cai';
 
-// Base cell size in pixels (before zoom)
+// Rendering constants
 const BASE_CELL_SIZE = 10;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 4;
@@ -17,21 +17,20 @@ const DEAD_COLOR = '#000000';
 
 // Player colors
 const PLAYER_COLORS: Record<number, string> = {
-  1: '#39FF14', // Green - Player 1
-  2: '#FF3939', // Red - Player 2
-  3: '#3939FF', // Blue - Player 3
-  4: '#FFD700', // Gold - Player 4
+  1: '#39FF14', // Green
+  2: '#FF3939', // Red
+  3: '#3939FF', // Blue
+  4: '#FFD700', // Gold
 };
 
-// Faded territory colors (for claimed but empty squares)
 const TERRITORY_COLORS: Record<number, string> = {
-  1: 'rgba(57, 255, 20, 0.15)',   // Green faded
-  2: 'rgba(255, 57, 57, 0.15)',   // Red faded
-  3: 'rgba(57, 57, 255, 0.15)',   // Blue faded
-  4: 'rgba(255, 215, 0, 0.15)',   // Gold faded
+  1: 'rgba(57, 255, 20, 0.15)',
+  2: 'rgba(255, 57, 57, 0.15)',
+  3: 'rgba(57, 57, 255, 0.15)',
+  4: 'rgba(255, 215, 0, 0.15)',
 };
 
-// Pattern categories for game
+// Pattern types
 type PatternCategory = 'gun' | 'spaceship' | 'defense' | 'bomb' | 'oscillator';
 
 interface PatternInfo {
@@ -39,12 +38,11 @@ interface PatternInfo {
   rle: string;
   category: PatternCategory;
   description: string;
-  tier?: number;
 }
 
-// RLE Parser - converts RLE string to coordinate array
-function parseRLE(rle: string): number[][] {
-  const coords: number[][] = [];
+// RLE Parser
+function parseRLE(rle: string): [number, number][] {
+  const coords: [number, number][] = [];
   const lines = rle.split('\n');
   let patternData = '';
   let width = 0;
@@ -64,300 +62,61 @@ function parseRLE(rle: string): number[][] {
     patternData += trimmed;
   }
 
-  let x = 0;
-  let y = 0;
-  let countStr = '';
-
+  let x = 0, y = 0, countStr = '';
   for (const char of patternData) {
     if (char >= '0' && char <= '9') {
       countStr += char;
     } else if (char === 'b') {
-      const count = countStr ? parseInt(countStr) : 1;
-      x += count;
+      x += countStr ? parseInt(countStr) : 1;
       countStr = '';
     } else if (char === 'o') {
       const count = countStr ? parseInt(countStr) : 1;
-      for (let i = 0; i < count; i++) {
-        coords.push([x + i, y]);
-      }
+      for (let i = 0; i < count; i++) coords.push([x + i, y]);
       x += count;
       countStr = '';
     } else if (char === '$') {
-      const count = countStr ? parseInt(countStr) : 1;
-      y += count;
+      y += countStr ? parseInt(countStr) : 1;
       x = 0;
       countStr = '';
-    } else if (char === '!') {
-      break;
-    }
+    } else if (char === '!') break;
   }
 
-  if (coords.length > 0) {
-    const centerX = Math.floor(width / 2);
-    const centerY = Math.floor(height / 2);
-    return coords.map(([cx, cy]) => [cx - centerX, cy - centerY]);
-  }
-
-  return coords;
+  // Center the pattern
+  const centerX = Math.floor(width / 2);
+  const centerY = Math.floor(height / 2);
+  return coords.map(([cx, cy]) => [cx - centerX, cy - centerY]);
 }
 
-// Curated pattern library
+// Pattern library (simplified)
 const PATTERNS: PatternInfo[] = [
-  // === SPACESHIPS ===
-  {
-    name: 'Glider',
-    category: 'spaceship',
-    description: 'The classic. Moves diagonally at c/4.',
-    tier: 1,
-    rle: `#N Glider
-x = 3, y = 3, rule = B3/S23
-bo$2bo$3o!`,
-  },
-  {
-    name: 'LWSS',
-    category: 'spaceship',
-    description: 'Lightweight spaceship. Moves horizontally at c/2.',
-    tier: 1,
-    rle: `#N LWSS
-x = 5, y = 4, rule = B3/S23
-bo2bo$o$o3bo$4o!`,
-  },
-  {
-    name: 'MWSS',
-    category: 'spaceship',
-    description: 'Middleweight spaceship. Larger c/2 horizontal.',
-    tier: 2,
-    rle: `#N MWSS
-x = 6, y = 5, rule = B3/S23
-3bo$bo3bo$o$o4bo$5o!`,
-  },
-  {
-    name: 'HWSS',
-    category: 'spaceship',
-    description: 'Heavyweight spaceship. Largest standard ship.',
-    tier: 2,
-    rle: `#N HWSS
-x = 7, y = 5, rule = B3/S23
-3b2o$bo4bo$o$o5bo$6o!`,
-  },
-  {
-    name: 'Copperhead',
-    category: 'spaceship',
-    description: 'First c/10 orthogonal spaceship. Slow and menacing.',
-    tier: 3,
-    rle: `#N Copperhead
-x = 8, y = 12, rule = B3/S23
-b2o2b2o$3b2o$3b2o$obo2bobo$o6bo2$o6bo$b2o2b2o$2b4o2$3b2o$3b2o!`,
-  },
-
-  // === GUNS ===
-  {
-    name: 'Gosper Glider Gun',
-    category: 'gun',
-    description: 'The first gun ever discovered. Fires gliders every 30 gen.',
-    tier: 1,
-    rle: `#N Gosper glider gun
-x = 36, y = 9, rule = B3/S23
-24bo$22bobo$12b2o6b2o12b2o$11bo3bo4b2o12b2o$2o8bo5bo3b2o$2o8bo3bob2o4bobo$10bo5bo7bo$11bo3bo$12b2o!`,
-  },
-  {
-    name: 'Simkin Glider Gun',
-    category: 'gun',
-    description: 'Smallest known gun (29 cells). Period 120.',
-    tier: 2,
-    rle: `#N Simkin glider gun
-x = 33, y = 21, rule = B3/S23
-2o5b2o$2o5b2o2$4b2o$4b2o5$22b2ob2o$21bo5bo$21bo6bo2b2o$21b3o3bo3b2o$26bo4$20b2o$20bo$21b3o$23bo!`,
-  },
-  {
-    name: 'P46 Gun',
-    category: 'gun',
-    description: 'Period 46 glider gun. Twin bee shuttle based.',
-    tier: 3,
-    rle: `#N p46 gun
-x = 29, y = 19, rule = B3/S23
-18bo$17bobo$6bo11bo5b2o$5bobo9bobo4b2o$5bobo9bobo$2o3bo2bo7bo2bo$2o4bobo7bobo5b2o$6bo11bo4b2o$26bo$24bobo$24bo!`,
-  },
-
-  // === DEFENSE (Still Lifes & Eaters) ===
-  {
-    name: 'Block',
-    category: 'defense',
-    description: 'Simplest still life. Indestructible wall unit.',
-    tier: 1,
-    rle: `#N Block
-x = 2, y = 2, rule = B3/S23
-2o$2o!`,
-  },
-  {
-    name: 'Beehive',
-    category: 'defense',
-    description: 'Common still life. Stable barrier.',
-    tier: 1,
-    rle: `#N Beehive
-x = 4, y = 3, rule = B3/S23
-b2o$o2bo$b2o!`,
-  },
-  {
-    name: 'Loaf',
-    category: 'defense',
-    description: 'Larger still life. Sturdy structure.',
-    tier: 1,
-    rle: `#N Loaf
-x = 4, y = 4, rule = B3/S23
-b2o$o2bo$bobo$2bo!`,
-  },
-  {
-    name: 'Eater 1',
-    category: 'defense',
-    description: 'Can absorb gliders! Key defensive structure.',
-    tier: 2,
-    rle: `#N Eater 1
-x = 4, y = 4, rule = B3/S23
-2o$bo$bobo$2b2o!`,
-  },
-  {
-    name: 'Boat',
-    category: 'defense',
-    description: 'Small still life. Cheap wall filler.',
-    tier: 1,
-    rle: `#N Boat
-x = 3, y = 3, rule = B3/S23
-2o$obo$bo!`,
-  },
-  {
-    name: 'Ship',
-    category: 'defense',
-    description: 'Diagonal still life. Corner defense.',
-    tier: 1,
-    rle: `#N Ship
-x = 3, y = 3, rule = B3/S23
-2o$obo$b2o!`,
-  },
-  {
-    name: 'Tub',
-    category: 'defense',
-    description: 'Hollow still life. Compact barrier.',
-    tier: 1,
-    rle: `#N Tub
-x = 3, y = 3, rule = B3/S23
-bo$obo$bo!`,
-  },
-  {
-    name: 'Snake',
-    category: 'defense',
-    description: 'Long still life. Extended wall section.',
-    tier: 2,
-    rle: `#N Snake
-x = 4, y = 2, rule = B3/S23
-2obo$ob2o!`,
-  },
-
-  // === BOMBS (Methuselahs) ===
-  {
-    name: 'R-pentomino',
-    category: 'bomb',
-    description: 'Chaos bomb! 5 cells evolve for 1103 generations.',
-    tier: 1,
-    rle: `#N R-pentomino
-x = 3, y = 3, rule = B3/S23
-b2o$2o$bo!`,
-  },
-  {
-    name: 'Acorn',
-    category: 'bomb',
-    description: 'Spawns many gliders. 5206 gen to stabilize.',
-    tier: 2,
-    rle: `#N Acorn
-x = 7, y = 3, rule = B3/S23
-bo$3bo$2o2b3o!`,
-  },
-  {
-    name: 'Die Hard',
-    category: 'bomb',
-    description: 'Vanishes after 130 gen. Leaves nothing behind.',
-    tier: 2,
-    rle: `#N Die hard
-x = 8, y = 3, rule = B3/S23
-6bo$2o$bo3b3o!`,
-  },
-  {
-    name: 'B-heptomino',
-    category: 'bomb',
-    description: 'Active chaos. Produces gliders and debris.',
-    tier: 2,
-    rle: `#N B-heptomino
-x = 4, y = 3, rule = B3/S23
-ob2o$2o$bo!`,
-  },
-  {
-    name: 'Pi-heptomino',
-    category: 'bomb',
-    description: 'Pi explosion. 173 gen of chaos.',
-    tier: 2,
-    rle: `#N Pi-heptomino
-x = 3, y = 2, rule = B3/S23
-b3o$3o!`,
-  },
-
-  // === OSCILLATORS ===
-  {
-    name: 'Blinker',
-    category: 'oscillator',
-    description: 'Simplest oscillator. Period 2.',
-    tier: 1,
-    rle: `#N Blinker
-x = 3, y = 1, rule = B3/S23
-3o!`,
-  },
-  {
-    name: 'Toad',
-    category: 'oscillator',
-    description: 'Period 2 oscillator. Compact.',
-    tier: 1,
-    rle: `#N Toad
-x = 4, y = 2, rule = B3/S23
-b3o$3o!`,
-  },
-  {
-    name: 'Beacon',
-    category: 'oscillator',
-    description: 'Period 2 flasher. Visual indicator.',
-    tier: 1,
-    rle: `#N Beacon
-x = 4, y = 4, rule = B3/S23
-2o$2o$2b2o$2b2o!`,
-  },
-  {
-    name: 'Pulsar',
-    category: 'oscillator',
-    description: 'Beautiful period 3 oscillator. 48 cells.',
-    tier: 2,
-    rle: `#N Pulsar
-x = 13, y = 13, rule = B3/S23
-2b3o3b3o2$o4bobo4bo$o4bobo4bo$o4bobo4bo$2b3o3b3o2$2b3o3b3o$o4bobo4bo$o4bobo4bo$o4bobo4bo2$2b3o3b3o!`,
-  },
-  {
-    name: 'Pentadecathlon',
-    category: 'oscillator',
-    description: 'Period 15 oscillator. Long cycle time.',
-    tier: 3,
-    rle: `#N Pentadecathlon
-x = 10, y = 3, rule = B3/S23
-2bo4bo$2ob4ob2o$2bo4bo!`,
-  },
-  {
-    name: 'Clock',
-    category: 'oscillator',
-    description: 'Period 2 spinner. Rotates 90 degrees.',
-    tier: 1,
-    rle: `#N Clock
-x = 4, y = 4, rule = B3/S23
-2bo$obo$bobo$bo!`,
-  },
+  { name: 'Glider', category: 'spaceship', description: 'Classic diagonal mover',
+    rle: `x = 3, y = 3\nbo$2bo$3o!` },
+  { name: 'LWSS', category: 'spaceship', description: 'Lightweight spaceship',
+    rle: `x = 5, y = 4\nbo2bo$o$o3bo$4o!` },
+  { name: 'MWSS', category: 'spaceship', description: 'Middleweight spaceship',
+    rle: `x = 6, y = 5\n3bo$bo3bo$o$o4bo$5o!` },
+  { name: 'HWSS', category: 'spaceship', description: 'Heavyweight spaceship',
+    rle: `x = 7, y = 5\n3b2o$bo4bo$o$o5bo$6o!` },
+  { name: 'Gosper Gun', category: 'gun', description: 'Fires gliders every 30 gen',
+    rle: `x = 36, y = 9\n24bo$22bobo$12b2o6b2o12b2o$11bo3bo4b2o12b2o$2o8bo5bo3b2o$2o8bo3bob2o4bobo$10bo5bo7bo$11bo3bo$12b2o!` },
+  { name: 'Simkin Gun', category: 'gun', description: 'Smallest known gun',
+    rle: `x = 33, y = 21\n2o5b2o$2o5b2o2$4b2o$4b2o5$22b2ob2o$21bo5bo$21bo6bo2b2o$21b3o3bo3b2o$26bo4$20b2o$20bo$21b3o$23bo!` },
+  { name: 'Block', category: 'defense', description: 'Simplest still life',
+    rle: `x = 2, y = 2\n2o$2o!` },
+  { name: 'Beehive', category: 'defense', description: 'Common still life',
+    rle: `x = 4, y = 3\nb2o$o2bo$b2o!` },
+  { name: 'Eater 1', category: 'defense', description: 'Absorbs gliders',
+    rle: `x = 4, y = 4\n2o$bo$bobo$2b2o!` },
+  { name: 'R-pentomino', category: 'bomb', description: 'Chaos bomb - 1103 gen',
+    rle: `x = 3, y = 3\nb2o$2o$bo!` },
+  { name: 'Acorn', category: 'bomb', description: 'Spawns gliders - 5206 gen',
+    rle: `x = 7, y = 3\nbo$3bo$2o2b3o!` },
+  { name: 'Blinker', category: 'oscillator', description: 'Period 2',
+    rle: `x = 3, y = 1\n3o!` },
+  { name: 'Pulsar', category: 'oscillator', description: 'Period 3',
+    rle: `x = 13, y = 13\n2b3o3b3o2$o4bobo4bo$o4bobo4bo$o4bobo4bo$2b3o3b3o2$2b3o3b3o$o4bobo4bo$o4bobo4bo$o4bobo4bo2$2b3o3b3o!` },
 ];
 
-// Category metadata
 const CATEGORY_INFO: Record<PatternCategory, { label: string; color: string; icon: string }> = {
   gun: { label: 'Guns', color: 'text-red-400 border-red-500/50 bg-red-500/10', icon: '>' },
   spaceship: { label: 'Ships', color: 'text-blue-400 border-blue-500/50 bg-blue-500/10', icon: '~' },
@@ -367,30 +126,23 @@ const CATEGORY_INFO: Record<PatternCategory, { label: string; color: string; ico
 };
 
 export const Life: React.FC = () => {
+  // Canvas refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isRunning, setIsRunning] = useState(false);
-  const [generation, setGeneration] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasSizeRef = useRef({ width: 0, height: 0 });
+
+  // Pattern state
   const [selectedPattern, setSelectedPattern] = useState<PatternInfo>(PATTERNS[0]);
   const [selectedCategory, setSelectedCategory] = useState<PatternCategory | 'all'>('all');
-  // Grid now stores owner ID: 0 = dead, 1+ = player ID
-  const [grid, setGrid] = useState<number[][]>([]);
-  // Territory tracks the last owner of each square (persists after cell dies)
-  const [territory, setTerritory] = useState<number[][]>([]);
-  const [gridSize, setGridSize] = useState({ rows: 0, cols: 0 });
-  const [speed, setSpeed] = useState(100);
-  const [currentPlayer, setCurrentPlayer] = useState(1);
-  const animationRef = useRef<number | null>(null);
-  const lastUpdateRef = useRef<number>(0);
-  const [parsedPattern, setParsedPattern] = useState<number[][]>([]);
+  const [parsedPattern, setParsedPattern] = useState<[number, number][]>([]);
 
-  // Zoom and pan state
+  // View state
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
-  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Auth & Multiplayer state
+  // Auth state
   const [mode, setMode] = useState<'lobby' | 'game'>('lobby');
   const [authClient, setAuthClient] = useState<AuthClient | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -398,97 +150,31 @@ export const Life: React.FC = () => {
   const [myPrincipal, setMyPrincipal] = useState<Principal | null>(null);
 
   // Lobby state
-  const [games, setGames] = useState<Array<[bigint, string, GameStatus, number]>>([]);
+  const [games, setGames] = useState<GameInfo[]>([]);
   const [currentGameId, setCurrentGameId] = useState<bigint | null>(null);
   const [newGameName, setNewGameName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Multiplayer sync state
-  const [placementIndex, setPlacementIndex] = useState<bigint>(BigInt(0));
-  const placementIndexRef = useRef<bigint>(BigInt(0));
-  const [playerColorMap, setPlayerColorMap] = useState<Map<string, number>>(new Map());
-  const playerColorMapRef = useRef<Map<string, number>>(new Map());
+  // Game state from backend
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [myPlayerNum, setMyPlayerNum] = useState(1);
+  const [gridSize, setGridSize] = useState({ rows: 150, cols: 200 });
 
-  // Parse pattern when selection changes
-  useEffect(() => {
-    const coords = parseRLE(selectedPattern.rle);
-    setParsedPattern(coords);
-  }, [selectedPattern]);
-
-  // Initialize grid with fixed size (200x150 cells)
-  useEffect(() => {
-    const FIXED_COLS = 200;
-    const FIXED_ROWS = 150;
-
-    if (gridSize.rows === 0 && gridSize.cols === 0) {
-      setGridSize({ rows: FIXED_ROWS, cols: FIXED_COLS });
-      setGrid(createEmptyGrid(FIXED_ROWS, FIXED_COLS));
-      setTerritory(createEmptyGrid(FIXED_ROWS, FIXED_COLS));
-    }
-  }, [gridSize.rows, gridSize.cols]);
-
-  // Canvas sizing ref to avoid state dependencies in draw
-  const canvasSizeRef = useRef({ width: 0, height: 0 });
+  // Simulation control
+  const [isRunning, setIsRunning] = useState(false);
   const [, forceRender] = useState(0);
 
-  // Handle canvas sizing with devicePixelRatio for crisp rendering
+  // Parse pattern on selection change
   useEffect(() => {
-    // Only set up canvas sizing when in game mode
-    if (mode !== 'game') return;
-
-    const container = containerRef.current;
-    const canvas = canvasRef.current;
-    if (!container || !canvas) return;
-
-    const updateCanvasSize = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const rect = container.getBoundingClientRect();
-      const width = Math.floor(rect.width);
-      const height = Math.floor(rect.height);
-
-      if (width === 0 || height === 0) return;
-
-      // Only update if size changed
-      if (canvasSizeRef.current.width === width && canvasSizeRef.current.height === height) return;
-
-      // Set actual canvas size in memory (scaled for crisp rendering)
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-
-      // Set display size (CSS pixels)
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-
-      canvasSizeRef.current = { width, height };
-      forceRender(n => n + 1); // Trigger redraw
-    };
-
-    // Use ResizeObserver for reliable sizing
-    const resizeObserver = new ResizeObserver(updateCanvasSize);
-    resizeObserver.observe(container);
-
-    // Initial sizing
-    updateCanvasSize();
-
-    // Retry sizing after layout settles
-    const timeoutId = setTimeout(updateCanvasSize, 50);
-    const timeoutId2 = setTimeout(updateCanvasSize, 200);
-
-    return () => {
-      resizeObserver.disconnect();
-      clearTimeout(timeoutId);
-      clearTimeout(timeoutId2);
-    };
-  }, [mode]);
+    setParsedPattern(parseRLE(selectedPattern.rle));
+  }, [selectedPattern]);
 
   // Auth initialization
   useEffect(() => {
     AuthClient.create().then(client => {
       setAuthClient(client);
-      if (client.isAuthenticated()) {
-        setupActor(client);
-      }
+      if (client.isAuthenticated()) setupActor(client);
     });
   }, []);
 
@@ -499,10 +185,7 @@ export const Life: React.FC = () => {
       await authClient.login({
         identityProvider: 'https://identity.ic0.app',
         onSuccess: () => setupActor(authClient),
-        onError: (err) => {
-          setError(`Login failed: ${err}`);
-          setIsLoading(false);
-        }
+        onError: (err) => { setError(`Login failed: ${err}`); setIsLoading(false); }
       });
     } catch (err) {
       setError(`Login failed: ${err}`);
@@ -513,18 +196,15 @@ export const Life: React.FC = () => {
   const setupActor = (client: AuthClient) => {
     const identity = client.getIdentity();
     const agent = new HttpAgent({ identity, host: 'https://icp-api.io' });
-    const newActor = Actor.createActor<_SERVICE>(idlFactory, {
-      agent,
-      canisterId: LIFE1_CANISTER_ID
-    });
+    const newActor = Actor.createActor<_SERVICE>(idlFactory, { agent, canisterId: LIFE1_CANISTER_ID });
     setActor(newActor);
     setMyPrincipal(identity.getPrincipal());
     setIsAuthenticated(true);
     setIsLoading(false);
   };
 
-  // Lobby functions
-  const fetchGames = async () => {
+  // Fetch games for lobby
+  const fetchGames = useCallback(async () => {
     if (!actor) return;
     setIsLoading(true);
     try {
@@ -535,26 +215,18 @@ export const Life: React.FC = () => {
       setError(`Failed to fetch games: ${err}`);
     }
     setIsLoading(false);
-  };
+  }, [actor]);
 
-  // Fetch games on auth
   useEffect(() => {
-    if (isAuthenticated && actor) {
-      fetchGames();
-    }
-  }, [isAuthenticated, actor]);
+    if (isAuthenticated && actor) fetchGames();
+  }, [isAuthenticated, actor, fetchGames]);
 
+  // Create game
   const handleCreateGame = async () => {
     if (!actor || !newGameName.trim()) return;
-
-    // Validate game name
     const trimmedName = newGameName.trim();
-    if (trimmedName.length > 50) {
-      setError('Game name must be 50 characters or less');
-      return;
-    }
-    if (!/^[a-zA-Z0-9\s\-_]+$/.test(trimmedName)) {
-      setError('Game name can only contain letters, numbers, spaces, hyphens, and underscores');
+    if (trimmedName.length > 50 || !/^[a-zA-Z0-9\s\-_]+$/.test(trimmedName)) {
+      setError('Invalid game name');
       return;
     }
 
@@ -562,41 +234,26 @@ export const Life: React.FC = () => {
     setError(null);
     try {
       const result = await actor.create_game(trimmedName, {
-        width: 200,
-        height: 150,
-        max_players: 4,
-        generations_limit: []
+        width: 200, height: 150, max_players: 4, generations_limit: []
       });
       if ('Ok' in result) {
         const gameId = result.Ok;
         await actor.start_game(gameId);
         setCurrentGameId(gameId);
-        // Initialize player color map with self as player 1
-        if (myPrincipal) {
-          const colorMap = new Map<string, number>();
-          colorMap.set(myPrincipal.toText(), 1);
-          setPlayerColorMap(colorMap);
-          playerColorMapRef.current = colorMap;
-          setCurrentPlayer(1);
-        }
-        // Reset grid to fresh state for new game
+        setMyPlayerNum(1);
         setGridSize({ rows: 150, cols: 200 });
-        setGrid(createEmptyGrid(150, 200));
-        setTerritory(createEmptyGrid(150, 200));
-        setGeneration(0);
-        placementIndexRef.current = BigInt(0);
-        setPlacementIndex(BigInt(0));
         setMode('game');
         setNewGameName('');
       } else {
-        setError(`Failed to create game: ${result.Err}`);
+        setError(`Failed: ${result.Err}`);
       }
     } catch (err) {
-      setError(`Failed to create game: ${err}`);
+      setError(`Failed: ${err}`);
     }
     setIsLoading(false);
   };
 
+  // Join game
   const handleJoinGame = async (gameId: bigint) => {
     if (!actor) return;
     setIsLoading(true);
@@ -605,60 +262,19 @@ export const Life: React.FC = () => {
       const result = await actor.join_game(gameId);
       if ('Ok' in result) {
         setCurrentGameId(gameId);
-        // Load game state and init player color map from game.players
-        const gameResult = await actor.get_game(gameId);
-        if ('Ok' in gameResult) {
-          const game = gameResult.Ok;
-          const colorMap = new Map<string, number>();
-          game.players.forEach((p, i) => colorMap.set(p.toText(), i + 1));
-          setPlayerColorMap(colorMap);
-          playerColorMapRef.current = colorMap;
-          // Set current player to own color
-          if (myPrincipal) {
-            const myColor = colorMap.get(myPrincipal.toText()) || 1;
-            setCurrentPlayer(myColor);
-          }
-          // Sync grid size from game
-          const gameWidth = game.width > 0 ? game.width : 200;
-          const gameHeight = game.height > 0 ? game.height : 150;
-          setGridSize({ rows: gameHeight, cols: gameWidth });
-
-          // Create new grids and apply all existing placements
-          const newGrid = createEmptyGrid(gameHeight, gameWidth);
-          const newTerritory = createEmptyGrid(gameHeight, gameWidth);
-
-          // Apply all existing placements from the game
-          for (const placement of game.placements) {
-            const pattern = PATTERNS.find(p => p.name === placement.pattern_name);
-            if (pattern) {
-              const coords = parseRLE(pattern.rle);
-              const playerNum = colorMap.get(placement.player.toText()) || 1;
-              coords.forEach(([dx, dy]) => {
-                const newRow = (placement.y + dy + gameHeight) % gameHeight;
-                const newCol = (placement.x + dx + gameWidth) % gameWidth;
-                if (newGrid[newRow]) {
-                  newGrid[newRow][newCol] = playerNum;
-                  newTerritory[newRow][newCol] = playerNum;
-                }
-              });
-            }
-          }
-
-          setGrid(newGrid);
-          setTerritory(newTerritory);
-          setGeneration(0);
-          // Start polling from after existing placements
-          const startIndex = BigInt(game.placements.length);
-          placementIndexRef.current = startIndex;
-          setPlacementIndex(startIndex);
-          console.log(`Joined game with ${game.placements.length} existing placements, starting poll from index ${startIndex}`);
+        setMyPlayerNum(result.Ok);
+        // Fetch initial state
+        const stateResult = await actor.get_state(gameId);
+        if ('Ok' in stateResult) {
+          setGameState(stateResult.Ok);
+          setGridSize({ rows: stateResult.Ok.grid.length, cols: stateResult.Ok.grid[0]?.length || 200 });
         }
         setMode('game');
       } else {
-        setError(`Failed to join game: ${result.Err}`);
+        setError(`Failed: ${result.Err}`);
       }
     } catch (err) {
-      setError(`Failed to join game: ${err}`);
+      setError(`Failed: ${err}`);
     }
     setIsLoading(false);
   };
@@ -666,150 +282,143 @@ export const Life: React.FC = () => {
   const handleLeaveGame = () => {
     setMode('lobby');
     setCurrentGameId(null);
-    placementIndexRef.current = BigInt(0);
-    setPlacementIndex(BigInt(0));
-    setPlayerColorMap(new Map());
-    playerColorMapRef.current = new Map();
-    setGrid(createEmptyGrid(gridSize.rows, gridSize.cols));
-    setTerritory(createEmptyGrid(gridSize.rows, gridSize.cols));
-    setGeneration(0);
+    setGameState(null);
     setIsRunning(false);
     fetchGames();
   };
 
-  // Get player number from principal
-  const getPlayerNumber = useCallback((principal: Principal): number => {
-    const key = principal.toText();
-    if (playerColorMapRef.current.has(key)) {
-      return playerColorMapRef.current.get(key)!;
-    }
-    const nextNum = playerColorMapRef.current.size + 1;
-    const newMap = new Map(playerColorMapRef.current);
-    newMap.set(key, nextNum);
-    playerColorMapRef.current = newMap;
-    setPlayerColorMap(newMap);
-    return nextNum;
-  }, []);
+  // Canvas sizing
+  useEffect(() => {
+    if (mode !== 'game') return;
+    const container = containerRef.current;
+    const canvas = canvasRef.current;
+    if (!container || !canvas) return;
 
-  // Apply remote placement
-  const applyPlacement = useCallback((placement: Placement) => {
-    // Skip own placements (already applied locally)
-    if (myPrincipal && placement.player.toText() === myPrincipal.toText()) return;
+    const updateSize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = container.getBoundingClientRect();
+      const width = Math.floor(rect.width);
+      const height = Math.floor(rect.height);
+      if (width === 0 || height === 0) return;
+      if (canvasSizeRef.current.width === width && canvasSizeRef.current.height === height) return;
 
-    const pattern = PATTERNS.find(p => p.name === placement.pattern_name);
-    if (!pattern) return;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      canvasSizeRef.current = { width, height };
+      forceRender(n => n + 1);
+    };
 
-    const coords = parseRLE(pattern.rle);
-    const playerNum = getPlayerNumber(placement.player);
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(container);
+    updateSize();
+    const t1 = setTimeout(updateSize, 50);
+    const t2 = setTimeout(updateSize, 200);
 
-    setGrid(currentGrid => {
-      const newGrid = currentGrid.map(r => [...r]);
-      coords.forEach(([dx, dy]) => {
-        const newRow = (placement.y + dy + gridSize.rows) % gridSize.rows;
-        const newCol = (placement.x + dx + gridSize.cols) % gridSize.cols;
-        if (newGrid[newRow]) newGrid[newRow][newCol] = playerNum;
-      });
-      return newGrid;
-    });
+    return () => {
+      observer.disconnect();
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [mode]);
 
-    setTerritory(currentTerritory => {
-      const newTerritory = currentTerritory.map(r => [...r]);
-      coords.forEach(([dx, dy]) => {
-        const newRow = (placement.y + dy + gridSize.rows) % gridSize.rows;
-        const newCol = (placement.x + dx + gridSize.cols) % gridSize.cols;
-        if (newTerritory[newRow]) newTerritory[newRow][newCol] = playerNum;
-      });
-      return newTerritory;
-    });
-  }, [myPrincipal, gridSize, getPlayerNumber]);
-
-  // Polling loop for multiplayer sync
+  // Single coordinated loop - either step (when running) or poll (when paused)
+  // Steps 5 generations at a time for ~10 gen/sec with IC latency
   useEffect(() => {
     if (!actor || currentGameId === null || mode !== 'game') return;
 
-    const pollInterval = setInterval(async () => {
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const tick = async () => {
+      if (cancelled) return;
+
       try {
-        const currentIndex = placementIndexRef.current;
-        const result = await actor.get_placements_since(currentGameId, currentIndex);
-        if ('Ok' in result && result.Ok.length > 0) {
-          console.log(`Received ${result.Ok.length} new placements from index ${currentIndex}`);
-          for (const placement of result.Ok) {
-            applyPlacement(placement);
+        if (isRunning) {
+          // Step 5 generations at a time for faster playback
+          const result = await actor.step(currentGameId, 5);
+          if ('Ok' in result && !cancelled) {
+            setGameState(result.Ok);
           }
-          const newIndex = currentIndex + BigInt(result.Ok.length);
-          placementIndexRef.current = newIndex;
-          setPlacementIndex(newIndex);
+        } else {
+          // Just poll for state (to see other players' placements)
+          const result = await actor.get_state(currentGameId);
+          if ('Ok' in result && !cancelled) {
+            setGameState(result.Ok);
+            // Sync running state from backend (another player might have started)
+            if (result.Ok.is_running !== isRunning) {
+              setIsRunning(result.Ok.is_running);
+            }
+          }
         }
       } catch (err) {
-        console.error('Polling error:', err);
+        console.error('Tick error:', err);
       }
-    }, 1000);
 
-    return () => clearInterval(pollInterval);
-  }, [actor, currentGameId, mode, applyPlacement]);
+      // Schedule next tick after this one completes
+      // Minimal delay when running - IC latency will naturally throttle to ~2 calls/sec
+      // 5 gens × 2 calls/sec = ~10 gen/sec
+      if (!cancelled) {
+        timeoutId = setTimeout(tick, isRunning ? 50 : 1000);
+      }
+    };
 
-  const createEmptyGrid = (rows: number, cols: number): number[][] => {
-    return Array(rows)
-      .fill(null)
-      .map(() => Array(cols).fill(0));
-  };
+    // Start the loop
+    tick();
 
-  // Draw the grid with territory colors (with zoom and pan)
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [actor, currentGameId, mode, isRunning]);
+
+  // Draw function
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     const { width: displayWidth, height: displayHeight } = canvasSizeRef.current;
-    if (!canvas || displayWidth === 0 || displayHeight === 0) return;
+    if (!canvas || displayWidth === 0 || displayHeight === 0 || !gameState) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
+    const { grid, territory } = gameState;
 
-    // Reset transform and clear
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = DEAD_COLOR;
     ctx.fillRect(0, 0, displayWidth, displayHeight);
 
-    // Apply pan offset
     ctx.save();
     ctx.translate(panOffset.x, panOffset.y);
 
     const cellSize = BASE_CELL_SIZE * zoom;
-
-    // Calculate visible range for optimization
     const startCol = Math.max(0, Math.floor(-panOffset.x / cellSize));
     const endCol = Math.min(gridSize.cols, Math.ceil((displayWidth - panOffset.x) / cellSize));
     const startRow = Math.max(0, Math.floor(-panOffset.y / cellSize));
     const endRow = Math.min(gridSize.rows, Math.ceil((displayHeight - panOffset.y) / cellSize));
 
-    // Draw territory (faded background for claimed squares) - only visible cells
+    // Draw territory
     for (let row = startRow; row < endRow; row++) {
       for (let col = startCol; col < endCol; col++) {
         const owner = territory[row]?.[col];
         if (owner > 0) {
           ctx.fillStyle = TERRITORY_COLORS[owner] || 'rgba(255,255,255,0.1)';
-          ctx.fillRect(
-            col * cellSize,
-            row * cellSize,
-            cellSize,
-            cellSize
-          );
+          ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
         }
       }
     }
 
-    // Draw grid lines (only if zoomed in enough)
+    // Draw grid lines
     if (zoom >= 0.5) {
       ctx.strokeStyle = GRID_COLOR;
       ctx.lineWidth = 1;
-
       for (let i = startCol; i <= endCol; i++) {
         ctx.beginPath();
         ctx.moveTo(i * cellSize, startRow * cellSize);
         ctx.lineTo(i * cellSize, endRow * cellSize);
         ctx.stroke();
       }
-
       for (let i = startRow; i <= endRow; i++) {
         ctx.beginPath();
         ctx.moveTo(startCol * cellSize, i * cellSize);
@@ -818,7 +427,7 @@ export const Life: React.FC = () => {
       }
     }
 
-    // Draw living cells with owner colors (on top of territory)
+    // Draw cells
     const cellPadding = Math.max(1, zoom * 0.5);
     for (let row = startRow; row < endRow; row++) {
       for (let col = startCol; col < endCol; col++) {
@@ -835,165 +444,41 @@ export const Life: React.FC = () => {
       }
     }
 
-    // Draw grid boundary indicator
+    // Boundary
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
     ctx.lineWidth = 2;
     ctx.strokeRect(0, 0, gridSize.cols * cellSize, gridSize.rows * cellSize);
 
     ctx.restore();
-  }, [grid, territory, gridSize, zoom, panOffset]);
+  }, [gameState, gridSize, zoom, panOffset]);
 
-  useEffect(() => {
-    draw();
-  }, [draw]);
+  useEffect(() => { draw(); }, [draw]);
 
-  // Count neighbors and their owners
-  const getNeighborInfo = (grid: number[][], row: number, col: number): { count: number; owners: Record<number, number> } => {
-    let count = 0;
-    const owners: Record<number, number> = {};
-
-    for (let i = -1; i <= 1; i++) {
-      for (let j = -1; j <= 1; j++) {
-        if (i === 0 && j === 0) continue;
-        const newRow = row + i;
-        const newCol = col + j;
-        const wrappedRow = (newRow + gridSize.rows) % gridSize.rows;
-        const wrappedCol = (newCol + gridSize.cols) % gridSize.cols;
-        const owner = grid[wrappedRow]?.[wrappedCol];
-        if (owner > 0) {
-          count++;
-          owners[owner] = (owners[owner] || 0) + 1;
-        }
-      }
-    }
-    return { count, owners };
-  };
-
-  // Get majority owner from neighbor counts
-  const getMajorityOwner = (owners: Record<number, number>): number => {
-    let maxCount = 0;
-    let maxOwner = 1;
-    for (const [owner, count] of Object.entries(owners)) {
-      if (count > maxCount) {
-        maxCount = count;
-        maxOwner = parseInt(owner);
-      }
-    }
-    return maxOwner;
-  };
-
-  const nextGeneration = useCallback(() => {
-    setGrid((currentGrid) => {
-      const newGrid = currentGrid.map((row, rowIndex) =>
-        row.map((cell, colIndex) => {
-          const { count, owners } = getNeighborInfo(currentGrid, rowIndex, colIndex);
-
-          if (cell > 0) {
-            // Living cell - survives with 2 or 3 neighbors, keeps its owner
-            return (count === 2 || count === 3) ? cell : 0;
-          } else {
-            // Dead cell - born with exactly 3 neighbors, inherits majority owner
-            if (count === 3) {
-              return getMajorityOwner(owners);
-            }
-            return 0;
-          }
-        })
-      );
-
-      // Update territory: any living cell claims its square
-      setTerritory((currentTerritory) => {
-        const newTerritory = currentTerritory.map((r) => [...r]);
-        for (let row = 0; row < newGrid.length; row++) {
-          for (let col = 0; col < newGrid[row].length; col++) {
-            if (newGrid[row][col] > 0) {
-              newTerritory[row][col] = newGrid[row][col];
-            }
-          }
-        }
-        return newTerritory;
-      });
-
-      return newGrid;
-    });
-    setGeneration((g) => g + 1);
-  }, [gridSize]);
-
-  useEffect(() => {
-    if (!isRunning) {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-      return;
-    }
-
-    const animate = (timestamp: number) => {
-      if (timestamp - lastUpdateRef.current >= speed) {
-        nextGeneration();
-        lastUpdateRef.current = timestamp;
-      }
-      animationRef.current = requestAnimationFrame(animate);
-    };
-
-    animationRef.current = requestAnimationFrame(animate);
-
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-    };
-  }, [isRunning, speed, nextGeneration]);
-
-  // Zoom controls
-  const handleZoomIn = () => {
-    setZoom(z => Math.min(MAX_ZOOM, z + ZOOM_STEP));
-  };
-
-  const handleZoomOut = () => {
-    setZoom(z => Math.max(MIN_ZOOM, z - ZOOM_STEP));
-  };
-
-  const handleResetView = () => {
-    setZoom(1);
-    setPanOffset({ x: 0, y: 0 });
-  };
-
-  // Mouse wheel zoom
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+  // Zoom/pan handlers
+  const handleZoomIn = () => setZoom(z => Math.min(MAX_ZOOM, z + ZOOM_STEP));
+  const handleZoomOut = () => setZoom(z => Math.max(MIN_ZOOM, z - ZOOM_STEP));
+  const handleResetView = () => { setZoom(1); setPanOffset({ x: 0, y: 0 }); };
+  const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
-    const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-    setZoom(z => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z + delta)));
+    setZoom(z => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z + (e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP))));
   }, []);
 
-  // Pan handlers
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 1 || e.button === 2 || e.shiftKey) {
-      // Middle click, right click, or shift+click to pan
       e.preventDefault();
       setIsPanning(true);
       setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
     }
   };
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isPanning) {
-      setPanOffset({
-        x: e.clientX - panStart.x,
-        y: e.clientY - panStart.y
-      });
-    }
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (isPanning) setPanOffset({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
   };
+  const handleMouseUp = () => setIsPanning(false);
+  const handleMouseLeave = () => setIsPanning(false);
 
-  const handleMouseUp = () => {
-    setIsPanning(false);
-  };
-
-  const handleMouseLeave = () => {
-    setIsPanning(false);
-  };
-
+  // Place cells on click
   const handleCanvasClick = async (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isPanning) return; // Don't place when panning
+    if (isPanning || !actor || currentGameId === null) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1002,99 +487,69 @@ export const Life: React.FC = () => {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // Account for zoom and pan
     const cellSize = BASE_CELL_SIZE * zoom;
     const col = Math.floor((x - panOffset.x) / cellSize);
     const row = Math.floor((y - panOffset.y) / cellSize);
 
-    // Check bounds
-    if (col < 0 || col >= gridSize.cols || row < 0 || row >= gridSize.rows) {
-      return;
-    }
+    if (col < 0 || col >= gridSize.cols || row < 0 || row >= gridSize.rows) return;
 
-    const cellPositions: Array<[number, number]> = [];
+    // Convert pattern to absolute coordinates
+    const cells: [number, number][] = parsedPattern.map(([dx, dy]) => [col + dx, row + dy]);
 
-    setGrid((currentGrid) => {
-      const newGrid = currentGrid.map((r) => [...r]);
-
-      parsedPattern.forEach(([dx, dy]) => {
-        const newRow = (row + dy + gridSize.rows) % gridSize.rows;
-        const newCol = (col + dx + gridSize.cols) % gridSize.cols;
-        if (newGrid[newRow]) {
-          newGrid[newRow][newCol] = currentPlayer;
-          cellPositions.push([newRow, newCol]);
-        }
-      });
-
-      return newGrid;
-    });
-
-    // Also claim territory for placed cells
-    setTerritory((currentTerritory) => {
-      const newTerritory = currentTerritory.map((r) => [...r]);
-      cellPositions.forEach(([r, c]) => {
-        newTerritory[r][c] = currentPlayer;
-      });
-      return newTerritory;
-    });
-
-    // Send placement to backend if in multiplayer game
-    if (actor && currentGameId !== null) {
-      try {
-        console.log(`Sending placement: ${selectedPattern.name} at (${col}, ${row}) to game ${currentGameId}`);
-        const result = await actor.place_pattern(
-          currentGameId,
-          selectedPattern.name,
-          col,
-          row,
-          BigInt(generation)
-        );
-        console.log('Placement result:', result);
-      } catch (err) {
-        console.error('Failed to send placement:', err);
-      }
+    try {
+      await actor.place_cells(currentGameId, cells);
+    } catch (err) {
+      console.error('Place error:', err);
     }
   };
 
-  const handleClear = () => {
-    setGrid(createEmptyGrid(gridSize.rows, gridSize.cols));
-    setTerritory(createEmptyGrid(gridSize.rows, gridSize.cols));
-    setGeneration(0);
-    setIsRunning(false);
+  // Controls
+  const handlePlayPause = async () => {
+    if (!actor || currentGameId === null) return;
+    try {
+      await actor.set_running(currentGameId, !isRunning);
+      setIsRunning(!isRunning);
+    } catch (err) {
+      console.error('Set running error:', err);
+    }
   };
 
-  const handleStep = () => {
-    nextGeneration();
+  const handleStep = async () => {
+    if (!actor || currentGameId === null) return;
+    try {
+      const result = await actor.step(currentGameId, 1);
+      if ('Ok' in result) {
+        setGameState(result.Ok);
+      }
+    } catch (err) {
+      console.error('Step error:', err);
+    }
   };
 
-  // Count cells per player
-  const cellCounts = grid.reduce((acc, row) => {
-    row.forEach((cell) => {
-      if (cell > 0) {
-        acc[cell] = (acc[cell] || 0) + 1;
-      }
-    });
+  const handleClear = async () => {
+    if (!actor || currentGameId === null) return;
+    try {
+      await actor.clear_grid(currentGameId);
+      setIsRunning(false);
+    } catch (err) {
+      console.error('Clear error:', err);
+    }
+  };
+
+  // Cell counts
+  const cellCounts = gameState?.grid.reduce((acc, row) => {
+    row.forEach(cell => { if (cell > 0) acc[cell] = (acc[cell] || 0) + 1; });
     return acc;
-  }, {} as Record<number, number>);
+  }, {} as Record<number, number>) || {};
 
-  // Count territory per player
-  const territoryCounts = territory.reduce((acc, row) => {
-    row.forEach((owner) => {
-      if (owner > 0) {
-        acc[owner] = (acc[owner] || 0) + 1;
-      }
-    });
+  const territoryCounts = gameState?.territory.reduce((acc, row) => {
+    row.forEach(owner => { if (owner > 0) acc[owner] = (acc[owner] || 0) + 1; });
     return acc;
-  }, {} as Record<number, number>);
+  }, {} as Record<number, number>) || {};
 
-  const totalTerritory = Object.values(territoryCounts).reduce((a, b) => a + b, 0);
-
-  // Filter patterns by category
   const filteredPatterns = selectedCategory === 'all'
-    ? PATTERNS
-    : PATTERNS.filter(p => p.category === selectedCategory);
+    ? PATTERNS : PATTERNS.filter(p => p.category === selectedCategory);
 
-  // Helper to format game status
   const formatStatus = (status: GameStatus): string => {
     if ('Active' in status) return 'Active';
     if ('Waiting' in status) return 'Waiting';
@@ -1102,7 +557,7 @@ export const Life: React.FC = () => {
     return 'Unknown';
   };
 
-  // Not authenticated - show login
+  // Login screen
   if (!isAuthenticated) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-120px)] gap-6">
@@ -1122,7 +577,7 @@ export const Life: React.FC = () => {
     );
   }
 
-  // Lobby mode
+  // Lobby
   if (mode === 'lobby') {
     return (
       <div className="flex flex-col h-[calc(100vh-120px)] p-6">
@@ -1139,7 +594,6 @@ export const Life: React.FC = () => {
           </div>
         )}
 
-        {/* Create game */}
         <div className="mb-6 p-4 bg-white/5 rounded-lg">
           <h2 className="text-lg font-semibold text-white mb-3">Create New Game</h2>
           <div className="flex gap-3">
@@ -1161,7 +615,6 @@ export const Life: React.FC = () => {
           </div>
         </div>
 
-        {/* Games list */}
         <div className="flex-1 overflow-auto">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-white">Available Games</h2>
@@ -1180,29 +633,29 @@ export const Life: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-2">
-              {games.map(([id, name, status, playerCount]) => (
+              {games.map((game) => (
                 <div
-                  key={id.toString()}
+                  key={game.id.toString()}
                   className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10 hover:border-white/20 transition-all"
                 >
                   <div className="flex items-center gap-4">
                     <div>
-                      <h3 className="font-semibold text-white">{name}</h3>
+                      <h3 className="font-semibold text-white">{game.name}</h3>
                       <p className="text-gray-500 text-sm font-mono">
-                        Game #{id.toString()} • {playerCount}/4 players
+                        Game #{game.id.toString()} | {game.player_count}/4 players | Gen {game.generation.toString()}
                       </p>
                     </div>
                     <span className={`px-2 py-0.5 rounded text-xs font-mono ${
-                      'Active' in status ? 'bg-green-500/20 text-green-400' :
-                      'Waiting' in status ? 'bg-yellow-500/20 text-yellow-400' :
+                      'Active' in game.status ? 'bg-green-500/20 text-green-400' :
+                      'Waiting' in game.status ? 'bg-yellow-500/20 text-yellow-400' :
                       'bg-gray-500/20 text-gray-400'
                     }`}>
-                      {formatStatus(status)}
+                      {formatStatus(game.status)}
                     </span>
                   </div>
                   <button
-                    onClick={() => handleJoinGame(id)}
-                    disabled={isLoading || 'Finished' in status}
+                    onClick={() => handleJoinGame(game.id)}
+                    disabled={isLoading || 'Finished' in game.status}
                     className="px-4 py-2 rounded font-mono text-sm bg-dfinity-turquoise/20 text-dfinity-turquoise border border-dfinity-turquoise/50 hover:bg-dfinity-turquoise/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Join
@@ -1216,7 +669,7 @@ export const Life: React.FC = () => {
     );
   }
 
-  // Game mode
+  // Game view
   return (
     <div className="flex flex-col h-[calc(100vh-120px)]">
       {/* Header */}
@@ -1226,44 +679,33 @@ export const Life: React.FC = () => {
             onClick={handleLeaveGame}
             className="px-3 py-1 rounded font-mono text-xs bg-white/10 text-gray-400 border border-white/20 hover:bg-white/20 hover:text-white transition-all"
           >
-            ← Lobby
+            Leave
           </button>
           <div>
-            <h1 className="text-xl font-bold text-white">Conway's Game of Life</h1>
+            <h1 className="text-xl font-bold text-white">Game of Life</h1>
             <p className="text-gray-500 text-xs">
-              Multiplayer • Game #{currentGameId?.toString()} • You are Player {currentPlayer}
+              Game #{currentGameId?.toString()} | You are Player {myPlayerNum}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-4 text-sm font-mono">
           <div className="text-gray-400">
-            Gen: <span className="text-dfinity-turquoise">{generation}</span>
+            Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span>
           </div>
           <div className="text-gray-600">|</div>
-          {/* Territory counts per player */}
           <div className="text-gray-400 text-xs">Territory:</div>
           {Object.entries(territoryCounts).map(([player, count]) => (
             <div key={player} className="flex items-center gap-1">
-              <div
-                className="w-3 h-3 rounded-sm opacity-50"
-                style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }}
-              />
+              <div className="w-3 h-3 rounded-sm opacity-50" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
               <span style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
             </div>
           ))}
-          {totalTerritory === 0 && (
-            <span className="text-gray-500">None</span>
-          )}
           <div className="text-gray-600">|</div>
-          {/* Living cell counts */}
           <div className="text-gray-400 text-xs">Cells:</div>
           {Object.entries(cellCounts).map(([player, count]) => (
             <div key={`cell-${player}`} className="flex items-center gap-1">
-              <div
-                className="w-2 h-2 rounded-sm"
-                style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }}
-              />
+              <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
               <span className="text-xs" style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
             </div>
           ))}
@@ -1273,7 +715,7 @@ export const Life: React.FC = () => {
       {/* Controls */}
       <div className="flex items-center gap-3 mb-3 p-3 bg-white/5 rounded-lg">
         <button
-          onClick={() => setIsRunning(!isRunning)}
+          onClick={handlePlayPause}
           className={`px-4 py-1.5 rounded font-mono text-sm font-bold transition-all ${
             isRunning
               ? 'bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30'
@@ -1286,7 +728,7 @@ export const Life: React.FC = () => {
         <button
           onClick={handleStep}
           disabled={isRunning}
-          className="px-3 py-1.5 rounded font-mono text-sm bg-white/10 text-white border border-white/20 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+          className="px-3 py-1.5 rounded font-mono text-sm bg-white/10 text-white border border-white/20 hover:bg-white/20 disabled:opacity-30 transition-all"
         >
           STEP
         </button>
@@ -1298,33 +740,21 @@ export const Life: React.FC = () => {
           CLEAR
         </button>
 
-        <div className="flex items-center gap-2 ml-2">
-          <span className="text-gray-500 text-xs">Speed:</span>
-          <input
-            type="range"
-            min="20"
-            max="500"
-            value={500 - speed + 20}
-            onChange={(e) => setSpeed(500 - Number(e.target.value) + 20)}
-            className="w-20 slider-turquoise"
-          />
-          <span className="text-gray-600 text-xs w-12">{Math.round(1000 / speed)}/s</span>
-        </div>
-
-        {/* Your color indicator */}
         <div className="flex items-center gap-2 ml-4 pl-4 border-l border-white/10">
           <span className="text-gray-500 text-xs">Your color:</span>
           <div
             className="w-6 h-6 rounded ring-2 ring-white ring-offset-2 ring-offset-black"
-            style={{ backgroundColor: PLAYER_COLORS[currentPlayer] }}
-            title={`Player ${currentPlayer}`}
+            style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }}
           />
+        </div>
+
+        <div className="ml-auto text-gray-500 text-xs">
+          Backend-sync (~10 gen/sec)
         </div>
       </div>
 
       {/* Pattern Selector */}
       <div className="mb-3 p-3 bg-white/5 rounded-lg">
-        {/* Category tabs */}
         <div className="flex gap-2 mb-3">
           <button
             onClick={() => setSelectedCategory('all')}
@@ -1334,28 +764,24 @@ export const Life: React.FC = () => {
                 : 'text-gray-400 hover:text-white'
             }`}
           >
-            All ({PATTERNS.length})
+            All
           </button>
           {(Object.keys(CATEGORY_INFO) as PatternCategory[]).map((cat) => {
             const info = CATEGORY_INFO[cat];
-            const count = PATTERNS.filter(p => p.category === cat).length;
             return (
               <button
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
                 className={`px-3 py-1 rounded text-xs font-mono transition-all border ${
-                  selectedCategory === cat
-                    ? info.color
-                    : 'text-gray-400 border-transparent hover:text-white'
+                  selectedCategory === cat ? info.color : 'text-gray-400 border-transparent hover:text-white'
                 }`}
               >
-                {info.icon} {info.label} ({count})
+                {info.icon} {info.label}
               </button>
             );
           })}
         </div>
 
-        {/* Pattern grid */}
         <div className="flex flex-wrap gap-2">
           {filteredPatterns.map((pattern) => {
             const catInfo = CATEGORY_INFO[pattern.category];
@@ -1367,7 +793,7 @@ export const Life: React.FC = () => {
                 className={`px-3 py-1.5 rounded text-xs font-mono transition-all border ${
                   isSelected
                     ? catInfo.color + ' ring-1 ring-white/30'
-                    : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10 hover:border-white/20'
+                    : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
                 }`}
                 title={pattern.description}
               >
@@ -1377,7 +803,6 @@ export const Life: React.FC = () => {
           })}
         </div>
 
-        {/* Selected pattern info */}
         <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-gray-400 text-xs">Selected: </span>
@@ -1385,54 +810,27 @@ export const Life: React.FC = () => {
               {selectedPattern.name}
             </span>
             <span className="text-gray-500 text-xs">({parsedPattern.length} cells)</span>
-            <div
-              className="w-3 h-3 rounded-sm ml-2"
-              style={{ backgroundColor: PLAYER_COLORS[currentPlayer] }}
-              title={`Will place as Player ${currentPlayer}`}
-            />
           </div>
-          <p className="text-gray-500 text-xs max-w-md">{selectedPattern.description}</p>
+          <p className="text-gray-500 text-xs">{selectedPattern.description}</p>
         </div>
       </div>
 
-      {/* Canvas container with zoom controls */}
+      {/* Canvas */}
       <div className="flex-1 flex flex-col border border-white/20 rounded-lg overflow-hidden bg-black relative">
-        {/* Zoom controls overlay */}
         <div className="absolute top-2 right-2 z-10 flex items-center gap-2 bg-black/70 rounded-lg p-2">
-          <button
-            onClick={handleZoomOut}
-            disabled={zoom <= MIN_ZOOM}
-            className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all font-bold"
-            title="Zoom out"
-          >
-            -
-          </button>
-          <span className="text-white text-xs font-mono w-12 text-center">
-            {Math.round(zoom * 100)}%
-          </span>
-          <button
-            onClick={handleZoomIn}
-            disabled={zoom >= MAX_ZOOM}
-            className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all font-bold"
-            title="Zoom in"
-          >
-            +
-          </button>
-          <button
-            onClick={handleResetView}
-            className="px-2 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 transition-all text-xs font-mono"
-            title="Reset view"
-          >
-            Reset
-          </button>
+          <button onClick={handleZoomOut} disabled={zoom <= MIN_ZOOM}
+            className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 font-bold">-</button>
+          <span className="text-white text-xs font-mono w-12 text-center">{Math.round(zoom * 100)}%</span>
+          <button onClick={handleZoomIn} disabled={zoom >= MAX_ZOOM}
+            className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 font-bold">+</button>
+          <button onClick={handleResetView}
+            className="px-2 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 text-xs font-mono">Reset</button>
         </div>
 
-        {/* Grid info overlay */}
         <div className="absolute bottom-2 left-2 z-10 bg-black/70 rounded px-2 py-1 text-xs text-gray-400 font-mono">
-          Grid: {gridSize.cols}x{gridSize.rows} | Shift+drag or scroll wheel to navigate
+          {gridSize.cols}x{gridSize.rows} | Shift+drag to pan
         </div>
 
-        {/* Canvas */}
         <div ref={containerRef} className="flex-1 w-full h-full min-h-0">
           <canvas
             ref={canvasRef}

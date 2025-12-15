@@ -536,8 +536,8 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
                 height: `${rocketSize}px`,
                 width: 'auto', // Preserve aspect ratio
                 filter: rocket.isCrashed
-                  ? 'drop-shadow(0 0 12px rgba(255, 100, 0, 0.8))'
-                  : 'drop-shadow(0 0 10px rgba(255, 200, 100, 0.7))'
+                  ? 'drop-shadow(0 0 6px rgba(255, 100, 0, 0.4))'
+                  : 'drop-shadow(0 0 5px rgba(255, 200, 100, 0.35))'
               }}
             />
             {/* Crash point label for high-flyers (10x+) */}
@@ -595,7 +595,7 @@ export const CrashCanvas: React.FC<CrashCanvasProps> = ({
               style={{
                 height: `${rocketSize}px`,
                 width: 'auto',
-                filter: 'drop-shadow(0 0 10px rgba(255, 200, 100, 0.7))'
+                filter: 'drop-shadow(0 0 5px rgba(255, 200, 100, 0.35))'
               }}
             />
           </div>

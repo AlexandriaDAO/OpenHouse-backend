@@ -58,6 +58,7 @@ export const Crash: React.FC = () => {
   const [multiResult, setMultiResult] = useState<MultiCrashResult | null>(null);
   const [rocketStates, setRocketStates] = useState<RocketState[]>([]);
   const [allCrashed, setAllCrashed] = useState(false);
+  const [showInfoModal, setShowInfoModal] = useState(false);
 
   // Animation frame ref for cleanup
   const animationRef = useRef<number | null>(null);
@@ -412,7 +413,16 @@ export const Crash: React.FC = () => {
             </div>
             <div className="h-6 w-px bg-gray-800"></div>
             <div className="flex flex-col items-center flex-1">
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">House Edge</span>
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                House Edge
+                <button
+                  onClick={() => setShowInfoModal(true)}
+                  className="text-gray-600 hover:text-gray-400 text-[10px]"
+                  title="How crash works"
+                >
+                  ?
+                </button>
+              </span>
               <span className="text-red-400 font-mono font-bold">1%</span>
             </div>
           </div>
@@ -444,6 +454,104 @@ export const Crash: React.FC = () => {
           isBalanceInitialized={gameBalanceContext.isInitialized}
         />
       </div>
+
+      {/* Info Modal */}
+      {showInfoModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowInfoModal(false)}>
+          <div className="bg-gray-900 rounded-xl p-6 max-w-lg w-full border border-gray-700 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-white">How Crash Works</h3>
+              <button
+                onClick={() => setShowInfoModal(false)}
+                className="text-gray-400 hover:text-white text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="text-xs text-gray-300 space-y-3">
+              <div>
+                <p className="font-semibold text-white mb-1">The Game</p>
+                <p>
+                  Each rocket launches with a hidden <span className="font-bold text-white">crash point</span> — a random multiplier where it will explode.
+                  You pick a <span className="font-bold text-dfinity-turquoise">target multiplier</span> before launch.
+                  If the rocket reaches your target before crashing, you win!
+                </p>
+              </div>
+
+              <div>
+                <p className="font-semibold text-white mb-1">Multi-Rocket Mode</p>
+                <p>
+                  Launch 1-10 rockets at once! Each rocket has an <span className="font-bold">independent crash point</span> — some may win, some may lose.
+                  Your bet is spread across all rockets.
+                </p>
+              </div>
+
+              <div>
+                <p className="font-semibold text-white mb-1">Win Calculation</p>
+                <div className="bg-gray-900 border border-gray-800 rounded p-2 font-mono text-xs">
+                  <p className="text-gray-400">For each rocket that reaches target:</p>
+                  <p className="mt-1">Payout = <span className="text-dfinity-turquoise">Bet × Target × 0.99</span></p>
+                  <p className="mt-2 text-gray-400">Example at 10x target:</p>
+                  <p>$1 bet → $9.90 payout (if rocket survives)</p>
+                </div>
+              </div>
+
+              <div>
+                <p className="font-semibold text-red-400 mb-1">The House Edge (1%)</p>
+                <p>
+                  The <span className="font-mono text-white">0.99</span> factor in the payout formula is the house edge.
+                  It's applied equally to <span className="font-bold">all targets</span>, whether you choose 1.1x or 100x.
+                </p>
+              </div>
+
+              <div className="bg-yellow-900/20 border border-yellow-600/30 rounded p-3">
+                <p className="font-semibold text-yellow-400 mb-1">No Strategy Beats Another</p>
+                <p className="text-gray-300">
+                  Every target has the <span className="font-bold">same 1% house edge</span>.
+                  A low target (like 1.5x) wins more often but pays less.
+                  A high target (like 50x) wins rarely but pays big.
+                  <span className="font-bold text-white"> Over time, all strategies converge to the same -1% expected return.</span>
+                </p>
+              </div>
+
+              <div>
+                <p className="font-semibold text-white mb-1">The Math</p>
+                <div className="bg-black/30 rounded p-2 font-mono text-[10px] text-gray-400 space-y-1">
+                  <p><span className="text-gray-500">Win chance:</span> <span className="text-green-400">99% / target</span></p>
+                  <p><span className="text-gray-500">At 2x:</span> 49.5% chance to win 2x (EV = 0.99)</p>
+                  <p><span className="text-gray-500">At 10x:</span> 9.9% chance to win 10x (EV = 0.99)</p>
+                  <p><span className="text-gray-500">At 100x:</span> 0.99% chance to win 100x (EV = 0.99)</p>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-gray-700/50 space-y-2">
+                <div>
+                  <p className="font-semibold text-white mb-1">Verify This Code</p>
+                  <p className="text-xs text-gray-400 mb-2">
+                    This game runs on the Internet Computer. You can verify the deployed code matches this open-source repository.
+                  </p>
+                  <div className="bg-black/30 rounded p-2 font-mono text-[10px] text-gray-400 space-y-1">
+                    <p><span className="text-gray-500">Canister:</span> <span className="text-white">fws6k-tyaaa-aaaap-qqc7q-cai</span></p>
+                    <p><span className="text-gray-500">Hash:</span> <span className="text-dfinity-turquoise break-all">0846c5ce0ec0b28d05f1c79009a71bd2e7f0cd4cde59ee36973c93a3d3a2cae3</span></p>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400">
+                  Crash points use the IC's verifiable random function (VRF) for provably fair results.{' '}
+                  <a
+                    href="https://github.com/AlexandriaDAO/alexandria/blob/master/openhouse/VERIFICATION.md"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-dfinity-turquoise hover:underline"
+                  >
+                    Verification Guide →
+                  </a>
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </GameLayout>
   );
 };

@@ -1,12 +1,3 @@
-type Placement = record {
-    player: principal;
-    pattern_name: text;
-    x: int32;
-    y: int32;
-    generation: nat64;
-    timestamp: nat64;
-};
-
 type GameStatus = variant {
     Waiting;
     Active;
@@ -26,31 +17,47 @@ type GameRoom = record {
     width: nat32;
     height: nat32;
     created_at: nat64;
-    placements: vec Placement;
-    current_generation: nat64;
+    grid: vec vec nat8;
+    territory: vec vec nat8;
+    generation: nat64;
     players: vec principal;
-    territory: vec record { principal; nat64 };
     status: GameStatus;
+    is_running: bool;
+};
+
+type GameState = record {
+    grid: vec vec nat8;
+    territory: vec vec nat8;
+    generation: nat64;
+    players: vec principal;
+    is_running: bool;
+};
+
+type GameInfo = record {
+    id: nat64;
+    name: text;
+    status: GameStatus;
+    player_count: nat32;
+    generation: nat64;
 };
 
 service : {
     // Game management
     create_game: (text, GameConfig) -> (variant { Ok: nat64; Err: text });
-    join_game: (nat64) -> (variant { Ok; Err: text });
+    join_game: (nat64) -> (variant { Ok: nat8; Err: text });
     start_game: (nat64) -> (variant { Ok; Err: text });
 
-    // Placements (multiplayer sync)
-    place_pattern: (nat64, text, int32, int32, nat64) -> (variant { Ok: nat64; Err: text });
-    get_placements_since: (nat64, nat64) -> (variant { Ok: vec Placement; Err: text }) query;
-    report_generation: (nat64, nat64) -> (variant { Ok; Err: text });
+    // Cell placement (frontend sends parsed coordinates)
+    place_cells: (nat64, vec record { int32; int32 }) -> (variant { Ok: nat32; Err: text });
 
-    // Territory / Scoring
-    submit_territory_snapshot: (nat64, vec record { principal; nat64 }) -> (variant { Ok; Err: text });
-    get_territory: (nat64) -> (variant { Ok: vec record { principal; nat64 }; Err: text }) query;
+    // Simulation control
+    step: (nat64, nat32) -> (variant { Ok: GameState; Err: text });
+    set_running: (nat64, bool) -> (variant { Ok; Err: text });
+    clear_grid: (nat64) -> (variant { Ok; Err: text });
 
     // Queries
-    list_games: () -> (vec record { nat64; text; GameStatus; nat32 }) query;
+    get_state: (nat64) -> (variant { Ok: GameState; Err: text }) query;
+    list_games: () -> (vec GameInfo) query;
     get_game: (nat64) -> (variant { Ok: GameRoom; Err: text }) query;
-    get_game_info: (nat64) -> (variant { Ok: record { text; GameStatus; nat32; nat64; nat64 }; Err: text }) query;
     greet: (text) -> (text) query;
 }
