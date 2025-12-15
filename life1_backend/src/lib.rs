@@ -33,6 +33,10 @@ type Memory = VirtualMemory<DefaultMemoryImpl>;
 pub struct LifeState {
     pub grid: Vec<Vec<u8>>,
     pub territory: Vec<Vec<u8>>,
+    // Points stored in each cell (economics system)
+    pub points: Vec<Vec<u16>>,
+    // Player balances (index matches players array)
+    pub player_balances: Vec<u64>,
     pub generation: u64,
     pub players: Vec<Principal>,
 }
@@ -53,10 +57,26 @@ impl Storable for Metadata {
         candid::decode_one(&bytes).unwrap_or_default()
     }
 
-    const BOUND: Bound = Bound::Bounded {
-        max_size: 512, // Enough for 10 principals + generation
-        is_fixed_size: false,
-    };
+/// Extended game state with points (main polling endpoint for economics)
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct GameStateWithPoints {
+    pub grid: Vec<Vec<u8>>,
+    pub territory: Vec<Vec<u8>>,
+    pub points: Vec<Vec<u16>>,  // Points stored in each cell
+    pub generation: u64,
+    pub players: Vec<Principal>,
+    pub balances: Vec<u64>,     // Balance per player (index matches players)
+    pub is_running: bool,
+}
+
+/// Game info for lobby listing
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct GameInfo {
+    pub id: u64,
+    pub name: String,
+    pub status: GameStatus,
+    pub player_count: u32,
+    pub generation: u64,
 }
 
 // ============================================================================
@@ -178,6 +198,10 @@ fn set_territory_cell(row: usize, col: usize, value: u8) {
     });
 }
 
+fn create_empty_points_grid(width: u32, height: u32) -> Vec<Vec<u16>> {
+    vec![vec![0u16; width as usize]; height as usize]
+}
+
 /// Count neighbors and their owners for a cell
 fn get_neighbor_info(row: usize, col: usize) -> (u8, [u8; MAX_PLAYERS + 1]) {
     let mut count = 0u8;
@@ -215,18 +239,19 @@ fn get_majority_owner(owner_counts: &[u8; MAX_PLAYERS + 1]) -> u8 {
     max_owner
 }
 
-/// Run one generation of Conway's Game of Life
-fn step_generation() {
-    // Read current grid into memory for processing
-    let mut current: Vec<u8> = Vec::with_capacity(GRID_SIZE);
-    GRID.with(|g| {
-        let g = g.borrow();
-        for i in 0..GRID_SIZE as u64 {
-            current.push(g.get(i).unwrap_or(0));
-        }
-    });
+/// Run one generation of Conway's Game of Life with ownership and point capture
+fn step_generation(game: &mut GameRoom) {
+    let height = game.height as usize;
+    let width = game.width as usize;
+    let mut new_grid = create_empty_grid(game.width, game.height);
 
-    let mut new_grid: Vec<u8> = vec![0u8; GRID_SIZE];
+    // Track points to transfer (to_player_idx, amount)
+    let mut point_transfers: Vec<(usize, u16)> = Vec::new();
+
+    for row in 0..height {
+        for col in 0..width {
+            let (count, owner_counts) = get_neighbor_info(&game.grid, row, col, height, width);
+            let current = game.grid[row][col];
 
     for row in 0..GRID_HEIGHT {
         for col in 0..GRID_WIDTH {
@@ -238,29 +263,41 @@ fn step_generation() {
                 if count == 2 || count == 3 {
                     new_grid[idx(row, col)] = current_val;
                 }
+                // Cell dies - points stay in cell (territory doesn't change on death)
             } else {
                 // Dead cell born with exactly 3 neighbors
                 if count == 3 {
-                    new_grid[idx(row, col)] = get_majority_owner(&owner_counts);
+                    let new_owner = get_majority_owner(&owner_counts);
+                    new_grid[row][col] = new_owner;
+
+                    // Check if this cell had points from another player
+                    let old_territory_owner = game.territory[row][col];
+                    let cell_points = game.points[row][col];
+
+                    if cell_points > 0 && old_territory_owner > 0 && old_territory_owner != new_owner {
+                        // Capture! Transfer points to new owner's balance
+                        let to_idx = (new_owner - 1) as usize;
+                        point_transfers.push((to_idx, cell_points));
+                        // Clear points from cell (they go to balance)
+                        game.points[row][col] = 0;
+                    }
                 }
             }
         }
     }
 
-    // Write new grid back to stable storage
-    GRID.with(|g| {
-        let g = g.borrow_mut();
-        for (i, &val) in new_grid.iter().enumerate() {
-            let _ = g.set(i as u64, &val);
+    // Apply point transfers to balances
+    for (to_idx, amount) in point_transfers {
+        if to_idx < game.player_balances.len() {
+            game.player_balances[to_idx] += amount as u64;
         }
-    });
+    }
 
-    // Update territory for living cells
-    for row in 0..GRID_HEIGHT {
-        for col in 0..GRID_WIDTH {
-            let owner = new_grid[idx(row, col)];
-            if owner > 0 {
-                set_territory_cell(row, col, owner);
+    // Update territory: any living cell claims its square
+    for row in 0..height {
+        for col in 0..width {
+            if new_grid[row][col] > 0 {
+                game.territory[row][col] = new_grid[row][col];
             }
         }
     }
@@ -283,46 +320,30 @@ fn cleanup_inactive_players() {
         }
     });
 
-    CACHED_METADATA.with(|cached| {
-        let mut m = cached.borrow_mut();
-        let mut i = 0;
-        while i < m.players.len() {
-            if live_counts[i + 1] == 0 {
-                // Player has no live cells - remove them
-                m.players.remove(i);
-                // Remap colors for all cells with color > i+1
-                let removed_color = (i + 1) as u8;
-                GRID.with(|g| {
-                    let g = g.borrow_mut();
-                    for j in 0..GRID_SIZE as u64 {
-                        if let Some(c) = g.get(j) {
-                            if c > removed_color {
-                                let _ = g.set(j, &(c - 1));
-                            }
-                        }
-                    }
-                });
-                TERRITORY.with(|t| {
-                    let t = t.borrow_mut();
-                    for j in 0..GRID_SIZE as u64 {
-                        if let Some(c) = t.get(j) {
-                            if c > removed_color {
-                                let _ = t.set(j, &(c - 1));
-                            } else if c == removed_color {
-                                // Territory of removed player stays (historical)
-                            }
-                        }
-                    }
-                });
-                // Re-check live counts after remap
-                for k in (removed_color as usize)..MAX_PLAYERS {
-                    live_counts[k] = live_counts[k + 1];
-                }
-                live_counts[MAX_PLAYERS] = 0;
-            } else {
-                i += 1;
-            }
-        }
+    let caller = ic_cdk::api::msg_caller();
+    let now = ic_cdk::api::time();
+
+    let width = config.width.min(200).max(10);
+    let height = config.height.min(200).max(10);
+
+    let game = GameRoom {
+        id: game_id,
+        name,
+        width,
+        height,
+        created_at: now,
+        grid: create_empty_grid(width, height),
+        territory: create_empty_grid(width, height),
+        points: create_empty_points_grid(width, height),
+        player_balances: vec![1000],  // Creator starts with 1000 points
+        generation: 0,
+        players: vec![caller],
+        status: GameStatus::Waiting,
+        is_running: false,
+    };
+
+    GAMES.with(|games| {
+        games.borrow_mut().insert(game_id, game);
     });
 }
 
@@ -357,6 +378,10 @@ fn build_state() -> LifeState {
             generation: m.generation,
             players: m.players.clone(),
         }
+
+        game.players.push(caller);
+        game.player_balances.push(1000);  // New player gets 1000 points
+        Ok(game.players.len() as u8)
     })
 }
 
@@ -381,14 +406,86 @@ fn post_upgrade() {
 // UPDATE METHODS
 // ============================================================================
 
-/// Place cells on the grid
+/// Place cells on the grid with economics. Costs 1 point per cell.
 #[update]
 fn place_cells(cells: Vec<(i32, i32)>) -> Result<u32, String> {
     let caller = ic_cdk::api::msg_caller();
 
-    if caller == Principal::anonymous() {
-        return Err("Anonymous callers cannot place cells".to_string());
-    }
+    GAMES.with(|games| {
+        let mut games = games.borrow_mut();
+        let game = games.get_mut(&game_id).ok_or("Game not found")?;
+
+        if game.status != GameStatus::Active {
+            return Err("Game not active".to_string());
+        }
+
+        // Find player index
+        let player_idx = game.players
+            .iter()
+            .position(|p| *p == caller)
+            .ok_or("Not a player in this game")?;
+        let player_num = (player_idx + 1) as u8;
+
+        let cost = cells.len() as u64;
+
+        // Check balance
+        if game.player_balances[player_idx] < cost {
+            return Err(format!("Insufficient points. Need {}, have {}",
+                cost, game.player_balances[player_idx]));
+        }
+
+        let width = game.width as i32;
+        let height = game.height as i32;
+
+        // Pre-validate: check for overlaps with alive cells
+        for (x, y) in &cells {
+            let col = ((*x % width) + width) % width;
+            let row = ((*y % height) + height) % height;
+            if game.grid[row as usize][col as usize] > 0 {
+                return Err("Cannot place on alive cells".to_string());
+            }
+        }
+
+        // Deduct cost from balance
+        game.player_balances[player_idx] -= cost;
+
+        // Find all cells owned by this player (for point distribution)
+        let mut my_cells: Vec<(usize, usize)> = Vec::new();
+        for row in 0..game.height as usize {
+            for col in 0..game.width as usize {
+                if game.grid[row][col] == player_num {
+                    my_cells.push((row, col));
+                }
+            }
+        }
+
+        // Place new cells
+        let mut placed_cells: Vec<(usize, usize)> = Vec::new();
+        for (x, y) in cells {
+            let col = ((x % width) + width) % width;
+            let row = ((y % height) + height) % height;
+            game.grid[row as usize][col as usize] = player_num;
+            game.territory[row as usize][col as usize] = player_num;
+            placed_cells.push((row as usize, col as usize));
+        }
+
+        // Distribute points across territory (including newly placed cells)
+        my_cells.extend(placed_cells.iter().cloned());
+
+        if !my_cells.is_empty() {
+            // Distribute points across owned cells
+            let points_per_cell = cost / my_cells.len() as u64;
+            let remainder = cost % my_cells.len() as u64;
+
+            for (i, (row, col)) in my_cells.iter().enumerate() {
+                let extra = if (i as u64) < remainder { 1 } else { 0 };
+                game.points[*row][*col] += (points_per_cell + extra) as u16;
+            }
+        }
+
+        Ok(placed_cells.len() as u32)
+    })
+}
 
     ensure_grid_initialized();
 
@@ -425,7 +522,7 @@ fn place_cells(cells: Vec<(i32, i32)>) -> Result<u32, String> {
     Ok(placed)
 }
 
-/// Advance the simulation by n generations
+/// Clear the grid (keep game active, reset points)
 #[update]
 fn step(n: u32) -> Result<LifeState, String> {
     ensure_grid_initialized();
@@ -440,7 +537,17 @@ fn step(n: u32) -> Result<LifeState, String> {
     cleanup_inactive_players();
     save_metadata();
 
-    Ok(build_state())
+        game.grid = create_empty_grid(game.width, game.height);
+        game.territory = create_empty_grid(game.width, game.height);
+        game.points = create_empty_points_grid(game.width, game.height);
+        // Reset all player balances to 1000
+        for balance in game.player_balances.iter_mut() {
+            *balance = 1000;
+        }
+        game.generation = 0;
+        game.is_running = false;
+        Ok(())
+    })
 }
 
 // ============================================================================
@@ -449,8 +556,79 @@ fn step(n: u32) -> Result<LifeState, String> {
 
 /// Get current game state
 #[query]
-fn get_state() -> LifeState {
-    build_state()
+fn get_state(game_id: u64) -> Result<GameState, String> {
+    GAMES.with(|games| {
+        let games = games.borrow();
+        let game = games.get(&game_id).ok_or("Game not found")?;
+        Ok(GameState {
+            grid: game.grid.clone(),
+            territory: game.territory.clone(),
+            generation: game.generation,
+            players: game.players.clone(),
+            is_running: game.is_running,
+        })
+    })
+}
+
+/// Get game state including points (main polling endpoint for economics)
+#[query]
+fn get_state_with_points(game_id: u64) -> Result<GameStateWithPoints, String> {
+    GAMES.with(|games| {
+        let games = games.borrow();
+        let game = games.get(&game_id).ok_or("Game not found")?;
+        Ok(GameStateWithPoints {
+            grid: game.grid.clone(),
+            territory: game.territory.clone(),
+            points: game.points.clone(),
+            generation: game.generation,
+            players: game.players.clone(),
+            balances: game.player_balances.clone(),
+            is_running: game.is_running,
+        })
+    })
+}
+
+/// Get player balance
+#[query]
+fn get_balance(game_id: u64) -> Result<u64, String> {
+    let caller = ic_cdk::api::msg_caller();
+    GAMES.with(|games| {
+        let games = games.borrow();
+        let game = games.get(&game_id).ok_or("Game not found")?;
+        let player_idx = game.players
+            .iter()
+            .position(|p| *p == caller)
+            .ok_or("Not a player")?;
+        Ok(game.player_balances[player_idx])
+    })
+}
+
+/// List all games (for lobby)
+#[query]
+fn list_games() -> Vec<GameInfo> {
+    GAMES.with(|games| {
+        games.borrow()
+            .iter()
+            .map(|(_, g)| GameInfo {
+                id: g.id,
+                name: g.name.clone(),
+                status: g.status.clone(),
+                player_count: g.players.len() as u32,
+                generation: g.generation,
+            })
+            .collect()
+    })
+}
+
+/// Get full game details
+#[query]
+fn get_game(game_id: u64) -> Result<GameRoom, String> {
+    GAMES.with(|games| {
+        games.borrow()
+            .get(&game_id)
+            .cloned()
+            .ok_or("Game not found".to_string())
+    })
 }
 
 #[query]

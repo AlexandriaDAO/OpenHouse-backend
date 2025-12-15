@@ -1,8 +1,38 @@
 type LifeState = record {
     grid: vec vec nat8;
     territory: vec vec nat8;
+    points: vec vec nat16;
+    player_balances: vec nat64;
     generation: nat64;
     players: vec principal;
+    status: GameStatus;
+    is_running: bool;
+};
+
+type GameState = record {
+    grid: vec vec nat8;
+    territory: vec vec nat8;
+    generation: nat64;
+    players: vec principal;
+    is_running: bool;
+};
+
+type GameStateWithPoints = record {
+    grid: vec vec nat8;
+    territory: vec vec nat8;
+    points: vec vec nat16;
+    generation: nat64;
+    players: vec principal;
+    balances: vec nat64;
+    is_running: bool;
+};
+
+type GameInfo = record {
+    id: nat64;
+    name: text;
+    status: GameStatus;
+    player_count: nat32;
+    generation: nat64;
 };
 
 service : {
@@ -15,6 +45,11 @@ service : {
     // Get current game state
     get_state: () -> (LifeState) query;
 
-    // Test endpoint
+    // Queries
+    get_state: (nat64) -> (variant { Ok: GameState; Err: text }) query;
+    get_state_with_points: (nat64) -> (variant { Ok: GameStateWithPoints; Err: text }) query;
+    get_balance: (nat64) -> (variant { Ok: nat64; Err: text }) query;
+    list_games: () -> (vec GameInfo) query;
+    get_game: (nat64) -> (variant { Ok: GameRoom; Err: text }) query;
     greet: (text) -> (text) query;
 }
