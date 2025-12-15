@@ -3,7 +3,7 @@ import { AuthClient } from '@dfinity/auth-client';
 import { Actor, HttpAgent, ActorSubclass } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
 import { idlFactory } from '../declarations/life1_backend';
-import type { _SERVICE, GameState, GameInfo, GameStatus } from '../declarations/life1_backend/life1_backend.did.d';
+import type { _SERVICE, GameState, GameStateWithPoints, GameInfo, GameStatus } from '../declarations/life1_backend/life1_backend.did.d';
 
 const LIFE1_CANISTER_ID = 'pijnb-7yaaa-aaaae-qgcuq-cai';
 
@@ -29,6 +29,10 @@ const TERRITORY_COLORS: Record<number, string> = {
   3: 'rgba(57, 57, 255, 0.15)',
   4: 'rgba(255, 215, 0, 0.15)',
 };
+
+// Gold border for cells with points
+const GOLD_BORDER_MIN_OPACITY = 0.3;
+const GOLD_BORDER_MAX_OPACITY = 1.0;
 
 // Pattern types
 type PatternCategory = 'gun' | 'spaceship' | 'defense' | 'bomb' | 'oscillator';
@@ -157,9 +161,11 @@ export const Life: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   // Game state from backend
-  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [gameState, setGameState] = useState<GameStateWithPoints | null>(null);
   const [myPlayerNum, setMyPlayerNum] = useState(1);
   const [gridSize, setGridSize] = useState({ rows: 150, cols: 200 });
+  const [myBalance, setMyBalance] = useState(1000);
+  const [placementError, setPlacementError] = useState<string | null>(null);
 
   // Simulation control
   const [isRunning, setIsRunning] = useState(false);
@@ -263,11 +269,18 @@ export const Life: React.FC = () => {
       if ('Ok' in result) {
         setCurrentGameId(gameId);
         setMyPlayerNum(result.Ok);
-        // Fetch initial state
-        const stateResult = await actor.get_state(gameId);
+        // Fetch initial state with points
+        const stateResult = await actor.get_state_with_points(gameId);
         if ('Ok' in stateResult) {
           setGameState(stateResult.Ok);
           setGridSize({ rows: stateResult.Ok.grid.length, cols: stateResult.Ok.grid[0]?.length || 200 });
+          // Update my balance
+          const myIdx = stateResult.Ok.players.findIndex(
+            p => p.toText() === myPrincipal?.toText()
+          );
+          if (myIdx >= 0) {
+            setMyBalance(Number(stateResult.Ok.balances[myIdx]));
+          }
         }
         setMode('game');
       } else {
@@ -337,15 +350,33 @@ export const Life: React.FC = () => {
       try {
         if (isRunning) {
           // Step 5 generations at a time for faster playback
-          const result = await actor.step(currentGameId, 5);
-          if ('Ok' in result && !cancelled) {
-            setGameState(result.Ok);
+          const stepResult = await actor.step(currentGameId, 5);
+          if ('Ok' in stepResult && !cancelled) {
+            // Fetch full state with points after stepping
+            const stateResult = await actor.get_state_with_points(currentGameId);
+            if ('Ok' in stateResult && !cancelled) {
+              setGameState(stateResult.Ok);
+              // Update my balance
+              const myIdx = stateResult.Ok.players.findIndex(
+                p => p.toText() === myPrincipal?.toText()
+              );
+              if (myIdx >= 0) {
+                setMyBalance(Number(stateResult.Ok.balances[myIdx]));
+              }
+            }
           }
         } else {
           // Just poll for state (to see other players' placements)
-          const result = await actor.get_state(currentGameId);
+          const result = await actor.get_state_with_points(currentGameId);
           if ('Ok' in result && !cancelled) {
             setGameState(result.Ok);
+            // Update my balance
+            const myIdx = result.Ok.players.findIndex(
+              p => p.toText() === myPrincipal?.toText()
+            );
+            if (myIdx >= 0) {
+              setMyBalance(Number(result.Ok.balances[myIdx]));
+            }
             // Sync running state from backend (another player might have started)
             if (result.Ok.is_running !== isRunning) {
               setIsRunning(result.Ok.is_running);
@@ -371,7 +402,7 @@ export const Life: React.FC = () => {
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [actor, currentGameId, mode, isRunning]);
+  }, [actor, currentGameId, mode, isRunning, myPrincipal]);
 
   // Draw function
   const draw = useCallback(() => {
@@ -444,6 +475,31 @@ export const Life: React.FC = () => {
       }
     }
 
+    // Draw gold borders for cells with points
+    const points = gameState.points;
+    if (points) {
+      for (let row = startRow; row < endRow; row++) {
+        for (let col = startCol; col < endCol; col++) {
+          const cellPoints = points[row]?.[col] || 0;
+          if (cellPoints > 0) {
+            // Calculate border opacity based on points (more points = more visible)
+            const opacity = Math.min(
+              GOLD_BORDER_MAX_OPACITY,
+              GOLD_BORDER_MIN_OPACITY + (cellPoints / 10) * 0.1
+            );
+            ctx.strokeStyle = `rgba(255, 215, 0, ${opacity})`;
+            ctx.lineWidth = Math.min(3, 1 + Math.floor(cellPoints / 5));
+            ctx.strokeRect(
+              col * cellSize + 1,
+              row * cellSize + 1,
+              cellSize - 2,
+              cellSize - 2
+            );
+          }
+        }
+      }
+    }
+
     // Boundary
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
     ctx.lineWidth = 2;
@@ -496,10 +552,27 @@ export const Life: React.FC = () => {
     // Convert pattern to absolute coordinates
     const cells: [number, number][] = parsedPattern.map(([dx, dy]) => [col + dx, row + dy]);
 
+    // Check if player has enough points
+    const cost = cells.length;
+    if (myBalance < cost) {
+      setPlacementError(`Not enough points. Need ${cost}, have ${myBalance}`);
+      setTimeout(() => setPlacementError(null), 3000);
+      return;
+    }
+
     try {
-      await actor.place_cells(currentGameId, cells);
+      const result = await actor.place_cells(currentGameId, cells);
+      if ('Err' in result) {
+        setPlacementError(result.Err);
+        setTimeout(() => setPlacementError(null), 3000);
+      } else {
+        setMyBalance(prev => prev - cost);  // Optimistic update
+        setPlacementError(null);
+      }
     } catch (err) {
       console.error('Place error:', err);
+      setPlacementError(`Failed to place: ${err}`);
+      setTimeout(() => setPlacementError(null), 3000);
     }
   };
 
@@ -531,6 +604,7 @@ export const Life: React.FC = () => {
     try {
       await actor.clear_grid(currentGameId);
       setIsRunning(false);
+      setMyBalance(1000);  // Reset balance
     } catch (err) {
       console.error('Clear error:', err);
     }
@@ -690,6 +764,11 @@ export const Life: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4 text-sm font-mono">
+          {/* Points balance */}
+          <div className="text-gray-400">
+            Points: <span className="text-yellow-400 font-bold">{myBalance}</span>
+          </div>
+          <div className="text-gray-600">|</div>
           <div className="text-gray-400">
             Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span>
           </div>
@@ -810,6 +889,12 @@ export const Life: React.FC = () => {
               {selectedPattern.name}
             </span>
             <span className="text-gray-500 text-xs">({parsedPattern.length} cells)</span>
+            {/* Cost indicator */}
+            <span className={`text-xs font-mono ${
+              myBalance >= parsedPattern.length ? 'text-green-400' : 'text-red-400'
+            }`}>
+              Cost: {parsedPattern.length} pts
+            </span>
           </div>
           <p className="text-gray-500 text-xs">{selectedPattern.description}</p>
         </div>
@@ -817,6 +902,14 @@ export const Life: React.FC = () => {
 
       {/* Canvas */}
       <div className="flex-1 flex flex-col border border-white/20 rounded-lg overflow-hidden bg-black relative">
+        {/* Placement error toast */}
+        {placementError && (
+          <div className="absolute top-2 left-2 z-10 bg-red-500/80 text-white px-3 py-2 rounded text-sm flex items-center gap-2">
+            {placementError}
+            <button onClick={() => setPlacementError(null)} className="font-bold hover:text-red-200">x</button>
+          </div>
+        )}
+
         <div className="absolute top-2 right-2 z-10 flex items-center gap-2 bg-black/70 rounded-lg p-2">
           <button onClick={handleZoomOut} disabled={zoom <= MIN_ZOOM}
             className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 font-bold">-</button>
