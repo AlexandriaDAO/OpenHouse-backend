@@ -2,82 +2,112 @@
 
 ## Overview
 
-A perpetually running Game of Life where players pay to place cells and compete for territory growth rewards. The economic model ensures money in equals money out with a house edge on placements.
+A perpetually running Game of Life where players spend points to place cells. Points are stored IN the territory cells themselves. When another player captures your territory, they capture your points. 100% efficient system - no house rake.
 
-## Core Economic Rules
+## Core Concepts
 
-### Input: Cell Placement
-- **Cost**: 1 cent per cell placed
-- **Destination**: Goes to the pot (minus house rake)
-- **No refunds**: Placed cells cannot be reclaimed
+### Points (Not Real Money Yet)
+- Each player starts with **1,000 points**
+- Points will become cents later when real money is added
+- For now, it's a free game to test mechanics
 
-### Output: Territory Growth Rewards
-- **Frequency**: Once per minute (60 seconds)
-- **Metric**: Territory delta (change in squares owned by each player)
-- **Winner**: Player with highest positive delta wins
-- **Payout**: 1% of pot goes to winner
+### Territory = Wallet
+- Points don't sit in a player's "balance" - they live in territory cells
+- Each cell can hold 0 or more points
+- Your wealth = sum of points in cells you own
 
-### Edge Cases
+## Placement Rules
 
-| Scenario | Resolution |
-|----------|------------|
-| Tie (multiple players same delta) | Split winnings equally among tied players |
-| All negative growth | Least negative player wins |
-| All zero growth | No payout, pot accumulates |
-| Pot ≤ 10 cents | No payout until pot exceeds threshold |
+### Cost
+- **1 point per cell placed**
+- Place 5 cells → costs 5 points
+
+### Point Distribution
+- Points spent get **randomly distributed across your existing territory**
+- If you have no territory yet, points go into the cells you just placed
+- Points can stack (a cell could hold 2+ points if doubled up)
+
+### Placement Restrictions
+- **Cannot place on alive cells** (yours or enemy's)
+- If any cell in your pattern overlaps a living cell, **entire placement fails**
+- Can place anywhere else (empty cells, including "dead" territory)
+
+## Earning Points
+
+### Territory Capture
+- When your cells take over enemy territory containing points, **you capture those points**
+- Captured points go directly to **your balance** (spendable on new placements)
+
+### Anti-Whale Mechanic
+- **You cannot harvest your own points**
+- If you own the entire board, you have no one to capture from = no income
+- Forces competition, prevents runaway dominance
 
 ## Money Flow
 
 ```
-┌─────────────────┐
-│  Player Places  │
-│   Cell (1¢)     │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│      POT        │◄──── Accumulates from placements
-│  (grows over    │
-│    time)        │
-└────────┬────────┘
-         │ Every 60 seconds
-         │ (if pot > 10¢)
-         ▼
-┌─────────────────┐
-│  1% of Pot to   │
-│  Growth Winner  │
-└─────────────────┘
+┌──────────────────────┐
+│  Player Places Cells │
+│  (5 cells = 5 pts)   │
+└──────────┬───────────┘
+           │
+           ▼
+┌──────────────────────┐
+│  Points distributed  │
+│  across player's     │
+│  existing territory  │
+│  (stored in cells)   │
+└──────────┬───────────┘
+           │
+           │ Enemy captures territory
+           ▼
+┌──────────────────────┐
+│  Points transfer to  │
+│  capturing player    │
+└──────────────────────┘
 ```
 
 ## Accounting Invariant
 
 ```
-pot_balance = Σ(placement_fees) - Σ(payouts) - Σ(house_rake)
+total_points_in_system = Σ(player_starting_points) = constant
+
+Where points exist:
+- In territory cells (as bounties)
+- In player balances (unspent points)
+
+No points created or destroyed. 100% efficient.
 ```
 
-The pot can never go negative. Worst case: pot drains to ≤10¢ and payouts pause until new placements occur.
+## Visual Feedback (Frontend)
+
+- Cells with points show **gold borders**
+- Border thickness varies based on point value (thicker = more points)
+- Players can visually identify high-value targets
+
+## Cell Ownership Inheritance
+
+When a new cell is born (exactly 3 neighbors):
+- New cell's owner = majority owner among the 3 parent cells
+- **New cells have 0 points** (only placed cells get points)
+- Ties: Random selection or oldest placement wins
 
 ## Why This Model Works
 
 1. **Only pay when placing** - No background fees or upkeep
-2. **Pot is self-regulating** - Low pot = low rewards = less competition = pot rebuilds
-3. **Growth, not dominance, wins** - Stable empires earn nothing; must actively expand
-4. **No runaway winner** - Expanding costs money (placements), and growth is hard to sustain in chaotic GoL
-5. **Always solvent** - Payouts are % of pot, can't exceed pot
+2. **Anti-whale** - Can't harvest own points, dominance doesn't equal income
+3. **Zero-sum** - Total points constant, your gain = someone's loss
+4. **Territorial incentive** - Points live in territory, must expand to capture
+5. **Visual clarity** - Gold borders show where the money is
 
-## Territory Tracking
+## Implementation Notes
 
-- Each cell has an owner (player who placed it, or inherited from parent cells)
-- Track `cells_per_player` at each minute boundary
-- Delta = `cells_now[player] - cells_60sec_ago[player]`
+### Data Structure
+```rust
+// Per cell: owner (u8) + points (u16 or u32)
+// 1000x1000 grid = 1M cells
+// ~3-5 bytes per cell = 3-5 MB total
+```
 
-### Cell Ownership Inheritance
-When a new cell is born (exactly 3 neighbors):
-- New cell's owner = majority owner among the 3 parent cells
-- Ties: Random selection or oldest placement wins
-
-## Decisions
-
-- **House rake**: % of each placement (simplest for auditability)
-- **Withdrawals**: Winnings go to player's chip balance, withdrawable anytime
-- **Fine-tuning**: House edge %, spam prevention, etc. to be determined during implementation
+### Files to Modify
+- `life1_backend/src/lib.rs` - Add points tracking per cell, placement cost, capture logic

@@ -1,63 +1,20 @@
-type GameStatus = variant {
-    Waiting;
-    Active;
-    Finished;
-};
-
-type GameConfig = record {
-    width: nat32;
-    height: nat32;
-    max_players: nat8;
-    generations_limit: opt nat64;
-};
-
-type GameRoom = record {
-    id: nat64;
-    name: text;
-    width: nat32;
-    height: nat32;
-    created_at: nat64;
+type LifeState = record {
     grid: vec vec nat8;
     territory: vec vec nat8;
     generation: nat64;
     players: vec principal;
-    status: GameStatus;
-    is_running: bool;
-};
-
-type GameState = record {
-    grid: vec vec nat8;
-    territory: vec vec nat8;
-    generation: nat64;
-    players: vec principal;
-    is_running: bool;
-};
-
-type GameInfo = record {
-    id: nat64;
-    name: text;
-    status: GameStatus;
-    player_count: nat32;
-    generation: nat64;
 };
 
 service : {
-    // Game management
-    create_game: (text, GameConfig) -> (variant { Ok: nat64; Err: text });
-    join_game: (nat64) -> (variant { Ok: nat8; Err: text });
-    start_game: (nat64) -> (variant { Ok; Err: text });
+    // Place cells on the grid (assigns color to new players automatically)
+    place_cells: (vec record { int32; int32 }) -> (variant { Ok: nat32; Err: text });
 
-    // Cell placement (frontend sends parsed coordinates)
-    place_cells: (nat64, vec record { int32; int32 }) -> (variant { Ok: nat32; Err: text });
+    // Advance simulation by n generations (removes inactive players)
+    step: (nat32) -> (variant { Ok: LifeState; Err: text });
 
-    // Simulation control
-    step: (nat64, nat32) -> (variant { Ok: GameState; Err: text });
-    set_running: (nat64, bool) -> (variant { Ok; Err: text });
-    clear_grid: (nat64) -> (variant { Ok; Err: text });
+    // Get current game state
+    get_state: () -> (LifeState) query;
 
-    // Queries
-    get_state: (nat64) -> (variant { Ok: GameState; Err: text }) query;
-    list_games: () -> (vec GameInfo) query;
-    get_game: (nat64) -> (variant { Ok: GameRoom; Err: text }) query;
+    // Test endpoint
     greet: (text) -> (text) query;
 }
