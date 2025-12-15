@@ -7,20 +7,30 @@ import type { _SERVICE, GameState, GameStateWithPoints, GameInfo, GameStatus } f
 
 const LIFE1_CANISTER_ID = 'pijnb-7yaaa-aaaae-qgcuq-cai';
 
+// Fixed grid size
+const GRID_WIDTH = 1000;
+const GRID_HEIGHT = 1000;
+
 // Rendering constants
 const BASE_CELL_SIZE = 10;
-const MIN_ZOOM = 0.25;
+const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
-const ZOOM_STEP = 0.25;
+const ZOOM_STEP = 0.1;
 const GRID_COLOR = 'rgba(255, 255, 255, 0.08)';
 const DEAD_COLOR = '#000000';
 
-// Player colors
+// 10 Player colors
 const PLAYER_COLORS: Record<number, string> = {
-  1: '#39FF14', // Green
-  2: '#FF3939', // Red
-  3: '#3939FF', // Blue
-  4: '#FFD700', // Gold
+  1: '#39FF14',  // Neon Green
+  2: '#FF3939',  // Red
+  3: '#3939FF',  // Blue
+  4: '#FFD700',  // Gold
+  5: '#FF39FF',  // Magenta
+  6: '#39FFFF',  // Cyan
+  7: '#FF8C00',  // Orange
+  8: '#8B5CF6',  // Purple
+  9: '#F472B6',  // Pink
+  10: '#A3E635', // Lime
 };
 
 const TERRITORY_COLORS: Record<number, string> = {
@@ -28,6 +38,12 @@ const TERRITORY_COLORS: Record<number, string> = {
   2: 'rgba(255, 57, 57, 0.15)',
   3: 'rgba(57, 57, 255, 0.15)',
   4: 'rgba(255, 215, 0, 0.15)',
+  5: 'rgba(255, 57, 255, 0.15)',
+  6: 'rgba(57, 255, 255, 0.15)',
+  7: 'rgba(255, 140, 0, 0.15)',
+  8: 'rgba(139, 92, 246, 0.15)',
+  9: 'rgba(244, 114, 182, 0.15)',
+  10: 'rgba(163, 230, 53, 0.15)',
 };
 
 // Gold border for cells with points
@@ -91,7 +107,7 @@ function parseRLE(rle: string): [number, number][] {
   return coords.map(([cx, cy]) => [cx - centerX, cy - centerY]);
 }
 
-// Pattern library (simplified)
+// Pattern library
 const PATTERNS: PatternInfo[] = [
   { name: 'Glider', category: 'spaceship', description: 'Classic diagonal mover',
     rle: `x = 3, y = 3\nbo$2bo$3o!` },
@@ -141,22 +157,16 @@ export const Life: React.FC = () => {
   const [parsedPattern, setParsedPattern] = useState<[number, number][]>([]);
 
   // View state
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(0.5); // Start zoomed out for 1000x1000
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
 
   // Auth state
-  const [mode, setMode] = useState<'lobby' | 'game'>('lobby');
   const [authClient, setAuthClient] = useState<AuthClient | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [actor, setActor] = useState<ActorSubclass<_SERVICE> | null>(null);
   const [myPrincipal, setMyPrincipal] = useState<Principal | null>(null);
-
-  // Lobby state
-  const [games, setGames] = useState<GameInfo[]>([]);
-  const [currentGameId, setCurrentGameId] = useState<bigint | null>(null);
-  const [newGameName, setNewGameName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -302,7 +312,7 @@ export const Life: React.FC = () => {
 
   // Canvas sizing
   useEffect(() => {
-    if (mode !== 'game') return;
+    if (!isAuthenticated) return;
     const container = containerRef.current;
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
@@ -334,12 +344,11 @@ export const Life: React.FC = () => {
       clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, [mode]);
+  }, [isAuthenticated]);
 
-  // Single coordinated loop - either step (when running) or poll (when paused)
-  // Steps 5 generations at a time for ~10 gen/sec with IC latency
+  // Main game loop - always running, steps continuously
   useEffect(() => {
-    if (!actor || currentGameId === null || mode !== 'game') return;
+    if (!actor || !isAuthenticated) return;
 
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout>;
@@ -387,15 +396,12 @@ export const Life: React.FC = () => {
         console.error('Tick error:', err);
       }
 
-      // Schedule next tick after this one completes
-      // Minimal delay when running - IC latency will naturally throttle to ~2 calls/sec
-      // 5 gens × 2 calls/sec = ~10 gen/sec
+      // Schedule next tick - IC latency will naturally throttle
       if (!cancelled) {
-        timeoutId = setTimeout(tick, isRunning ? 50 : 1000);
+        timeoutId = setTimeout(tick, 50);
       }
     };
 
-    // Start the loop
     tick();
 
     return () => {
@@ -425,9 +431,9 @@ export const Life: React.FC = () => {
 
     const cellSize = BASE_CELL_SIZE * zoom;
     const startCol = Math.max(0, Math.floor(-panOffset.x / cellSize));
-    const endCol = Math.min(gridSize.cols, Math.ceil((displayWidth - panOffset.x) / cellSize));
+    const endCol = Math.min(GRID_WIDTH, Math.ceil((displayWidth - panOffset.x) / cellSize));
     const startRow = Math.max(0, Math.floor(-panOffset.y / cellSize));
-    const endRow = Math.min(gridSize.rows, Math.ceil((displayHeight - panOffset.y) / cellSize));
+    const endRow = Math.min(GRID_HEIGHT, Math.ceil((displayHeight - panOffset.y) / cellSize));
 
     // Draw territory
     for (let row = startRow; row < endRow; row++) {
@@ -440,7 +446,7 @@ export const Life: React.FC = () => {
       }
     }
 
-    // Draw grid lines
+    // Draw grid lines only at higher zoom
     if (zoom >= 0.5) {
       ctx.strokeStyle = GRID_COLOR;
       ctx.lineWidth = 1;
@@ -503,17 +509,17 @@ export const Life: React.FC = () => {
     // Boundary
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
     ctx.lineWidth = 2;
-    ctx.strokeRect(0, 0, gridSize.cols * cellSize, gridSize.rows * cellSize);
+    ctx.strokeRect(0, 0, GRID_WIDTH * cellSize, GRID_HEIGHT * cellSize);
 
     ctx.restore();
-  }, [gameState, gridSize, zoom, panOffset]);
+  }, [gameState, zoom, panOffset]);
 
   useEffect(() => { draw(); }, [draw]);
 
   // Zoom/pan handlers
   const handleZoomIn = () => setZoom(z => Math.min(MAX_ZOOM, z + ZOOM_STEP));
   const handleZoomOut = () => setZoom(z => Math.max(MIN_ZOOM, z - ZOOM_STEP));
-  const handleResetView = () => { setZoom(1); setPanOffset({ x: 0, y: 0 }); };
+  const handleResetView = () => { setZoom(0.5); setPanOffset({ x: 0, y: 0 }); };
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
     setZoom(z => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z + (e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP))));
@@ -534,7 +540,7 @@ export const Life: React.FC = () => {
 
   // Place cells on click
   const handleCanvasClick = async (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isPanning || !actor || currentGameId === null) return;
+    if (isPanning || !actor) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -547,7 +553,7 @@ export const Life: React.FC = () => {
     const col = Math.floor((x - panOffset.x) / cellSize);
     const row = Math.floor((y - panOffset.y) / cellSize);
 
-    if (col < 0 || col >= gridSize.cols || row < 0 || row >= gridSize.rows) return;
+    if (col < 0 || col >= GRID_WIDTH || row < 0 || row >= GRID_HEIGHT) return;
 
     // Convert pattern to absolute coordinates
     const cells: [number, number][] = parsedPattern.map(([dx, dy]) => [col + dx, row + dy]);
@@ -592,7 +598,10 @@ export const Life: React.FC = () => {
     try {
       const result = await actor.step(currentGameId, 1);
       if ('Ok' in result) {
-        setGameState(result.Ok);
+        // Placement successful
+      } else if ('Err' in result) {
+        setError(result.Err);
+        setTimeout(() => setError(null), 3000);
       }
     } catch (err) {
       console.error('Step error:', err);
@@ -624,20 +633,14 @@ export const Life: React.FC = () => {
   const filteredPatterns = selectedCategory === 'all'
     ? PATTERNS : PATTERNS.filter(p => p.category === selectedCategory);
 
-  const formatStatus = (status: GameStatus): string => {
-    if ('Active' in status) return 'Active';
-    if ('Waiting' in status) return 'Waiting';
-    if ('Finished' in status) return 'Finished';
-    return 'Unknown';
-  };
-
   // Login screen
   if (!isAuthenticated) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-120px)] gap-6">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-white mb-2">Conway's Game of Life</h1>
-          <p className="text-gray-400">Multiplayer Territory Mode</p>
+          <p className="text-gray-400">1000x1000 Persistent World</p>
+          <p className="text-gray-500 text-sm mt-2">10 players max - your cells, your territory</p>
         </div>
         <button
           onClick={handleLogin}
@@ -651,114 +654,20 @@ export const Life: React.FC = () => {
     );
   }
 
-  // Lobby
-  if (mode === 'lobby') {
-    return (
-      <div className="flex flex-col h-[calc(100vh-120px)] p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-white mb-1">Game Lobby</h1>
-          <p className="text-gray-500 text-sm font-mono">
-            Principal: {myPrincipal?.toText().slice(0, 15)}...
-          </p>
-        </div>
-
-        {error && (
-          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
-            {error}
-          </div>
-        )}
-
-        <div className="mb-6 p-4 bg-white/5 rounded-lg">
-          <h2 className="text-lg font-semibold text-white mb-3">Create New Game</h2>
-          <div className="flex gap-3">
-            <input
-              type="text"
-              value={newGameName}
-              onChange={(e) => setNewGameName(e.target.value)}
-              placeholder="Enter game name..."
-              maxLength={50}
-              className="flex-1 px-4 py-2 rounded-lg bg-black border border-white/20 text-white placeholder-gray-500 focus:border-dfinity-turquoise/50 focus:outline-none"
-            />
-            <button
-              onClick={handleCreateGame}
-              disabled={isLoading || !newGameName.trim()}
-              className="px-6 py-2 rounded-lg font-mono bg-green-500/20 text-green-400 border border-green-500/50 hover:bg-green-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isLoading ? 'Creating...' : 'Create Game'}
-            </button>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-auto">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-white">Available Games</h2>
-            <button
-              onClick={fetchGames}
-              disabled={isLoading}
-              className="px-4 py-1.5 rounded font-mono text-sm bg-white/10 text-white border border-white/20 hover:bg-white/20 transition-all disabled:opacity-50"
-            >
-              {isLoading ? 'Loading...' : 'Refresh'}
-            </button>
-          </div>
-
-          {games.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
-              <p>No games available. Create one to start playing!</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {games.map((game) => (
-                <div
-                  key={game.id.toString()}
-                  className="flex items-center justify-between p-4 bg-white/5 rounded-lg border border-white/10 hover:border-white/20 transition-all"
-                >
-                  <div className="flex items-center gap-4">
-                    <div>
-                      <h3 className="font-semibold text-white">{game.name}</h3>
-                      <p className="text-gray-500 text-sm font-mono">
-                        Game #{game.id.toString()} | {game.player_count}/4 players | Gen {game.generation.toString()}
-                      </p>
-                    </div>
-                    <span className={`px-2 py-0.5 rounded text-xs font-mono ${
-                      'Active' in game.status ? 'bg-green-500/20 text-green-400' :
-                      'Waiting' in game.status ? 'bg-yellow-500/20 text-yellow-400' :
-                      'bg-gray-500/20 text-gray-400'
-                    }`}>
-                      {formatStatus(game.status)}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => handleJoinGame(game.id)}
-                    disabled={isLoading || 'Finished' in game.status}
-                    className="px-4 py-2 rounded font-mono text-sm bg-dfinity-turquoise/20 text-dfinity-turquoise border border-dfinity-turquoise/50 hover:bg-dfinity-turquoise/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Join
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Game view
+  // Game view (no lobby, no controls - always running)
   return (
     <div className="flex flex-col h-[calc(100vh-120px)]">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-4">
-          <button
-            onClick={handleLeaveGame}
-            className="px-3 py-1 rounded font-mono text-xs bg-white/10 text-gray-400 border border-white/20 hover:bg-white/20 hover:text-white transition-all"
-          >
-            Leave
-          </button>
           <div>
             <h1 className="text-xl font-bold text-white">Game of Life</h1>
             <p className="text-gray-500 text-xs">
-              Game #{currentGameId?.toString()} | You are Player {myPlayerNum}
+              {myPlayerNum ? (
+                <>You are Player {myPlayerNum} <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }}></span></>
+              ) : (
+                'Place cells to join'
+              )}
             </p>
           </div>
         </div>
@@ -773,8 +682,10 @@ export const Life: React.FC = () => {
             Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span>
           </div>
           <div className="text-gray-600">|</div>
+          <div className="text-gray-400 text-xs">Players: {gameState?.players.length || 0}/10</div>
+          <div className="text-gray-600">|</div>
           <div className="text-gray-400 text-xs">Territory:</div>
-          {Object.entries(territoryCounts).map(([player, count]) => (
+          {Object.entries(territoryCounts).slice(0, 5).map(([player, count]) => (
             <div key={player} className="flex items-center gap-1">
               <div className="w-3 h-3 rounded-sm opacity-50" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
               <span style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
@@ -782,7 +693,7 @@ export const Life: React.FC = () => {
           ))}
           <div className="text-gray-600">|</div>
           <div className="text-gray-400 text-xs">Cells:</div>
-          {Object.entries(cellCounts).map(([player, count]) => (
+          {Object.entries(cellCounts).slice(0, 5).map(([player, count]) => (
             <div key={`cell-${player}`} className="flex items-center gap-1">
               <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
               <span className="text-xs" style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
@@ -791,46 +702,12 @@ export const Life: React.FC = () => {
         </div>
       </div>
 
-      {/* Controls */}
-      <div className="flex items-center gap-3 mb-3 p-3 bg-white/5 rounded-lg">
-        <button
-          onClick={handlePlayPause}
-          className={`px-4 py-1.5 rounded font-mono text-sm font-bold transition-all ${
-            isRunning
-              ? 'bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30'
-              : 'bg-green-500/20 text-green-400 border border-green-500/50 hover:bg-green-500/30'
-          }`}
-        >
-          {isRunning ? 'PAUSE' : 'PLAY'}
-        </button>
-
-        <button
-          onClick={handleStep}
-          disabled={isRunning}
-          className="px-3 py-1.5 rounded font-mono text-sm bg-white/10 text-white border border-white/20 hover:bg-white/20 disabled:opacity-30 transition-all"
-        >
-          STEP
-        </button>
-
-        <button
-          onClick={handleClear}
-          className="px-3 py-1.5 rounded font-mono text-sm bg-white/10 text-white border border-white/20 hover:bg-white/20 transition-all"
-        >
-          CLEAR
-        </button>
-
-        <div className="flex items-center gap-2 ml-4 pl-4 border-l border-white/10">
-          <span className="text-gray-500 text-xs">Your color:</span>
-          <div
-            className="w-6 h-6 rounded ring-2 ring-white ring-offset-2 ring-offset-black"
-            style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }}
-          />
+      {/* Error display */}
+      {error && (
+        <div className="mb-3 p-2 bg-red-500/20 border border-red-500/50 rounded text-red-400 text-sm">
+          {error}
         </div>
-
-        <div className="ml-auto text-gray-500 text-xs">
-          Backend-sync (~10 gen/sec)
-        </div>
-      </div>
+      )}
 
       {/* Pattern Selector */}
       <div className="mb-3 p-3 bg-white/5 rounded-lg">
@@ -896,7 +773,7 @@ export const Life: React.FC = () => {
               Cost: {parsedPattern.length} pts
             </span>
           </div>
-          <p className="text-gray-500 text-xs">{selectedPattern.description}</p>
+          <p className="text-gray-500 text-xs">{selectedPattern.description} | Click to place</p>
         </div>
       </div>
 
@@ -921,7 +798,7 @@ export const Life: React.FC = () => {
         </div>
 
         <div className="absolute bottom-2 left-2 z-10 bg-black/70 rounded px-2 py-1 text-xs text-gray-400 font-mono">
-          {gridSize.cols}x{gridSize.rows} | Shift+drag to pan
+          {GRID_WIDTH}x{GRID_HEIGHT} | Shift+drag to pan | Scroll to zoom
         </div>
 
         <div ref={containerRef} className="flex-1 w-full h-full min-h-0">
