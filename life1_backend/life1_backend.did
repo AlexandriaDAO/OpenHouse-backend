@@ -1,26 +1,19 @@
-type LifeState = record {
-    grid: vec vec nat8;
-    territory: vec vec nat8;
-    points: vec vec nat16;
-    player_balances: vec nat64;
-    generation: nat64;
-    players: vec principal;
-    status: GameStatus;
-    is_running: bool;
+type GameStatus = variant {
+    Waiting;
+    Active;
+    Finished;
+};
+
+type Cell = record {
+    owner: nat8;
+    points: nat8;
+    alive: bool;
 };
 
 type GameState = record {
-    grid: vec vec nat8;
-    territory: vec vec nat8;
-    generation: nat64;
-    players: vec principal;
-    is_running: bool;
-};
-
-type GameStateWithPoints = record {
-    grid: vec vec nat8;
-    territory: vec vec nat8;
-    points: vec vec nat16;
+    cells: vec Cell;
+    width: nat32;
+    height: nat32;
     generation: nat64;
     players: vec principal;
     balances: vec nat64;
@@ -35,21 +28,37 @@ type GameInfo = record {
     generation: nat64;
 };
 
+type GameRoom = record {
+    id: nat64;
+    name: text;
+    width: nat32;
+    height: nat32;
+    status: GameStatus;
+    players: vec principal;
+    generation: nat64;
+    is_running: bool;
+};
+
+type GameConfig = record {
+    width: nat32;
+    height: nat32;
+    max_players: nat32;
+    generations_limit: opt nat64;
+};
+
 service : {
-    // Place cells on the grid (assigns color to new players automatically)
-    place_cells: (vec record { int32; int32 }) -> (variant { Ok: nat32; Err: text });
+    // Game management
+    list_games: () -> (vec GameInfo) query;
+    create_game: (text, GameConfig) -> (variant { Ok: nat64; Err: text });
+    join_game: (nat64) -> (variant { Ok: nat8; Err: text });
+    start_game: (nat64) -> (variant { Ok; Err: text });
+    get_game: (nat64) -> (variant { Ok: GameRoom; Err: text }) query;
 
-    // Advance simulation by n generations (removes inactive players)
-    step: (nat32) -> (variant { Ok: LifeState; Err: text });
-
-    // Get current game state
-    get_state: () -> (LifeState) query;
+    // Game actions
+    place_cells: (nat64, vec record { int32; int32 }) -> (variant { Ok: nat32; Err: text });
 
     // Queries
     get_state: (nat64) -> (variant { Ok: GameState; Err: text }) query;
-    get_state_with_points: (nat64) -> (variant { Ok: GameStateWithPoints; Err: text }) query;
     get_balance: (nat64) -> (variant { Ok: nat64; Err: text }) query;
-    list_games: () -> (vec GameInfo) query;
-    get_game: (nat64) -> (variant { Ok: GameRoom; Err: text }) query;
     greet: (text) -> (text) query;
 }

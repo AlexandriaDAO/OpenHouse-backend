@@ -1,26 +1,34 @@
 use candid::{CandidType, Deserialize, Principal};
-use ic_cdk::{query, update, init, post_upgrade};
+use ic_cdk::{query, update, init, post_upgrade, pre_upgrade};
+use ic_cdk_timers::set_timer_interval;
 use ic_stable_structures::{
     memory_manager::{MemoryId, MemoryManager, VirtualMemory},
-    storable::Bound,
     DefaultMemoryImpl, StableVec, Storable,
 };
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::time::Duration;
 
 // ============================================================================
 // CONSTANTS
 // ============================================================================
 
-const GRID_WIDTH: usize = 1000;
-const GRID_HEIGHT: usize = 1000;
-const GRID_SIZE: usize = GRID_WIDTH * GRID_HEIGHT;
+const GRID_SIZE: usize = 512;
+const GRID_SHIFT: usize = 9;        // 2^9 = 512, for bit-shift indexing
+const GRID_MASK: usize = 0x1FF;     // 511, for fast modulo (x & GRID_MASK == x % 512)
+const TOTAL_CELLS: usize = GRID_SIZE * GRID_SIZE; // 262,144 cells
 const MAX_PLAYERS: usize = 10;
+const STARTING_BALANCE: u64 = 1000;
+
+// Simulation timing: 5 generations per tick, 1 tick every 5 seconds
+// Frontend runs optimistic UI locally, backend is authoritative checkpoint
+const GENERATIONS_PER_TICK: u32 = 5;
+const TICK_INTERVAL_MS: u64 = 5000; // 1 tick per 5 seconds
 
 // Memory IDs for stable storage
-const MEMORY_ID_GRID: MemoryId = MemoryId::new(0);
-const MEMORY_ID_TERRITORY: MemoryId = MemoryId::new(1);
-const MEMORY_ID_METADATA: MemoryId = MemoryId::new(2);
+// Using 20+ to avoid conflict with old data (v1 used 0-9, v2 used 10-19)
+const MEMORY_ID_GRID: MemoryId = MemoryId::new(20);
+const MEMORY_ID_METADATA: MemoryId = MemoryId::new(21);
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
 
@@ -28,44 +36,87 @@ type Memory = VirtualMemory<DefaultMemoryImpl>;
 // TYPES
 // ============================================================================
 
-/// Game state returned to frontend
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct LifeState {
-    pub grid: Vec<Vec<u8>>,
-    pub territory: Vec<Vec<u8>>,
-    // Points stored in each cell (economics system)
-    pub points: Vec<Vec<u16>>,
-    // Player balances (index matches players array)
-    pub player_balances: Vec<u64>,
-    pub generation: u64,
-    pub players: Vec<Principal>,
+/// Packed cell structure - 2 bytes total (50% smaller than before)
+/// Bits 0-3:   owner (0-15, where 0=unclaimed, 1-10=player ID)
+/// Bits 4-10:  points (0-127)
+/// Bit 11:     alive
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Cell(u16);
+
+impl Cell {
+    pub fn new(owner: u8, points: u8, alive: bool) -> Self {
+        let mut v = (owner & 0x0F) as u16;
+        v |= ((points & 0x7F) as u16) << 4;
+        if alive { v |= 1 << 11; }
+        Cell(v)
+    }
+
+    #[inline] pub fn owner(&self) -> u8   { (self.0 & 0x0F) as u8 }
+    #[inline] pub fn points(&self) -> u8  { ((self.0 >> 4) & 0x7F) as u8 }
+    #[inline] pub fn alive(&self) -> bool { self.0 & (1 << 11) != 0 }
+
+    #[inline] pub fn set_owner(&mut self, v: u8) {
+        self.0 = (self.0 & !0x0F) | (v & 0x0F) as u16;
+    }
+    #[inline] pub fn set_points(&mut self, v: u8) {
+        self.0 = (self.0 & !0x07F0) | (((v & 0x7F) as u16) << 4);
+    }
+    #[inline] pub fn set_alive(&mut self, v: bool) {
+        if v { self.0 |= 1 << 11; } else { self.0 &= !(1 << 11); }
+    }
+
+    pub fn add_points(&mut self, n: u8) {
+        self.set_points(self.points().saturating_add(n).min(127));
+    }
 }
 
-/// Metadata stored in stable memory (generation + players)
-#[derive(CandidType, Deserialize, Clone, Debug, Default)]
-struct Metadata {
-    generation: u64,
-    players: Vec<Principal>,
-}
-
-impl Storable for Metadata {
+impl Storable for Cell {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(candid::encode_one(self).unwrap())
+        Cow::Owned(self.0.to_le_bytes().to_vec())
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        candid::decode_one(&bytes).unwrap_or_default()
+        if bytes.len() < 2 { return Cell(0); }
+        Cell(u16::from_le_bytes([bytes[0], bytes[1]]))
     }
 
-/// Extended game state with points (main polling endpoint for economics)
+    const BOUND: ic_stable_structures::storable::Bound =
+        ic_stable_structures::storable::Bound::Bounded {
+            max_size: 2,
+            is_fixed_size: true,
+        };
+}
+
+/// External cell representation for Candid API (what frontend sees)
+#[derive(CandidType, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct CellView {
+    pub owner: u8,
+    pub points: u8,
+    pub alive: bool,
+}
+
+impl From<Cell> for CellView {
+    fn from(c: Cell) -> Self {
+        CellView { owner: c.owner(), points: c.points(), alive: c.alive() }
+    }
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum GameStatus {
+    Waiting,
+    Active,
+    Finished,
+}
+
+/// Game state returned to frontend - flat array for efficiency
 #[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct GameStateWithPoints {
-    pub grid: Vec<Vec<u8>>,
-    pub territory: Vec<Vec<u8>>,
-    pub points: Vec<Vec<u16>>,  // Points stored in each cell
+pub struct GameState {
+    pub cells: Vec<CellView>,
+    pub width: u32,
+    pub height: u32,
     pub generation: u64,
     pub players: Vec<Principal>,
-    pub balances: Vec<u64>,     // Balance per player (index matches players)
+    pub balances: Vec<u64>,
     pub is_running: bool,
 }
 
@@ -79,6 +130,50 @@ pub struct GameInfo {
     pub generation: u64,
 }
 
+/// Game room structure (for API compatibility)
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct GameRoom {
+    pub id: u64,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub status: GameStatus,
+    pub players: Vec<Principal>,
+    pub generation: u64,
+    pub is_running: bool,
+}
+
+/// Game config for create_game
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct GameConfig {
+    pub width: u32,
+    pub height: u32,
+    pub max_players: u32,
+    pub generations_limit: Option<u64>,
+}
+
+/// Metadata stored in stable memory
+#[derive(CandidType, Deserialize, Clone, Debug, Default)]
+struct Metadata {
+    generation: u64,
+    players: Vec<Principal>,
+    balances: Vec<u64>,
+    is_running: bool,
+}
+
+impl Storable for Metadata {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        Cow::Owned(candid::encode_one(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        candid::decode_one(&bytes).unwrap_or_default()
+    }
+
+    const BOUND: ic_stable_structures::storable::Bound =
+        ic_stable_structures::storable::Bound::Unbounded;
+}
+
 // ============================================================================
 // STABLE STATE
 // ============================================================================
@@ -87,22 +182,18 @@ thread_local! {
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
         RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
 
-    // Grid: 1000x1000 u8 values (player colors 0-10)
-    static GRID: RefCell<StableVec<u8, Memory>> = RefCell::new(
+    // HEAP GRID: Fast runtime access (no stable memory overhead)
+    static GRID: RefCell<Vec<Cell>> = RefCell::new(Vec::new());
+
+    // STABLE GRID: Persistence only (used during upgrades)
+    static STABLE_GRID: RefCell<StableVec<Cell, Memory>> = RefCell::new(
         StableVec::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MEMORY_ID_GRID))
         ).unwrap()
     );
 
-    // Territory: 1000x1000 u8 values (ownership tracking)
-    static TERRITORY: RefCell<StableVec<u8, Memory>> = RefCell::new(
-        StableVec::init(
-            MEMORY_MANAGER.with(|m| m.borrow().get(MEMORY_ID_TERRITORY))
-        ).unwrap()
-    );
-
-    // Metadata stored as serialized blob in another StableVec
-    static METADATA: RefCell<StableVec<u8, Memory>> = RefCell::new(
+    // Metadata stored as serialized blob
+    static METADATA_STORE: RefCell<StableVec<u8, Memory>> = RefCell::new(
         StableVec::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MEMORY_ID_METADATA))
         ).unwrap()
@@ -116,40 +207,27 @@ thread_local! {
 // HELPERS
 // ============================================================================
 
+#[inline]
 fn idx(row: usize, col: usize) -> usize {
-    row * GRID_WIDTH + col
+    (row << GRID_SHIFT) | col  // Fast: bit shift instead of multiply
+}
+
+#[inline]
+fn coords(index: usize) -> (usize, usize) {
+    (index >> GRID_SHIFT, index & GRID_MASK)  // Fast: bit ops instead of div/mod
 }
 
 fn ensure_grid_initialized() {
     GRID.with(|grid| {
-        let grid = grid.borrow();
-        if grid.len() < GRID_SIZE as u64 {
-            drop(grid);
-            GRID.with(|g| {
-                let g = g.borrow_mut();
-                while g.len() < GRID_SIZE as u64 {
-                    g.push(&0u8).unwrap();
-                }
-            });
-        }
-    });
-
-    TERRITORY.with(|territory| {
-        let territory = territory.borrow();
-        if territory.len() < GRID_SIZE as u64 {
-            drop(territory);
-            TERRITORY.with(|t| {
-                let t = t.borrow_mut();
-                while t.len() < GRID_SIZE as u64 {
-                    t.push(&0u8).unwrap();
-                }
-            });
+        let mut grid = grid.borrow_mut();
+        if grid.len() < TOTAL_CELLS {
+            grid.resize(TOTAL_CELLS, Cell::default());
         }
     });
 }
 
 fn load_metadata() {
-    METADATA.with(|meta| {
+    METADATA_STORE.with(|meta| {
         let meta = meta.borrow();
         if meta.len() > 0 {
             let bytes: Vec<u8> = (0..meta.len()).filter_map(|i| meta.get(i)).collect();
@@ -164,7 +242,7 @@ fn save_metadata() {
     CACHED_METADATA.with(|cached| {
         let m = cached.borrow();
         let bytes = candid::encode_one(&*m).unwrap();
-        METADATA.with(|meta| {
+        METADATA_STORE.with(|meta| {
             let meta = meta.borrow_mut();
             // Clear and rewrite
             while meta.len() > 0 {
@@ -177,33 +255,22 @@ fn save_metadata() {
     });
 }
 
-fn get_grid_cell(row: usize, col: usize) -> u8 {
-    GRID.with(|g| g.borrow().get(idx(row, col) as u64).unwrap_or(0))
+fn get_cell(row: usize, col: usize) -> Cell {
+    GRID.with(|g| g.borrow().get(idx(row, col)).copied().unwrap_or_default())
 }
 
-fn set_grid_cell(row: usize, col: usize, value: u8) {
+fn set_cell(row: usize, col: usize, cell: Cell) {
     GRID.with(|g| {
-        let _ = g.borrow_mut().set(idx(row, col) as u64, &value);
+        let mut g = g.borrow_mut();
+        let i = idx(row, col);
+        if i < g.len() {
+            g[i] = cell;
+        }
     });
 }
 
-#[allow(dead_code)]
-fn get_territory_cell(row: usize, col: usize) -> u8 {
-    TERRITORY.with(|t| t.borrow().get(idx(row, col) as u64).unwrap_or(0))
-}
-
-fn set_territory_cell(row: usize, col: usize, value: u8) {
-    TERRITORY.with(|t| {
-        let _ = t.borrow_mut().set(idx(row, col) as u64, &value);
-    });
-}
-
-fn create_empty_points_grid(width: u32, height: u32) -> Vec<Vec<u16>> {
-    vec![vec![0u16; width as usize]; height as usize]
-}
-
-/// Count neighbors and their owners for a cell
-fn get_neighbor_info(row: usize, col: usize) -> (u8, [u8; MAX_PLAYERS + 1]) {
+/// Count living neighbors and their owners for a cell
+fn get_neighbor_info(row: usize, col: usize, current_grid: &[Cell]) -> (u8, [u8; MAX_PLAYERS + 1]) {
     let mut count = 0u8;
     let mut owner_counts = [0u8; MAX_PLAYERS + 1];
 
@@ -212,13 +279,13 @@ fn get_neighbor_info(row: usize, col: usize) -> (u8, [u8; MAX_PLAYERS + 1]) {
             if di == 0 && dj == 0 {
                 continue;
             }
-            let new_row = ((row as i32 + di + GRID_HEIGHT as i32) as usize) % GRID_HEIGHT;
-            let new_col = ((col as i32 + dj + GRID_WIDTH as i32) as usize) % GRID_WIDTH;
-            let owner = get_grid_cell(new_row, new_col);
-            if owner > 0 {
+            let new_row = ((row as i32 + di + GRID_SIZE as i32) as usize) & GRID_MASK;
+            let new_col = ((col as i32 + dj + GRID_SIZE as i32) as usize) & GRID_MASK;
+            let cell = current_grid[idx(new_row, new_col)];
+            if cell.alive() {
                 count += 1;
-                if (owner as usize) < owner_counts.len() {
-                    owner_counts[owner as usize] += 1;
+                if (cell.owner() as usize) < owner_counts.len() {
+                    owner_counts[cell.owner() as usize] += 1;
                 }
             }
         }
@@ -239,149 +306,88 @@ fn get_majority_owner(owner_counts: &[u8; MAX_PLAYERS + 1]) -> u8 {
     max_owner
 }
 
-/// Run one generation of Conway's Game of Life with ownership and point capture
-fn step_generation(game: &mut GameRoom) {
-    let height = game.height as usize;
-    let width = game.width as usize;
-    let mut new_grid = create_empty_grid(game.width, game.height);
+/// Run one generation of Conway's Game of Life with ownership
+fn step_generation() {
+    // Clone current grid for neighbor calculations (heap-to-heap, fast)
+    let current: Vec<Cell> = GRID.with(|g| g.borrow().clone());
 
-    // Track points to transfer (to_player_idx, amount)
-    let mut point_transfers: Vec<(usize, u16)> = Vec::new();
+    let mut new_grid: Vec<Cell> = vec![Cell::default(); TOTAL_CELLS];
+    let mut point_transfers: Vec<(usize, u8)> = Vec::new();
 
-    for row in 0..height {
-        for col in 0..width {
-            let (count, owner_counts) = get_neighbor_info(&game.grid, row, col, height, width);
-            let current = game.grid[row][col];
+    for row in 0..GRID_SIZE {
+        for col in 0..GRID_SIZE {
+            let i = idx(row, col);
+            let (neighbor_count, owner_counts) = get_neighbor_info(row, col, &current);
+            let current_cell = current[i];
 
-    for row in 0..GRID_HEIGHT {
-        for col in 0..GRID_WIDTH {
-            let (count, owner_counts) = get_neighbor_info(row, col);
-            let current_val = current[idx(row, col)];
+            // Preserve territory (owner) and points regardless of alive state
+            new_grid[i].set_owner(current_cell.owner());
+            new_grid[i].set_points(current_cell.points());
 
-            if current_val > 0 {
+            if current_cell.alive() {
                 // Living cell survives with 2 or 3 neighbors
-                if count == 2 || count == 3 {
-                    new_grid[idx(row, col)] = current_val;
+                if neighbor_count == 2 || neighbor_count == 3 {
+                    new_grid[i].set_alive(true);
                 }
-                // Cell dies - points stay in cell (territory doesn't change on death)
+                // Cell dies - owner (territory) and points stay in cell
             } else {
                 // Dead cell born with exactly 3 neighbors
-                if count == 3 {
+                if neighbor_count == 3 {
                     let new_owner = get_majority_owner(&owner_counts);
-                    new_grid[row][col] = new_owner;
+                    new_grid[i].set_alive(true);
 
-                    // Check if this cell had points from another player
-                    let old_territory_owner = game.territory[row][col];
-                    let cell_points = game.points[row][col];
-
-                    if cell_points > 0 && old_territory_owner > 0 && old_territory_owner != new_owner {
+                    // Territory capture: if cell had different owner with points
+                    let old_owner = current_cell.owner();
+                    if current_cell.points() > 0 && old_owner > 0 && old_owner != new_owner {
                         // Capture! Transfer points to new owner's balance
                         let to_idx = (new_owner - 1) as usize;
-                        point_transfers.push((to_idx, cell_points));
-                        // Clear points from cell (they go to balance)
-                        game.points[row][col] = 0;
+                        point_transfers.push((to_idx, current_cell.points()));
+                        new_grid[i].set_points(0);
                     }
+
+                    // New owner claims territory
+                    new_grid[i].set_owner(new_owner);
                 }
             }
         }
     }
 
     // Apply point transfers to balances
-    for (to_idx, amount) in point_transfers {
-        if to_idx < game.player_balances.len() {
-            game.player_balances[to_idx] += amount as u64;
-        }
-    }
-
-    // Update territory: any living cell claims its square
-    for row in 0..height {
-        for col in 0..width {
-            if new_grid[row][col] > 0 {
-                game.territory[row][col] = new_grid[row][col];
+    CACHED_METADATA.with(|m| {
+        let mut m = m.borrow_mut();
+        for (to_idx, amount) in point_transfers {
+            if to_idx < m.balances.len() {
+                m.balances[to_idx] += amount as u64;
             }
         }
-    }
+    });
+
+    // Swap in new grid (heap assignment, no stable memory I/O)
+    GRID.with(|g| {
+        *g.borrow_mut() = new_grid;
+    });
 
     // Increment generation
     CACHED_METADATA.with(|m| m.borrow_mut().generation += 1);
 }
 
-/// Remove inactive players and remap colors
-fn cleanup_inactive_players() {
-    // Count live cells per player
-    let mut live_counts = [0u32; MAX_PLAYERS + 1];
-    GRID.with(|g| {
-        let g = g.borrow();
-        for i in 0..GRID_SIZE as u64 {
-            let cell = g.get(i).unwrap_or(0);
-            if cell > 0 && (cell as usize) <= MAX_PLAYERS {
-                live_counts[cell as usize] += 1;
-            }
-        }
-    });
-
-    let caller = ic_cdk::api::msg_caller();
-    let now = ic_cdk::api::time();
-
-    let width = config.width.min(200).max(10);
-    let height = config.height.min(200).max(10);
-
-    let game = GameRoom {
-        id: game_id,
-        name,
-        width,
-        height,
-        created_at: now,
-        grid: create_empty_grid(width, height),
-        territory: create_empty_grid(width, height),
-        points: create_empty_points_grid(width, height),
-        player_balances: vec![1000],  // Creator starts with 1000 points
-        generation: 0,
-        players: vec![caller],
-        status: GameStatus::Waiting,
-        is_running: false,
-    };
-
-    GAMES.with(|games| {
-        games.borrow_mut().insert(game_id, game);
-    });
-}
-
-/// Build LifeState response from stable storage
-fn build_state() -> LifeState {
-    let mut grid = vec![vec![0u8; GRID_WIDTH]; GRID_HEIGHT];
-    let mut territory = vec![vec![0u8; GRID_WIDTH]; GRID_HEIGHT];
-
-    GRID.with(|g| {
-        let g = g.borrow();
-        for row in 0..GRID_HEIGHT {
-            for col in 0..GRID_WIDTH {
-                grid[row][col] = g.get(idx(row, col) as u64).unwrap_or(0);
-            }
-        }
-    });
-
-    TERRITORY.with(|t| {
-        let t = t.borrow();
-        for row in 0..GRID_HEIGHT {
-            for col in 0..GRID_WIDTH {
-                territory[row][col] = t.get(idx(row, col) as u64).unwrap_or(0);
-            }
-        }
+/// Build full state response
+fn build_game_state() -> GameState {
+    let cells: Vec<CellView> = GRID.with(|g| {
+        g.borrow().iter().map(|c| (*c).into()).collect()
     });
 
     CACHED_METADATA.with(|m| {
         let m = m.borrow();
-        LifeState {
-            grid,
-            territory,
+        GameState {
+            cells,
+            width: GRID_SIZE as u32,
+            height: GRID_SIZE as u32,
             generation: m.generation,
             players: m.players.clone(),
+            balances: m.balances.clone(),
+            is_running: m.is_running,
         }
-
-        game.players.push(caller);
-        game.player_balances.push(1000);  // New player gets 1000 points
-        Ok(game.players.len() as u8)
     })
 }
 
@@ -389,17 +395,183 @@ fn build_state() -> LifeState {
 // CANISTER LIFECYCLE
 // ============================================================================
 
+/// Start the autonomous simulation timer
+fn start_simulation_timer() {
+    set_timer_interval(Duration::from_millis(TICK_INTERVAL_MS), || async {
+        let is_running = CACHED_METADATA.with(|m| m.borrow().is_running);
+        if is_running {
+            for _ in 0..GENERATIONS_PER_TICK {
+                step_generation();
+            }
+            // Save periodically (every tick when running)
+            save_metadata();
+        }
+    });
+}
+
 #[init]
 fn init() {
     ensure_grid_initialized();
-    ic_cdk::println!("Life Backend Initialized - 1000x1000 persistent world");
+    // Start running by default - simulation is always on
+    CACHED_METADATA.with(|m| m.borrow_mut().is_running = true);
+    save_metadata();
+    start_simulation_timer();
+    ic_cdk::println!("Life Backend Initialized - {}x{} persistent world, {} gen/sec",
+        GRID_SIZE, GRID_SIZE, GENERATIONS_PER_TICK as u64 * (1000 / TICK_INTERVAL_MS));
+}
+
+#[pre_upgrade]
+fn pre_upgrade() {
+    // Save metadata
+    save_metadata();
+
+    // Persist heap grid to stable memory for upgrade survival
+    GRID.with(|heap| {
+        STABLE_GRID.with(|stable| {
+            let heap = heap.borrow();
+            let stable = stable.borrow_mut();
+
+            // Clear old stable data
+            while stable.len() > 0 {
+                stable.pop();
+            }
+
+            // Copy heap → stable
+            for cell in heap.iter() {
+                stable.push(cell).unwrap();
+            }
+        });
+    });
+
+    ic_cdk::println!("Life Backend pre_upgrade: saved {} cells to stable memory", TOTAL_CELLS);
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    ensure_grid_initialized();
+    // Load metadata
     load_metadata();
-    ic_cdk::println!("Life Backend Upgraded - state restored from stable memory");
+
+    // Restore grid from stable memory to heap
+    let stable_len = STABLE_GRID.with(|s| s.borrow().len());
+
+    if stable_len == TOTAL_CELLS as u64 {
+        // Normal upgrade: restore from stable
+        STABLE_GRID.with(|stable| {
+            GRID.with(|heap| {
+                let stable = stable.borrow();
+                let mut heap = heap.borrow_mut();
+                heap.clear();
+                heap.reserve(TOTAL_CELLS);
+                for i in 0..TOTAL_CELLS as u64 {
+                    heap.push(stable.get(i).unwrap_or_default());
+                }
+            });
+        });
+        ic_cdk::println!("Life Backend post_upgrade: restored {} cells from stable memory", TOTAL_CELLS);
+    } else {
+        // Migration or first deploy: initialize fresh grid
+        ic_cdk::println!("Life Backend post_upgrade: stable has {} cells, expected {}. Initializing fresh grid.",
+            stable_len, TOTAL_CELLS);
+
+        // Clear incompatible stable data
+        STABLE_GRID.with(|s| {
+            let s = s.borrow_mut();
+            while s.len() > 0 {
+                s.pop();
+            }
+        });
+
+        // Initialize fresh heap grid
+        ensure_grid_initialized();
+
+        // Reset game state for fresh start
+        CACHED_METADATA.with(|m| {
+            let mut m = m.borrow_mut();
+            m.generation = 0;
+            m.is_running = true;
+            for balance in m.balances.iter_mut() {
+                *balance = STARTING_BALANCE;
+            }
+        });
+        save_metadata();
+    }
+
+    start_simulation_timer();
+}
+
+// ============================================================================
+// GAME MANAGEMENT (compatibility layer - single world)
+// ============================================================================
+
+/// List available games (returns single global world)
+#[query]
+fn list_games() -> Vec<GameInfo> {
+    CACHED_METADATA.with(|m| {
+        let m = m.borrow();
+        vec![GameInfo {
+            id: 0,
+            name: "Global World".to_string(),
+            status: GameStatus::Active,
+            player_count: m.players.len() as u32,
+            generation: m.generation,
+        }]
+    })
+}
+
+/// Create game (returns existing world id)
+#[update]
+fn create_game(_name: String, _config: GameConfig) -> Result<u64, String> {
+    Ok(0)
+}
+
+/// Join game (adds player to global world)
+#[update]
+fn join_game(_game_id: u64) -> Result<u8, String> {
+    let caller = ic_cdk::api::caller();
+
+    CACHED_METADATA.with(|m| {
+        let mut m = m.borrow_mut();
+
+        // Check if already a player
+        if let Some(pos) = m.players.iter().position(|p| *p == caller) {
+            return Ok((pos + 1) as u8);
+        }
+
+        // Check max players
+        if m.players.len() >= MAX_PLAYERS {
+            return Err("Game full - max 10 players".to_string());
+        }
+
+        m.players.push(caller);
+        m.balances.push(STARTING_BALANCE);
+        save_metadata();
+        Ok(m.players.len() as u8)
+    })
+}
+
+/// Start game (no-op for global world, always active)
+#[update]
+fn start_game(_game_id: u64) -> Result<(), String> {
+    Ok(())
+}
+
+
+/// Get game room info
+#[query]
+fn get_game(_game_id: u64) -> Result<GameRoom, String> {
+    CACHED_METADATA.with(|m| {
+        let m = m.borrow();
+        Ok(GameRoom {
+            id: 0,
+            name: "Global World".to_string(),
+            width: GRID_SIZE as u32,
+            height: GRID_SIZE as u32,
+            status: GameStatus::Active,
+            players: m.players.clone(),
+            generation: m.generation,
+            is_running: m.is_running,
+        })
+    })
 }
 
 // ============================================================================
@@ -408,94 +580,17 @@ fn post_upgrade() {
 
 /// Place cells on the grid with economics. Costs 1 point per cell.
 #[update]
-fn place_cells(cells: Vec<(i32, i32)>) -> Result<u32, String> {
-    let caller = ic_cdk::api::msg_caller();
-
-    GAMES.with(|games| {
-        let mut games = games.borrow_mut();
-        let game = games.get_mut(&game_id).ok_or("Game not found")?;
-
-        if game.status != GameStatus::Active {
-            return Err("Game not active".to_string());
-        }
-
-        // Find player index
-        let player_idx = game.players
-            .iter()
-            .position(|p| *p == caller)
-            .ok_or("Not a player in this game")?;
-        let player_num = (player_idx + 1) as u8;
-
-        let cost = cells.len() as u64;
-
-        // Check balance
-        if game.player_balances[player_idx] < cost {
-            return Err(format!("Insufficient points. Need {}, have {}",
-                cost, game.player_balances[player_idx]));
-        }
-
-        let width = game.width as i32;
-        let height = game.height as i32;
-
-        // Pre-validate: check for overlaps with alive cells
-        for (x, y) in &cells {
-            let col = ((*x % width) + width) % width;
-            let row = ((*y % height) + height) % height;
-            if game.grid[row as usize][col as usize] > 0 {
-                return Err("Cannot place on alive cells".to_string());
-            }
-        }
-
-        // Deduct cost from balance
-        game.player_balances[player_idx] -= cost;
-
-        // Find all cells owned by this player (for point distribution)
-        let mut my_cells: Vec<(usize, usize)> = Vec::new();
-        for row in 0..game.height as usize {
-            for col in 0..game.width as usize {
-                if game.grid[row][col] == player_num {
-                    my_cells.push((row, col));
-                }
-            }
-        }
-
-        // Place new cells
-        let mut placed_cells: Vec<(usize, usize)> = Vec::new();
-        for (x, y) in cells {
-            let col = ((x % width) + width) % width;
-            let row = ((y % height) + height) % height;
-            game.grid[row as usize][col as usize] = player_num;
-            game.territory[row as usize][col as usize] = player_num;
-            placed_cells.push((row as usize, col as usize));
-        }
-
-        // Distribute points across territory (including newly placed cells)
-        my_cells.extend(placed_cells.iter().cloned());
-
-        if !my_cells.is_empty() {
-            // Distribute points across owned cells
-            let points_per_cell = cost / my_cells.len() as u64;
-            let remainder = cost % my_cells.len() as u64;
-
-            for (i, (row, col)) in my_cells.iter().enumerate() {
-                let extra = if (i as u64) < remainder { 1 } else { 0 };
-                game.points[*row][*col] += (points_per_cell + extra) as u16;
-            }
-        }
-
-        Ok(placed_cells.len() as u32)
-    })
-}
-
+fn place_cells(_game_id: u64, cells: Vec<(i32, i32)>) -> Result<u32, String> {
+    let caller = ic_cdk::api::caller();
     ensure_grid_initialized();
 
     // Get or assign player number
-    let player_num = CACHED_METADATA.with(|cached| {
-        let mut m = cached.borrow_mut();
+    let (player_num, player_idx) = CACHED_METADATA.with(|m| {
+        let mut m = m.borrow_mut();
 
         // Check if caller already has a color
         if let Some(pos) = m.players.iter().position(|p| *p == caller) {
-            return Ok((pos + 1) as u8);
+            return Ok(((pos + 1) as u8, pos));
         }
 
         // New player - check if room available
@@ -504,51 +599,58 @@ fn place_cells(cells: Vec<(i32, i32)>) -> Result<u32, String> {
         }
 
         m.players.push(caller);
-        Ok(m.players.len() as u8)
+        m.balances.push(STARTING_BALANCE);
+        Ok((m.players.len() as u8, m.players.len() - 1))
     })?;
 
-    let mut placed = 0u32;
-    for (x, y) in cells {
-        // Wrap coordinates (toroidal)
-        let col = ((x % GRID_WIDTH as i32) + GRID_WIDTH as i32) as usize % GRID_WIDTH;
-        let row = ((y % GRID_HEIGHT as i32) + GRID_HEIGHT as i32) as usize % GRID_HEIGHT;
+    let cost = cells.len() as u64;
 
-        set_grid_cell(row, col, player_num);
-        set_territory_cell(row, col, player_num);
-        placed += 1;
+    // Check balance
+    let current_balance = CACHED_METADATA.with(|m| {
+        m.borrow().balances.get(player_idx).copied().unwrap_or(0)
+    });
+
+    if current_balance < cost {
+        return Err(format!("Insufficient points. Need {}, have {}", cost, current_balance));
     }
 
-    save_metadata();
-    Ok(placed)
-}
-
-/// Clear the grid (keep game active, reset points)
-#[update]
-fn step(n: u32) -> Result<LifeState, String> {
-    ensure_grid_initialized();
-
-    // Limit steps per call to prevent timeout
-    let steps = n.min(100);
-    for _ in 0..steps {
-        step_generation();
-    }
-
-    // Cleanup inactive players
-    cleanup_inactive_players();
-    save_metadata();
-
-        game.grid = create_empty_grid(game.width, game.height);
-        game.territory = create_empty_grid(game.width, game.height);
-        game.points = create_empty_points_grid(game.width, game.height);
-        // Reset all player balances to 1000
-        for balance in game.player_balances.iter_mut() {
-            *balance = 1000;
+    // Pre-validate: check for overlaps with alive cells
+    for (x, y) in &cells {
+        let col = ((*x & GRID_MASK as i32) + GRID_SIZE as i32) as usize & GRID_MASK;
+        let row = ((*y & GRID_MASK as i32) + GRID_SIZE as i32) as usize & GRID_MASK;
+        let cell = get_cell(row, col);
+        if cell.alive() {
+            return Err("Cannot place on alive cells".to_string());
         }
-        game.generation = 0;
-        game.is_running = false;
-        Ok(())
-    })
+    }
+
+    // Deduct cost from balance
+    CACHED_METADATA.with(|m| {
+        let mut m = m.borrow_mut();
+        if let Some(balance) = m.balances.get_mut(player_idx) {
+            *balance -= cost;
+        }
+    });
+
+    // Place new cells - each gets 1 point stored directly in the cell
+    let mut placed_count = 0u32;
+    for (x, y) in cells {
+        let col = ((x & GRID_MASK as i32) + GRID_SIZE as i32) as usize & GRID_MASK;
+        let row = ((y & GRID_MASK as i32) + GRID_SIZE as i32) as usize & GRID_MASK;
+
+        let mut cell = get_cell(row, col);
+        cell.set_owner(player_num);
+        cell.set_alive(true);
+        cell.add_points(1);
+        set_cell(row, col, cell);
+        placed_count += 1;
+    }
+
+    save_metadata();
+    Ok(placed_count)
 }
+
+
 
 // ============================================================================
 // QUERY METHODS
@@ -556,85 +658,26 @@ fn step(n: u32) -> Result<LifeState, String> {
 
 /// Get current game state
 #[query]
-fn get_state(game_id: u64) -> Result<GameState, String> {
-    GAMES.with(|games| {
-        let games = games.borrow();
-        let game = games.get(&game_id).ok_or("Game not found")?;
-        Ok(GameState {
-            grid: game.grid.clone(),
-            territory: game.territory.clone(),
-            generation: game.generation,
-            players: game.players.clone(),
-            is_running: game.is_running,
-        })
-    })
-}
-
-/// Get game state including points (main polling endpoint for economics)
-#[query]
-fn get_state_with_points(game_id: u64) -> Result<GameStateWithPoints, String> {
-    GAMES.with(|games| {
-        let games = games.borrow();
-        let game = games.get(&game_id).ok_or("Game not found")?;
-        Ok(GameStateWithPoints {
-            grid: game.grid.clone(),
-            territory: game.territory.clone(),
-            points: game.points.clone(),
-            generation: game.generation,
-            players: game.players.clone(),
-            balances: game.player_balances.clone(),
-            is_running: game.is_running,
-        })
-    })
+fn get_state(_game_id: u64) -> Result<GameState, String> {
+    Ok(build_game_state())
 }
 
 /// Get player balance
 #[query]
-fn get_balance(game_id: u64) -> Result<u64, String> {
-    let caller = ic_cdk::api::msg_caller();
-    GAMES.with(|games| {
-        let games = games.borrow();
-        let game = games.get(&game_id).ok_or("Game not found")?;
-        let player_idx = game.players
+fn get_balance(_game_id: u64) -> Result<u64, String> {
+    let caller = ic_cdk::api::caller();
+    CACHED_METADATA.with(|m| {
+        let m = m.borrow();
+        let player_idx = m.players
             .iter()
             .position(|p| *p == caller)
             .ok_or("Not a player")?;
-        Ok(game.player_balances[player_idx])
+        Ok(m.balances.get(player_idx).copied().unwrap_or(0))
     })
 }
 
-/// List all games (for lobby)
-#[query]
-fn list_games() -> Vec<GameInfo> {
-    GAMES.with(|games| {
-        games.borrow()
-            .iter()
-            .map(|(_, g)| GameInfo {
-                id: g.id,
-                name: g.name.clone(),
-                status: g.status.clone(),
-                player_count: g.players.len() as u32,
-                generation: g.generation,
-            })
-            .collect()
-    })
-}
-
-/// Get full game details
-#[query]
-fn get_game(game_id: u64) -> Result<GameRoom, String> {
-    GAMES.with(|games| {
-        games.borrow()
-            .get(&game_id)
-            .cloned()
-            .ok_or("Game not found".to_string())
-    })
-}
-
+/// Simple greeting
 #[query]
 fn greet(name: String) -> String {
-    format!("Hello, {}! Welcome to Life - 1000x1000 persistent world.", name)
+    format!("Hello, {}! Welcome to the {}x{} Game of Life world.", name, GRID_SIZE, GRID_SIZE)
 }
-
-// Export Candid interface
-ic_cdk::export_candid!();

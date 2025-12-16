@@ -3,20 +3,32 @@ import { AuthClient } from '@dfinity/auth-client';
 import { Actor, HttpAgent, ActorSubclass } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
 import { idlFactory } from '../declarations/life1_backend';
-import type { _SERVICE, GameState, GameStateWithPoints, GameInfo, GameStatus } from '../declarations/life1_backend/life1_backend.did.d';
+import type { _SERVICE, GameState, Cell } from '../declarations/life1_backend/life1_backend.did.d';
 
 const LIFE1_CANISTER_ID = 'pijnb-7yaaa-aaaae-qgcuq-cai';
 
-// Fixed grid size
-const GRID_WIDTH = 1000;
-const GRID_HEIGHT = 1000;
+// Grid dimensions - 512x512 divided into 16 quadrants of 128x128
+const GRID_SIZE = 512;
+const QUADRANT_SIZE = 128;
+const QUADRANTS_PER_ROW = 4;
+const TOTAL_QUADRANTS = 16;
+
+// Legacy constants for backend compatibility
+const GRID_WIDTH = GRID_SIZE;
+const GRID_HEIGHT = GRID_SIZE;
+
+// Simulation timing
+const LOCAL_TICK_MS = 100;      // Local simulation: 10 generations/second
+const BACKEND_SYNC_MS = 5000;   // Sync with backend every 5 seconds
 
 // Rendering constants
-const BASE_CELL_SIZE = 10;
-const MIN_ZOOM = 0.1;
-const MAX_ZOOM = 4;
-const ZOOM_STEP = 0.1;
 const GRID_COLOR = 'rgba(255, 255, 255, 0.08)';
+
+// View modes
+type ViewMode = 'overview' | 'quadrant';
+
+// Swipe detection
+const SWIPE_THRESHOLD = 50;
 const DEAD_COLOR = '#000000';
 
 // 10 Player colors
@@ -145,6 +157,73 @@ const CATEGORY_INFO: Record<PatternCategory, { label: string; color: string; ico
   oscillator: { label: 'Oscillators', color: 'text-purple-400 border-purple-500/50 bg-purple-500/10', icon: 'o' },
 };
 
+// Local Game of Life simulation - mirrors backend rules exactly
+const stepLocalGeneration = (cells: Cell[]): Cell[] => {
+  const newCells: Cell[] = new Array(GRID_WIDTH * GRID_HEIGHT);
+
+  for (let row = 0; row < GRID_HEIGHT; row++) {
+    for (let col = 0; col < GRID_WIDTH; col++) {
+      const idx = row * GRID_WIDTH + col;
+      const current = cells[idx];
+
+      // Count neighbors and track owner counts
+      let neighborCount = 0;
+      const ownerCounts: number[] = new Array(11).fill(0); // 0-10 players
+
+      for (let di = -1; di <= 1; di++) {
+        for (let dj = -1; dj <= 1; dj++) {
+          if (di === 0 && dj === 0) continue;
+
+          // Toroidal wrap
+          const nRow = (row + di + GRID_HEIGHT) % GRID_HEIGHT;
+          const nCol = (col + dj + GRID_WIDTH) % GRID_WIDTH;
+          const neighbor = cells[nRow * GRID_WIDTH + nCol];
+
+          if (neighbor.alive) {
+            neighborCount++;
+            if (neighbor.owner > 0 && neighbor.owner <= 10) {
+              ownerCounts[neighbor.owner]++;
+            }
+          }
+        }
+      }
+
+      // Apply Conway's rules
+      let newAlive = false;
+      let newOwner = current.owner;
+
+      if (current.alive) {
+        // Living cell survives with 2-3 neighbors
+        newAlive = neighborCount === 2 || neighborCount === 3;
+      } else {
+        // Dead cell born with exactly 3 neighbors
+        if (neighborCount === 3) {
+          newAlive = true;
+          // New owner = majority owner among parents
+          let maxCount = 0;
+          let majorityOwner = 1;
+          for (let o = 1; o <= 10; o++) {
+            if (ownerCounts[o] > maxCount) {
+              maxCount = ownerCounts[o];
+              majorityOwner = o;
+            }
+          }
+          newOwner = majorityOwner;
+        }
+      }
+
+      // Preserve owner (territory) and points - they persist even when cells die
+      newCells[idx] = {
+        owner: newOwner,
+        points: current.points,  // Points stay in cell
+        alive: newAlive,
+      };
+    }
+  }
+
+  return newCells;
+};
+
 export const Life: React.FC = () => {
   // Canvas refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -156,11 +235,16 @@ export const Life: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<PatternCategory | 'all'>('all');
   const [parsedPattern, setParsedPattern] = useState<[number, number][]>([]);
 
-  // View state
-  const [zoom, setZoom] = useState(0.5); // Start zoomed out for 1000x1000
-  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const [isPanning, setIsPanning] = useState(false);
-  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  // Quadrant-based view state
+  const [viewMode, setViewMode] = useState<ViewMode>('overview');
+  const [viewX, setViewX] = useState(0);     // 0, 128, 256, or 384
+  const [viewY, setViewY] = useState(0);     // 0, 128, 256, or 384
+
+  // Touch handling for swipe navigation
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Derived: current quadrant number (0-15)
+  const currentQuadrant = (viewY / QUADRANT_SIZE) * QUADRANTS_PER_ROW + (viewX / QUADRANT_SIZE);
 
   // Auth state
   const [authClient, setAuthClient] = useState<AuthClient | null>(null);
@@ -170,15 +254,22 @@ export const Life: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Game state from backend
-  const [gameState, setGameState] = useState<GameStateWithPoints | null>(null);
+  // Game state from backend - now uses unified GameState with Cell array
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  // Local cells for optimistic simulation (runs independently, synced from backend periodically)
+  const [localCells, setLocalCells] = useState<Cell[]>([]);
   const [myPlayerNum, setMyPlayerNum] = useState(1);
-  const [gridSize, setGridSize] = useState({ rows: 150, cols: 200 });
   const [myBalance, setMyBalance] = useState(1000);
   const [placementError, setPlacementError] = useState<string | null>(null);
 
-  // Simulation control
-  const [isRunning, setIsRunning] = useState(false);
+  // Game management state
+  const [currentGameId, setCurrentGameId] = useState<bigint | null>(BigInt(0));
+  const [mode, setMode] = useState<'lobby' | 'game'>('game');
+  const [games, setGames] = useState<any[]>([]);
+  const [newGameName, setNewGameName] = useState('');
+
+  // Simulation control - always running
+  const [isRunning, setIsRunning] = useState(true);
   const [, forceRender] = useState(0);
 
   // Sidebar collapsed state with localStorage persistence
@@ -199,6 +290,111 @@ export const Life: React.FC = () => {
   useEffect(() => {
     setParsedPattern(parseRLE(selectedPattern.rle));
   }, [selectedPattern]);
+
+  // Navigate to adjacent quadrant with toroidal wrapping
+  const navigateQuadrant = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
+    const step = QUADRANT_SIZE;
+    const maxPos = GRID_SIZE - QUADRANT_SIZE; // 384
+
+    switch (direction) {
+      case 'up':
+        setViewY(y => y === 0 ? maxPos : y - step);
+        break;
+      case 'down':
+        setViewY(y => y === maxPos ? 0 : y + step);
+        break;
+      case 'left':
+        setViewX(x => x === 0 ? maxPos : x - step);
+        break;
+      case 'right':
+        setViewX(x => x === maxPos ? 0 : x + step);
+        break;
+    }
+  }, []);
+
+  // Jump to specific quadrant (0-15)
+  const jumpToQuadrant = useCallback((quadrant: number) => {
+    const qRow = Math.floor(quadrant / QUADRANTS_PER_ROW);
+    const qCol = quadrant % QUADRANTS_PER_ROW;
+    setViewX(qCol * QUADRANT_SIZE);
+    setViewY(qRow * QUADRANT_SIZE);
+    setViewMode('quadrant');
+  }, []);
+
+  // Toggle between overview and quadrant view
+  const toggleViewMode = useCallback(() => {
+    setViewMode(mode => mode === 'overview' ? 'quadrant' : 'overview');
+  }, []);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't capture if typing in input
+      if (e.target instanceof HTMLInputElement) return;
+
+      switch (e.key) {
+        case 'ArrowUp':
+        case 'w':
+        case 'W':
+          e.preventDefault();
+          if (viewMode === 'quadrant') navigateQuadrant('up');
+          break;
+        case 'ArrowDown':
+        case 's':
+        case 'S':
+          e.preventDefault();
+          if (viewMode === 'quadrant') navigateQuadrant('down');
+          break;
+        case 'ArrowLeft':
+        case 'a':
+        case 'A':
+          e.preventDefault();
+          if (viewMode === 'quadrant') navigateQuadrant('left');
+          break;
+        case 'ArrowRight':
+        case 'd':
+        case 'D':
+          e.preventDefault();
+          if (viewMode === 'quadrant') navigateQuadrant('right');
+          break;
+        case ' ':  // Space to toggle view mode
+        case 'Tab':
+          e.preventDefault();
+          toggleViewMode();
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [viewMode, navigateQuadrant, toggleViewMode]);
+
+  // Touch/Swipe navigation for mobile
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+  }, []);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (!touchStartRef.current || viewMode !== 'quadrant') return;
+
+    const touch = e.changedTouches[0];
+    const deltaX = touch.clientX - touchStartRef.current.x;
+    const deltaY = touch.clientY - touchStartRef.current.y;
+
+    // Determine swipe direction (if significant)
+    if (Math.abs(deltaX) > SWIPE_THRESHOLD || Math.abs(deltaY) > SWIPE_THRESHOLD) {
+      if (Math.abs(deltaX) > Math.abs(deltaY)) {
+        // Horizontal swipe - swipe left means go right (reveal content to the right)
+        navigateQuadrant(deltaX < 0 ? 'right' : 'left');
+      } else {
+        // Vertical swipe - swipe up means go down
+        navigateQuadrant(deltaY < 0 ? 'down' : 'up');
+      }
+    }
+
+    touchStartRef.current = null;
+  }, [viewMode, navigateQuadrant]);
 
   // Auth initialization
   useEffect(() => {
@@ -251,6 +447,8 @@ export const Life: React.FC = () => {
     if (isAuthenticated && actor) fetchGames();
   }, [isAuthenticated, actor, fetchGames]);
 
+  // Simulation runs locally - backend handles its own tick rate
+
   // Create game
   const handleCreateGame = async () => {
     if (!actor || !newGameName.trim()) return;
@@ -264,14 +462,13 @@ export const Life: React.FC = () => {
     setError(null);
     try {
       const result = await actor.create_game(trimmedName, {
-        width: 200, height: 150, max_players: 4, generations_limit: []
+        width: GRID_WIDTH, height: GRID_HEIGHT, max_players: 10, generations_limit: []
       });
       if ('Ok' in result) {
         const gameId = result.Ok;
         await actor.start_game(gameId);
         setCurrentGameId(gameId);
         setMyPlayerNum(1);
-        setGridSize({ rows: 150, cols: 200 });
         setMode('game');
         setNewGameName('');
       } else {
@@ -293,11 +490,10 @@ export const Life: React.FC = () => {
       if ('Ok' in result) {
         setCurrentGameId(gameId);
         setMyPlayerNum(result.Ok);
-        // Fetch initial state with points
-        const stateResult = await actor.get_state_with_points(gameId);
+        // Fetch initial state
+        const stateResult = await actor.get_state(gameId);
         if ('Ok' in stateResult) {
           setGameState(stateResult.Ok);
-          setGridSize({ rows: stateResult.Ok.grid.length, cols: stateResult.Ok.grid[0]?.length || 200 });
           // Update my balance
           const myIdx = stateResult.Ok.players.findIndex(
             p => p.toText() === myPrincipal?.toText()
@@ -360,155 +556,118 @@ export const Life: React.FC = () => {
     };
   }, [isAuthenticated]);
 
-  // Main game loop - always running, steps continuously
+  // Backend sync - fetch authoritative state every 5 seconds
   useEffect(() => {
     if (!actor || !isAuthenticated) return;
 
     let cancelled = false;
-    let timeoutId: ReturnType<typeof setTimeout>;
 
-    const tick = async () => {
+    const syncFromBackend = async () => {
       if (cancelled) return;
-
       try {
-        if (isRunning) {
-          // Step 5 generations at a time for faster playback
-          const stepResult = await actor.step(currentGameId, 5);
-          if ('Ok' in stepResult && !cancelled) {
-            // Fetch full state with points after stepping
-            const stateResult = await actor.get_state_with_points(currentGameId);
-            if ('Ok' in stateResult && !cancelled) {
-              setGameState(stateResult.Ok);
-              // Update my balance
-              const myIdx = stateResult.Ok.players.findIndex(
-                p => p.toText() === myPrincipal?.toText()
-              );
-              if (myIdx >= 0) {
-                setMyBalance(Number(stateResult.Ok.balances[myIdx]));
-              }
-            }
-          }
-        } else {
-          // Just poll for state (to see other players' placements)
-          const result = await actor.get_state_with_points(currentGameId);
-          if ('Ok' in result && !cancelled) {
-            setGameState(result.Ok);
-            // Update my balance
-            const myIdx = result.Ok.players.findIndex(
-              p => p.toText() === myPrincipal?.toText()
-            );
-            if (myIdx >= 0) {
-              setMyBalance(Number(result.Ok.balances[myIdx]));
-            }
-            // Sync running state from backend (another player might have started)
-            if (result.Ok.is_running !== isRunning) {
-              setIsRunning(result.Ok.is_running);
-            }
+        const stateResult = await actor.get_state(currentGameId);
+        if ('Ok' in stateResult && !cancelled) {
+          setGameState(stateResult.Ok);
+          setLocalCells(stateResult.Ok.cells);  // Sync local cells from backend
+          // Update my balance
+          const myIdx = stateResult.Ok.players.findIndex(
+            p => p.toText() === myPrincipal?.toText()
+          );
+          if (myIdx >= 0) {
+            setMyBalance(Number(stateResult.Ok.balances[myIdx]));
           }
         }
       } catch (err) {
-        console.error('Tick error:', err);
-      }
-
-      // Schedule next tick - IC latency will naturally throttle
-      if (!cancelled) {
-        timeoutId = setTimeout(tick, 50);
+        console.error('Backend sync error:', err);
       }
     };
 
-    tick();
+    // Initial sync
+    syncFromBackend();
+
+    // Periodic sync every 5 seconds
+    const syncInterval = setInterval(syncFromBackend, BACKEND_SYNC_MS);
 
     return () => {
       cancelled = true;
-      clearTimeout(timeoutId);
+      clearInterval(syncInterval);
     };
-  }, [actor, currentGameId, mode, isRunning, myPrincipal]);
+  }, [actor, currentGameId, myPrincipal, isAuthenticated]);
 
-  // Draw function
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    const { width: displayWidth, height: displayHeight } = canvasSizeRef.current;
-    if (!canvas || displayWidth === 0 || displayHeight === 0 || !gameState) return;
+  // Local simulation - runs every 100ms for smooth visuals
+  useEffect(() => {
+    if (!isRunning || localCells.length === 0) return;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const localTick = setInterval(() => {
+      setLocalCells(cells => stepLocalGeneration(cells));
+    }, LOCAL_TICK_MS);
 
-    const dpr = window.devicePixelRatio || 1;
-    const { grid, territory } = gameState;
+    return () => clearInterval(localTick);
+  }, [isRunning, localCells.length > 0]);
 
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = DEAD_COLOR;
-    ctx.fillRect(0, 0, displayWidth, displayHeight);
+  // Helper to draw cells within a region
+  const drawCells = useCallback((
+    ctx: CanvasRenderingContext2D,
+    startX: number,
+    startY: number,
+    width: number,
+    height: number,
+    cellSize: number
+  ) => {
+    const cells = localCells;
 
-    ctx.save();
-    ctx.translate(panOffset.x, panOffset.y);
+    // Draw territory (owner > 0, regardless of alive)
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
+        const gridRow = startY + row;
+        const gridCol = startX + col;
+        const idx = gridRow * GRID_SIZE + gridCol;
+        const cell = cells[idx];
 
-    const cellSize = BASE_CELL_SIZE * zoom;
-    const startCol = Math.max(0, Math.floor(-panOffset.x / cellSize));
-    const endCol = Math.min(GRID_WIDTH, Math.ceil((displayWidth - panOffset.x) / cellSize));
-    const startRow = Math.max(0, Math.floor(-panOffset.y / cellSize));
-    const endRow = Math.min(GRID_HEIGHT, Math.ceil((displayHeight - panOffset.y) / cellSize));
-
-    // Draw territory
-    for (let row = startRow; row < endRow; row++) {
-      for (let col = startCol; col < endCol; col++) {
-        const owner = territory[row]?.[col];
-        if (owner > 0) {
-          ctx.fillStyle = TERRITORY_COLORS[owner] || 'rgba(255,255,255,0.1)';
+        if (cell && cell.owner > 0) {
+          ctx.fillStyle = TERRITORY_COLORS[cell.owner] || 'rgba(255,255,255,0.1)';
           ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
         }
       }
     }
 
-    // Draw grid lines only at higher zoom
-    if (zoom >= 0.5) {
-      ctx.strokeStyle = GRID_COLOR;
-      ctx.lineWidth = 1;
-      for (let i = startCol; i <= endCol; i++) {
-        ctx.beginPath();
-        ctx.moveTo(i * cellSize, startRow * cellSize);
-        ctx.lineTo(i * cellSize, endRow * cellSize);
-        ctx.stroke();
-      }
-      for (let i = startRow; i <= endRow; i++) {
-        ctx.beginPath();
-        ctx.moveTo(startCol * cellSize, i * cellSize);
-        ctx.lineTo(endCol * cellSize, i * cellSize);
-        ctx.stroke();
-      }
-    }
+    // Draw living cells
+    const gap = cellSize > 2 ? 1 : 0;
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
+        const gridRow = startY + row;
+        const gridCol = startX + col;
+        const idx = gridRow * GRID_SIZE + gridCol;
+        const cell = cells[idx];
 
-    // Draw cells
-    const cellPadding = Math.max(1, zoom * 0.5);
-    for (let row = startRow; row < endRow; row++) {
-      for (let col = startCol; col < endCol; col++) {
-        const owner = grid[row]?.[col];
-        if (owner > 0) {
-          ctx.fillStyle = PLAYER_COLORS[owner] || '#FFFFFF';
+        if (cell && cell.alive && cell.owner > 0) {
+          ctx.fillStyle = PLAYER_COLORS[cell.owner] || '#FFFFFF';
           ctx.fillRect(
-            col * cellSize + cellPadding,
-            row * cellSize + cellPadding,
-            cellSize - cellPadding * 2,
-            cellSize - cellPadding * 2
+            col * cellSize,
+            row * cellSize,
+            cellSize - gap,
+            cellSize - gap
           );
         }
       }
     }
 
-    // Draw gold borders for cells with points
-    const points = gameState.points;
-    if (points) {
-      for (let row = startRow; row < endRow; row++) {
-        for (let col = startCol; col < endCol; col++) {
-          const cellPoints = points[row]?.[col] || 0;
-          if (cellPoints > 0) {
-            // Calculate border opacity based on points (more points = more visible)
+    // Draw gold borders for cells with points (only in quadrant view where cells are large enough)
+    if (cellSize > 3) {
+      for (let row = 0; row < height; row++) {
+        for (let col = 0; col < width; col++) {
+          const gridRow = startY + row;
+          const gridCol = startX + col;
+          const idx = gridRow * GRID_SIZE + gridCol;
+          const cell = cells[idx];
+
+          if (cell && cell.points > 0) {
             const opacity = Math.min(
               GOLD_BORDER_MAX_OPACITY,
-              GOLD_BORDER_MIN_OPACITY + (cellPoints / 10) * 0.1
+              GOLD_BORDER_MIN_OPACITY + (cell.points / 10) * 0.1
             );
             ctx.strokeStyle = `rgba(255, 215, 0, ${opacity})`;
-            ctx.lineWidth = Math.min(3, 1 + Math.floor(cellPoints / 5));
+            ctx.lineWidth = Math.min(3, 1 + Math.floor(cell.points / 5));
             ctx.strokeRect(
               col * cellSize + 1,
               row * cellSize + 1,
@@ -519,133 +678,382 @@ export const Life: React.FC = () => {
         }
       }
     }
+  }, [localCells]);
 
-    // Boundary
+  // Draw 4x4 quadrant grid lines (overview mode)
+  const drawQuadrantGrid = useCallback((ctx: CanvasRenderingContext2D, cellSize: number) => {
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
     ctx.lineWidth = 2;
-    ctx.strokeRect(0, 0, GRID_WIDTH * cellSize, GRID_HEIGHT * cellSize);
 
-    ctx.restore();
-  }, [gameState, zoom, panOffset]);
+    for (let i = 1; i < QUADRANTS_PER_ROW; i++) {
+      const pos = i * QUADRANT_SIZE * cellSize;
+
+      // Vertical line
+      ctx.beginPath();
+      ctx.moveTo(pos, 0);
+      ctx.lineTo(pos, GRID_SIZE * cellSize);
+      ctx.stroke();
+
+      // Horizontal line
+      ctx.beginPath();
+      ctx.moveTo(0, pos);
+      ctx.lineTo(GRID_SIZE * cellSize, pos);
+      ctx.stroke();
+    }
+  }, []);
+
+  // Draw cell grid lines (quadrant mode only)
+  const drawGridLines = useCallback((ctx: CanvasRenderingContext2D, cellSize: number, gridWidth: number, gridHeight: number) => {
+    if (cellSize < 4) return; // Skip grid lines when cells are too small
+
+    ctx.strokeStyle = GRID_COLOR;
+    ctx.lineWidth = 1;
+
+    for (let i = 0; i <= gridWidth; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * cellSize, 0);
+      ctx.lineTo(i * cellSize, gridHeight * cellSize);
+      ctx.stroke();
+    }
+    for (let i = 0; i <= gridHeight; i++) {
+      ctx.beginPath();
+      ctx.moveTo(0, i * cellSize);
+      ctx.lineTo(gridWidth * cellSize, i * cellSize);
+      ctx.stroke();
+    }
+  }, []);
+
+  // Main draw function - simplified for quadrant-based navigation
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    const { width: displayWidth, height: displayHeight } = canvasSizeRef.current;
+    if (!canvas || displayWidth === 0 || displayHeight === 0 || localCells.length === 0) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Clear canvas
+    ctx.fillStyle = DEAD_COLOR;
+    ctx.fillRect(0, 0, displayWidth, displayHeight);
+
+    // Use the smaller dimension to ensure square cells
+    const canvasSize = Math.min(displayWidth, displayHeight);
+
+    if (viewMode === 'overview') {
+      // Overview: show all 512×512, each cell is tiny
+      const cellSize = canvasSize / GRID_SIZE;
+
+      // Center the grid if canvas is not square
+      const offsetX = (displayWidth - canvasSize) / 2;
+      const offsetY = (displayHeight - canvasSize) / 2;
+      ctx.save();
+      ctx.translate(offsetX, offsetY);
+
+      drawCells(ctx, 0, 0, GRID_SIZE, GRID_SIZE, cellSize);
+      drawQuadrantGrid(ctx, cellSize);
+
+      // Highlight current quadrant position
+      const qRow = viewY / QUADRANT_SIZE;
+      const qCol = viewX / QUADRANT_SIZE;
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(
+        qCol * QUADRANT_SIZE * cellSize,
+        qRow * QUADRANT_SIZE * cellSize,
+        QUADRANT_SIZE * cellSize,
+        QUADRANT_SIZE * cellSize
+      );
+
+      // Boundary
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(0, 0, GRID_SIZE * cellSize, GRID_SIZE * cellSize);
+
+      ctx.restore();
+    } else {
+      // Quadrant: show 128×128, cells are larger
+      const cellSize = canvasSize / QUADRANT_SIZE;
+
+      // Center the grid if canvas is not square
+      const offsetX = (displayWidth - canvasSize) / 2;
+      const offsetY = (displayHeight - canvasSize) / 2;
+      ctx.save();
+      ctx.translate(offsetX, offsetY);
+
+      drawCells(ctx, viewX, viewY, QUADRANT_SIZE, QUADRANT_SIZE, cellSize);
+      drawGridLines(ctx, cellSize, QUADRANT_SIZE, QUADRANT_SIZE);
+
+      // Boundary
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(0, 0, QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize);
+
+      ctx.restore();
+    }
+  }, [viewMode, viewX, viewY, localCells, drawCells, drawQuadrantGrid, drawGridLines]);
 
   useEffect(() => { draw(); }, [draw]);
 
-  // Zoom/pan handlers
-  const handleZoomIn = () => setZoom(z => Math.min(MAX_ZOOM, z + ZOOM_STEP));
-  const handleZoomOut = () => setZoom(z => Math.max(MIN_ZOOM, z - ZOOM_STEP));
-  const handleResetView = () => { setZoom(0.5); setPanOffset({ x: 0, y: 0 }); };
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    setZoom(z => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z + (e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP))));
-  }, []);
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 1 || e.button === 2 || e.shiftKey) {
-      e.preventDefault();
-      setIsPanning(true);
-      setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
-    }
-  };
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (isPanning) setPanOffset({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
-  };
-  const handleMouseUp = () => setIsPanning(false);
-  const handleMouseLeave = () => setIsPanning(false);
-
-  // Place cells on click
+  // Simplified click handler for quadrant-based navigation
   const handleCanvasClick = async (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isPanning || !actor) return;
+    if (!actor) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const { width: displayWidth, height: displayHeight } = canvasSizeRef.current;
+    const canvasSize = Math.min(displayWidth, displayHeight);
+    const offsetX = (displayWidth - canvasSize) / 2;
+    const offsetY = (displayHeight - canvasSize) / 2;
 
-    const cellSize = BASE_CELL_SIZE * zoom;
-    const col = Math.floor((x - panOffset.x) / cellSize);
-    const row = Math.floor((y - panOffset.y) / cellSize);
+    const x = e.clientX - rect.left - offsetX;
+    const y = e.clientY - rect.top - offsetY;
 
-    if (col < 0 || col >= GRID_WIDTH || row < 0 || row >= GRID_HEIGHT) return;
+    // Ignore clicks outside the grid
+    if (x < 0 || y < 0 || x >= canvasSize || y >= canvasSize) return;
 
-    // Convert pattern to absolute coordinates
-    const cells: [number, number][] = parsedPattern.map(([dx, dy]) => [col + dx, row + dy]);
+    if (viewMode === 'overview') {
+      // Click in overview = jump to that quadrant
+      const cellSize = canvasSize / GRID_SIZE;
+      const gridCol = Math.floor(x / cellSize);
+      const gridRow = Math.floor(y / cellSize);
+      const quadrant = Math.floor(gridRow / QUADRANT_SIZE) * QUADRANTS_PER_ROW
+                     + Math.floor(gridCol / QUADRANT_SIZE);
+      jumpToQuadrant(quadrant);
+    } else {
+      // Click in quadrant = place cell/pattern
+      const cellSize = canvasSize / QUADRANT_SIZE;
+      const localCol = Math.floor(x / cellSize);
+      const localRow = Math.floor(y / cellSize);
+      const gridCol = viewX + localCol;
+      const gridRow = viewY + localRow;
 
-    // Check if player has enough points
-    const cost = cells.length;
-    if (myBalance < cost) {
-      setPlacementError(`Not enough points. Need ${cost}, have ${myBalance}`);
-      setTimeout(() => setPlacementError(null), 3000);
-      return;
-    }
+      // Validate coordinates
+      if (gridCol < 0 || gridCol >= GRID_SIZE || gridRow < 0 || gridRow >= GRID_SIZE) return;
 
-    try {
-      const result = await actor.place_cells(currentGameId, cells);
-      if ('Err' in result) {
-        setPlacementError(result.Err);
+      // Convert pattern to absolute coordinates with toroidal wrapping
+      const cellsToPlace: [number, number][] = parsedPattern.map(([dx, dy]) => [
+        (gridCol + dx + GRID_SIZE) % GRID_SIZE,
+        (gridRow + dy + GRID_SIZE) % GRID_SIZE
+      ]);
+
+      // Check if player has enough points
+      const cost = cellsToPlace.length;
+      if (myBalance < cost) {
+        setPlacementError(`Not enough points. Need ${cost}, have ${myBalance}`);
         setTimeout(() => setPlacementError(null), 3000);
-      } else {
-        setMyBalance(prev => prev - cost);  // Optimistic update
-        setPlacementError(null);
+        return;
       }
-    } catch (err) {
-      console.error('Place error:', err);
-      setPlacementError(`Failed to place: ${err}`);
-      setTimeout(() => setPlacementError(null), 3000);
-    }
-  };
 
-  // Controls
-  const handlePlayPause = async () => {
-    if (!actor || currentGameId === null) return;
-    try {
-      await actor.set_running(currentGameId, !isRunning);
-      setIsRunning(!isRunning);
-    } catch (err) {
-      console.error('Set running error:', err);
-    }
-  };
+      // Optimistically update local cells immediately for instant feedback
+      setLocalCells(cells => {
+        const newCells = [...cells];
+        for (const [cx, cy] of cellsToPlace) {
+          const idx = cy * GRID_SIZE + cx;
+          if (idx >= 0 && idx < newCells.length && !newCells[idx].alive) {
+            newCells[idx] = {
+              ...newCells[idx],
+              alive: true,
+              owner: myPlayerNum,
+            };
+          }
+        }
+        return newCells;
+      });
 
-  const handleStep = async () => {
-    if (!actor || currentGameId === null) return;
-    try {
-      const result = await actor.step(currentGameId, 1);
-      if ('Ok' in result) {
-        // Placement successful
-      } else if ('Err' in result) {
-        setError(result.Err);
-        setTimeout(() => setError(null), 3000);
+      // Optimistically update balance
+      setMyBalance(prev => prev - cost);
+
+      // Send to backend (async, don't wait)
+      try {
+        const result = await actor.place_cells(currentGameId, cellsToPlace);
+        if ('Err' in result) {
+          setPlacementError(result.Err);
+          setTimeout(() => setPlacementError(null), 3000);
+          // Backend will correct state on next sync
+        } else {
+          setPlacementError(null);
+        }
+      } catch (err) {
+        console.error('Place error:', err);
+        setPlacementError(`Failed to place: ${err}`);
+        setTimeout(() => setPlacementError(null), 3000);
+        // Backend will correct state on next sync
       }
-    } catch (err) {
-      console.error('Step error:', err);
     }
   };
 
-  const handleClear = async () => {
-    if (!actor || currentGameId === null) return;
-    try {
-      await actor.clear_grid(currentGameId);
-      setIsRunning(false);
-      setMyBalance(1000);  // Reset balance
-    } catch (err) {
-      console.error('Clear error:', err);
+  // Controls - local simulation only
+  const handlePlayPause = () => {
+    setIsRunning(!isRunning);
+  };
+
+  const handleStep = () => {
+    // Manually advance local simulation by one generation
+    if (localCells.length > 0) {
+      setLocalCells(cells => stepLocalGeneration(cells));
     }
   };
 
-  // Cell counts
-  const cellCounts = gameState?.grid.reduce((acc, row) => {
-    row.forEach(cell => { if (cell > 0) acc[cell] = (acc[cell] || 0) + 1; });
-    return acc;
-  }, {} as Record<number, number>) || {};
+  const handleClear = () => {
+    // Clear local cells only (backend state persists)
+    setIsRunning(false);
+    setLocalCells(cells => cells.map(() => ({ owner: 0, points: 0, alive: false })));
+  };
 
-  const territoryCounts = gameState?.territory.reduce((acc, row) => {
-    row.forEach(owner => { if (owner > 0) acc[owner] = (acc[owner] || 0) + 1; });
+  // Cell counts - uses localCells for live updates
+  const cellCounts = localCells.reduce((acc, cell) => {
+    if (cell.alive && cell.owner > 0) acc[cell.owner] = (acc[cell.owner] || 0) + 1;
     return acc;
-  }, {} as Record<number, number>) || {};
+  }, {} as Record<number, number>);
+
+  const territoryCounts = localCells.reduce((acc, cell) => {
+    if (cell.owner > 0) acc[cell.owner] = (acc[cell.owner] || 0) + 1;
+    return acc;
+  }, {} as Record<number, number>);
 
   const filteredPatterns = selectedCategory === 'all'
     ? PATTERNS : PATTERNS.filter(p => p.category === selectedCategory);
+
+  // Calculate quadrant density for minimap heatmap
+  const calculateQuadrantDensity = useCallback((quadrant: number): number => {
+    if (localCells.length === 0) return 0;
+    const qRow = Math.floor(quadrant / QUADRANTS_PER_ROW);
+    const qCol = quadrant % QUADRANTS_PER_ROW;
+    const startY = qRow * QUADRANT_SIZE;
+    const startX = qCol * QUADRANT_SIZE;
+
+    let livingCells = 0;
+    for (let row = startY; row < startY + QUADRANT_SIZE; row++) {
+      for (let col = startX; col < startX + QUADRANT_SIZE; col++) {
+        const cell = localCells[row * GRID_SIZE + col];
+        if (cell && cell.alive && cell.owner > 0) livingCells++;
+      }
+    }
+
+    return livingCells / (QUADRANT_SIZE * QUADRANT_SIZE);
+  }, [localCells]);
+
+  // Minimap Component
+  const Minimap: React.FC = () => {
+    const minimapRef = useRef<HTMLCanvasElement>(null);
+
+    useEffect(() => {
+      const canvas = minimapRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const size = canvas.width;
+      const quadSize = size / QUADRANTS_PER_ROW;
+
+      // Clear
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, size, size);
+
+      // Draw cell density per quadrant (heatmap)
+      for (let q = 0; q < TOTAL_QUADRANTS; q++) {
+        const qRow = Math.floor(q / QUADRANTS_PER_ROW);
+        const qCol = q % QUADRANTS_PER_ROW;
+        const density = calculateQuadrantDensity(q);
+
+        // Color based on density
+        const alpha = Math.min(0.8, density * 2);
+        ctx.fillStyle = `rgba(57, 255, 20, ${alpha})`;
+        ctx.fillRect(qCol * quadSize + 1, qRow * quadSize + 1, quadSize - 2, quadSize - 2);
+      }
+
+      // Highlight current quadrant
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 3;
+      const curRow = Math.floor(currentQuadrant / QUADRANTS_PER_ROW);
+      const curCol = currentQuadrant % QUADRANTS_PER_ROW;
+      ctx.strokeRect(curCol * quadSize, curRow * quadSize, quadSize, quadSize);
+
+      // Draw grid
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= QUADRANTS_PER_ROW; i++) {
+        const pos = i * quadSize;
+        ctx.beginPath();
+        ctx.moveTo(pos, 0);
+        ctx.lineTo(pos, size);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, pos);
+        ctx.lineTo(size, pos);
+        ctx.stroke();
+      }
+    }, []);
+
+    const handleMinimapClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const canvas = minimapRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const quadSize = canvas.width / QUADRANTS_PER_ROW;
+
+      const qCol = Math.floor(x / quadSize);
+      const qRow = Math.floor(y / quadSize);
+      const quadrant = qRow * QUADRANTS_PER_ROW + qCol;
+
+      jumpToQuadrant(quadrant);
+    };
+
+    return (
+      <div className="minimap-container mb-4">
+        <div className="text-xs text-gray-400 mb-1">World Map</div>
+        <canvas
+          ref={minimapRef}
+          width={120}
+          height={120}
+          className="cursor-pointer border border-gray-700 rounded"
+          onClick={handleMinimapClick}
+        />
+        <div className="text-xs text-gray-500 mt-1">
+          Q{currentQuadrant} ({viewX}, {viewY})
+        </div>
+      </div>
+    );
+  };
+
+  // Navigation Controls Component
+  const NavigationControls: React.FC = () => (
+    <div className="navigation-controls mb-4">
+      <button
+        onClick={toggleViewMode}
+        className="w-full mb-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm font-mono"
+      >
+        {viewMode === 'overview' ? 'Enter Quadrant' : 'View Overview'}
+      </button>
+
+      {viewMode === 'quadrant' && (
+        <div className="grid grid-cols-3 gap-1 mt-2">
+          <div />
+          <button onClick={() => navigateQuadrant('up')} className="p-2 bg-white/10 hover:bg-white/20 rounded text-white text-center">^</button>
+          <div />
+          <button onClick={() => navigateQuadrant('left')} className="p-2 bg-white/10 hover:bg-white/20 rounded text-white text-center">&lt;</button>
+          <div className="p-2 bg-gray-800 rounded text-gray-600 text-center">o</div>
+          <button onClick={() => navigateQuadrant('right')} className="p-2 bg-white/10 hover:bg-white/20 rounded text-white text-center">&gt;</button>
+          <div />
+          <button onClick={() => navigateQuadrant('down')} className="p-2 bg-white/10 hover:bg-white/20 rounded text-white text-center">v</button>
+          <div />
+        </div>
+      )}
+
+      <div className="text-xs text-gray-500 mt-2">
+        {viewMode === 'quadrant'
+          ? 'Arrow keys / WASD to navigate'
+          : 'Click quadrant to enter'}
+      </div>
+    </div>
+  );
 
   // Desktop Sidebar component
   const Sidebar = () => (
@@ -706,6 +1114,10 @@ export const Life: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Minimap and Navigation */}
+        <Minimap />
+        <NavigationControls />
 
         {/* Pattern Section */}
         <div className="flex-1">
@@ -790,27 +1202,55 @@ export const Life: React.FC = () => {
     <div className="lg:hidden bg-black border-t border-white/20">
       {/* Collapsed view */}
       <div className="flex items-center justify-between p-2">
-        <div className="flex items-center gap-4 text-xs font-mono">
+        <div className="flex items-center gap-3 text-xs font-mono">
+          <span className="text-gray-400">Q{currentQuadrant}</span>
           <span className="text-gray-400">Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span></span>
-          <span className="text-gray-400">{gameState?.players.length || 0}/10 players</span>
           {myPlayerNum && (
             <span className="flex items-center gap-1">
-              <span className="text-gray-400">You:</span>
               <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }} />
             </span>
           )}
         </div>
-        <button
-          onClick={() => setMobileExpanded(!mobileExpanded)}
-          className="p-2 text-gray-400 hover:text-white"
-        >
-          {mobileExpanded ? '▼' : '▲'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleViewMode}
+            className="px-2 py-1 text-xs bg-white/10 rounded text-white"
+          >
+            {viewMode === 'overview' ? 'Enter' : 'Map'}
+          </button>
+          <button
+            onClick={() => setMobileExpanded(!mobileExpanded)}
+            className="p-2 text-gray-400 hover:text-white"
+          >
+            {mobileExpanded ? 'v' : '^'}
+          </button>
+        </div>
       </div>
 
       {/* Expanded view */}
       {mobileExpanded && (
         <div className="p-3 border-t border-white/10 max-h-64 overflow-y-auto">
+          {/* Navigation d-pad for mobile (quadrant mode only) */}
+          {viewMode === 'quadrant' && (
+            <div className="flex items-center gap-4 mb-3">
+              <div className="grid grid-cols-3 gap-1">
+                <div />
+                <button onClick={() => navigateQuadrant('up')} className="w-8 h-8 bg-white/10 rounded text-white text-center">^</button>
+                <div />
+                <button onClick={() => navigateQuadrant('left')} className="w-8 h-8 bg-white/10 rounded text-white text-center">&lt;</button>
+                <div className="w-8 h-8 bg-gray-800 rounded text-gray-600 text-center leading-8">o</div>
+                <button onClick={() => navigateQuadrant('right')} className="w-8 h-8 bg-white/10 rounded text-white text-center">&gt;</button>
+                <div />
+                <button onClick={() => navigateQuadrant('down')} className="w-8 h-8 bg-white/10 rounded text-white text-center">v</button>
+                <div />
+              </div>
+              <div className="text-xs text-gray-500">
+                Q{currentQuadrant}<br/>
+                ({viewX}, {viewY})
+              </div>
+            </div>
+          )}
+
           {/* Territory/cell stats in row */}
           <div className="flex gap-4 mb-3 text-xs overflow-x-auto">
             <div className="flex items-center gap-2">
@@ -892,7 +1332,7 @@ export const Life: React.FC = () => {
       <div className="flex flex-col items-center justify-center h-[calc(100vh-80px)] gap-6">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-white mb-2">Conway's Game of Life</h1>
-          <p className="text-gray-400">1000x1000 Persistent World</p>
+          <p className="text-gray-400">{GRID_WIDTH}x{GRID_HEIGHT} Persistent World</p>
           <p className="text-gray-500 text-sm mt-2">10 players max - your cells, your territory</p>
         </div>
         <button
@@ -911,53 +1351,6 @@ export const Life: React.FC = () => {
   return (
     <div className="flex flex-col h-[calc(100vh-80px)]">
       {/* Error display - keep at top */}
-    <div className="flex flex-col h-[calc(100vh-120px)]">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-4">
-          <div>
-            <h1 className="text-xl font-bold text-white">Game of Life</h1>
-            <p className="text-gray-500 text-xs">
-              {myPlayerNum ? (
-                <>You are Player {myPlayerNum} <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }}></span></>
-              ) : (
-                'Place cells to join'
-              )}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4 text-sm font-mono">
-          {/* Points balance */}
-          <div className="text-gray-400">
-            Points: <span className="text-yellow-400 font-bold">{myBalance}</span>
-          </div>
-          <div className="text-gray-600">|</div>
-          <div className="text-gray-400">
-            Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span>
-          </div>
-          <div className="text-gray-600">|</div>
-          <div className="text-gray-400 text-xs">Players: {gameState?.players.length || 0}/10</div>
-          <div className="text-gray-600">|</div>
-          <div className="text-gray-400 text-xs">Territory:</div>
-          {Object.entries(territoryCounts).slice(0, 5).map(([player, count]) => (
-            <div key={player} className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-sm opacity-50" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
-              <span style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
-            </div>
-          ))}
-          <div className="text-gray-600">|</div>
-          <div className="text-gray-400 text-xs">Cells:</div>
-          {Object.entries(cellCounts).slice(0, 5).map(([player, count]) => (
-            <div key={`cell-${player}`} className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
-              <span className="text-xs" style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Error display */}
       {error && (
         <div className="p-2 bg-red-500/20 border border-red-500/50 text-red-400 text-sm">
           {error}
@@ -971,94 +1364,49 @@ export const Life: React.FC = () => {
 
         {/* Canvas Container */}
         <div className="flex-1 flex flex-col relative bg-black">
-          {/* Zoom controls - top right overlay */}
+          {/* View mode toggle - top right overlay */}
           <div className="absolute top-2 right-2 z-10 flex items-center gap-2 bg-black/70 rounded-lg p-2">
-            <button onClick={handleZoomOut} disabled={zoom <= MIN_ZOOM}
-              className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 font-bold">-</button>
-            <span className="text-white text-xs font-mono w-12 text-center">{Math.round(zoom * 100)}%</span>
-            <button onClick={handleZoomIn} disabled={zoom >= MAX_ZOOM}
-              className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 font-bold">+</button>
-            <button onClick={handleResetView}
-              className="px-2 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 text-xs font-mono">Reset</button>
+            <button onClick={toggleViewMode}
+              className="px-3 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 text-xs font-mono">
+              {viewMode === 'overview' ? 'Enter Quadrant' : 'Overview'}
+            </button>
+            <span className="text-white text-xs font-mono px-2">
+              Q{currentQuadrant}
+            </span>
           </div>
 
           {/* Help text overlay - bottom left */}
           <div className="absolute bottom-2 left-2 z-10 bg-black/70 rounded px-2 py-1 text-xs text-gray-400 font-mono">
-            {GRID_WIDTH}x{GRID_HEIGHT} | Shift+drag to pan | Scroll to zoom
+            {viewMode === 'overview'
+              ? `${GRID_SIZE}x${GRID_SIZE} | Click quadrant to enter | Space to toggle`
+              : `Q${currentQuadrant} (${viewX},${viewY}) | WASD/Arrows to move | Click to place`}
           </div>
+
+          {/* Placement error toast */}
+          {placementError && (
+            <div className="absolute top-12 left-2 z-10 bg-red-500/80 text-white px-3 py-2 rounded text-sm flex items-center gap-2">
+              {placementError}
+              <button onClick={() => setPlacementError(null)} className="font-bold hover:text-red-200">x</button>
+            </div>
+          )}
 
           {/* Canvas */}
           <div ref={containerRef} className="flex-1 w-full h-full min-h-0">
             <canvas
               ref={canvasRef}
               onClick={handleCanvasClick}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseLeave}
-              onWheel={handleWheel}
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
               onContextMenu={(e) => e.preventDefault()}
-              className={`w-full h-full ${isPanning ? 'cursor-grabbing' : 'cursor-crosshair'}`}
+              className={`w-full h-full ${viewMode === 'quadrant' ? 'cursor-crosshair' : 'cursor-pointer'}`}
               style={{ display: 'block' }}
             />
-        <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-gray-400 text-xs">Selected: </span>
-            <span className={`font-mono text-sm ${CATEGORY_INFO[selectedPattern.category].color.split(' ')[0]}`}>
-              {selectedPattern.name}
-            </span>
-            <span className="text-gray-500 text-xs">({parsedPattern.length} cells)</span>
-            {/* Cost indicator */}
-            <span className={`text-xs font-mono ${
-              myBalance >= parsedPattern.length ? 'text-green-400' : 'text-red-400'
-            }`}>
-              Cost: {parsedPattern.length} pts
-            </span>
           </div>
         </div>
       </div>
 
       {/* Mobile Bottom Bar */}
       <MobileBottomBar />
-      {/* Canvas */}
-      <div className="flex-1 flex flex-col border border-white/20 rounded-lg overflow-hidden bg-black relative">
-        {/* Placement error toast */}
-        {placementError && (
-          <div className="absolute top-2 left-2 z-10 bg-red-500/80 text-white px-3 py-2 rounded text-sm flex items-center gap-2">
-            {placementError}
-            <button onClick={() => setPlacementError(null)} className="font-bold hover:text-red-200">x</button>
-          </div>
-        )}
-
-        <div className="absolute top-2 right-2 z-10 flex items-center gap-2 bg-black/70 rounded-lg p-2">
-          <button onClick={handleZoomOut} disabled={zoom <= MIN_ZOOM}
-            className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 font-bold">-</button>
-          <span className="text-white text-xs font-mono w-12 text-center">{Math.round(zoom * 100)}%</span>
-          <button onClick={handleZoomIn} disabled={zoom >= MAX_ZOOM}
-            className="w-8 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 font-bold">+</button>
-          <button onClick={handleResetView}
-            className="px-2 h-8 flex items-center justify-center rounded bg-white/10 text-white hover:bg-white/20 text-xs font-mono">Reset</button>
-        </div>
-
-        <div className="absolute bottom-2 left-2 z-10 bg-black/70 rounded px-2 py-1 text-xs text-gray-400 font-mono">
-          {GRID_WIDTH}x{GRID_HEIGHT} | Shift+drag to pan | Scroll to zoom
-        </div>
-
-        <div ref={containerRef} className="flex-1 w-full h-full min-h-0">
-          <canvas
-            ref={canvasRef}
-            onClick={handleCanvasClick}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseLeave}
-            onWheel={handleWheel}
-            onContextMenu={(e) => e.preventDefault()}
-            className={`w-full h-full ${isPanning ? 'cursor-grabbing' : 'cursor-crosshair'}`}
-            style={{ display: 'block' }}
-          />
-        </div>
-      </div>
     </div>
   );
 };
