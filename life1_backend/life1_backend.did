@@ -18,6 +18,7 @@ type GameState = record {
     players: vec principal;
     balances: vec nat64;
     is_running: bool;
+    checkpoint_timestamp_ns: nat64;
 };
 
 type GameInfo = record {
@@ -46,6 +47,23 @@ type GameConfig = record {
     generations_limit: opt nat64;
 };
 
+type PlaceCellsResult = record {
+    placed_count: nat32;
+    new_generation: nat64;
+    new_timestamp_ns: nat64;
+};
+
+// Lightweight metadata for sync checks (no cells - much faster)
+type GameMetadata = record {
+    width: nat32;
+    height: nat32;
+    generation: nat64;
+    players: vec principal;
+    balances: vec nat64;
+    is_running: bool;
+    checkpoint_timestamp_ns: nat64;
+};
+
 service : {
     // Game management
     list_games: () -> (vec GameInfo) query;
@@ -54,11 +72,17 @@ service : {
     start_game: (nat64) -> (variant { Ok; Err: text });
     get_game: (nat64) -> (variant { Ok: GameRoom; Err: text }) query;
 
-    // Game actions
-    place_cells: (nat64, vec record { int32; int32 }) -> (variant { Ok: nat32; Err: text });
+    // Game actions - event-driven architecture
+    // Third parameter is expected_generation for optimistic concurrency
+    place_cells: (nat64, vec record { int32; int32 }, nat64) -> (variant { Ok: PlaceCellsResult; Err: text });
+
+    // Debug/Admin
+    manual_tick: () -> (nat64);
 
     // Queries
     get_state: (nat64) -> (variant { Ok: GameState; Err: text }) query;
+    get_metadata: (nat64) -> (variant { Ok: GameMetadata; Err: text }) query;
     get_balance: (nat64) -> (variant { Ok: nat64; Err: text }) query;
     greet: (text) -> (text) query;
+    get_instruction_stats: () -> (text) query;
 }
