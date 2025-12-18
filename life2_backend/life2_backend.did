@@ -34,6 +34,7 @@ service : {
     get_alive_count: () -> (nat32) query;
     get_potential_count: () -> (nat32) query;
     get_balance: () -> (variant { Ok: nat64; Err: text }) query;
+    get_next_wipe: () -> (nat8, nat64) query;
     is_running: () -> (bool) query;
     greet: (text) -> (text) query;
 

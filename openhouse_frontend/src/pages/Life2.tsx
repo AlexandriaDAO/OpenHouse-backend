@@ -158,6 +158,9 @@ export const Life2: React.FC = () => {
   const [isRunning, setIsRunning] = useState(true);
   const [, forceRender] = useState(0);
 
+  // Quadrant wipe timer state
+  const [wipeInfo, setWipeInfo] = useState<{ quadrant: number; secondsUntil: number } | null>(null);
+
   // Sidebar collapsed state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     const saved = localStorage.getItem('life2-sidebar-collapsed');
@@ -185,6 +188,23 @@ export const Life2: React.FC = () => {
     }, 16);
     return () => clearInterval(interval);
   }, [pendingPlacements.length]);
+
+  // Local countdown for wipe timer (smooth decrement between backend syncs)
+  useEffect(() => {
+    if (!wipeInfo) return;
+    const interval = setInterval(() => {
+      setWipeInfo(prev => {
+        if (!prev) return null;
+        const newSeconds = prev.secondsUntil - 1;
+        if (newSeconds <= 0) {
+          // Move to next quadrant when timer hits 0 (5 minute rotation)
+          return { quadrant: (prev.quadrant + 1) % TOTAL_QUADRANTS, secondsUntil: 300 };
+        }
+        return { ...prev, secondsUntil: newSeconds };
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [wipeInfo !== null]);
 
   // Navigate to adjacent quadrant with toroidal wrapping
   const navigateQuadrant = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
@@ -365,6 +385,14 @@ export const Life2: React.FC = () => {
           );
           if (myIdx >= 0) {
             setMyBalance(Number(state.balances[myIdx]));
+          }
+
+          // Fetch wipe timer info
+          try {
+            const [nextQuadrant, secondsUntil] = await actor.get_next_wipe();
+            setWipeInfo({ quadrant: nextQuadrant, secondsUntil: Number(secondsUntil) });
+          } catch (err) {
+            console.error('Wipe info fetch error:', err);
           }
         }
       } catch (err) {
@@ -612,6 +640,39 @@ export const Life2: React.FC = () => {
       drawCells(ctx, 0, 0, GRID_SIZE, GRID_SIZE, cellSize);
       drawQuadrantGrid(ctx, cellSize);
 
+      // Highlight upcoming wipe quadrants (yellow, orange, red)
+      if (wipeInfo) {
+        // Third quadrant (+2m) - yellow
+        const q3 = (wipeInfo.quadrant + 2) % TOTAL_QUADRANTS;
+        const q3Row = Math.floor(q3 / QUADRANTS_PER_ROW);
+        const q3Col = q3 % QUADRANTS_PER_ROW;
+        ctx.fillStyle = 'rgba(234, 179, 8, 0.08)';
+        ctx.fillRect(q3Col * QUADRANT_SIZE * cellSize, q3Row * QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize);
+        ctx.strokeStyle = '#EAB308';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(q3Col * QUADRANT_SIZE * cellSize, q3Row * QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize);
+
+        // Second quadrant (+1m) - orange
+        const q2 = (wipeInfo.quadrant + 1) % TOTAL_QUADRANTS;
+        const q2Row = Math.floor(q2 / QUADRANTS_PER_ROW);
+        const q2Col = q2 % QUADRANTS_PER_ROW;
+        ctx.fillStyle = 'rgba(249, 115, 22, 0.08)';
+        ctx.fillRect(q2Col * QUADRANT_SIZE * cellSize, q2Row * QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize);
+        ctx.strokeStyle = '#F97316';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(q2Col * QUADRANT_SIZE * cellSize, q2Row * QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize);
+
+        // Next quadrant (imminent) - red with pulse
+        const wipeRow = Math.floor(wipeInfo.quadrant / QUADRANTS_PER_ROW);
+        const wipeCol = wipeInfo.quadrant % QUADRANTS_PER_ROW;
+        const pulseAlpha = wipeInfo.secondsUntil <= 10 ? 0.15 + 0.1 * Math.sin(Date.now() / 200) : 0.1;
+        ctx.fillStyle = `rgba(239, 68, 68, ${pulseAlpha})`;
+        ctx.fillRect(wipeCol * QUADRANT_SIZE * cellSize, wipeRow * QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize);
+        ctx.strokeStyle = wipeInfo.secondsUntil <= 10 ? '#DC2626' : '#EF4444';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(wipeCol * QUADRANT_SIZE * cellSize, wipeRow * QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize);
+      }
+
       // Highlight current quadrant position
       const qRow = viewY / QUADRANT_SIZE;
       const qCol = viewX / QUADRANT_SIZE;
@@ -653,7 +714,7 @@ export const Life2: React.FC = () => {
 
       ctx.restore();
     }
-  }, [viewMode, viewX, viewY, localCells, drawCells, drawQuadrantGrid, drawGridLines, drawPreviewCells, previewPulse]);
+  }, [viewMode, viewX, viewY, localCells, drawCells, drawQuadrantGrid, drawGridLines, drawPreviewCells, previewPulse, wipeInfo]);
 
   useEffect(() => { draw(); }, [draw]);
 
@@ -702,6 +763,39 @@ export const Life2: React.FC = () => {
       ctx.fillRect(qCol * quadSize + 1, qRow * quadSize + 1, quadSize - 2, quadSize - 2);
     }
 
+    // Highlight upcoming wipe quadrants (yellow, orange, red)
+    if (wipeInfo) {
+      // Third quadrant (+2m) - yellow
+      const q3 = (wipeInfo.quadrant + 2) % TOTAL_QUADRANTS;
+      const q3Row = Math.floor(q3 / QUADRANTS_PER_ROW);
+      const q3Col = q3 % QUADRANTS_PER_ROW;
+      ctx.fillStyle = 'rgba(234, 179, 8, 0.15)';
+      ctx.fillRect(q3Col * quadSize + 1, q3Row * quadSize + 1, quadSize - 2, quadSize - 2);
+      ctx.strokeStyle = '#EAB308';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(q3Col * quadSize, q3Row * quadSize, quadSize, quadSize);
+
+      // Second quadrant (+1m) - orange
+      const q2 = (wipeInfo.quadrant + 1) % TOTAL_QUADRANTS;
+      const q2Row = Math.floor(q2 / QUADRANTS_PER_ROW);
+      const q2Col = q2 % QUADRANTS_PER_ROW;
+      ctx.fillStyle = 'rgba(249, 115, 22, 0.15)';
+      ctx.fillRect(q2Col * quadSize + 1, q2Row * quadSize + 1, quadSize - 2, quadSize - 2);
+      ctx.strokeStyle = '#F97316';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(q2Col * quadSize, q2Row * quadSize, quadSize, quadSize);
+
+      // Next quadrant (imminent) - red with pulse
+      const wipeRow = Math.floor(wipeInfo.quadrant / QUADRANTS_PER_ROW);
+      const wipeCol = wipeInfo.quadrant % QUADRANTS_PER_ROW;
+      const pulseAlpha = wipeInfo.secondsUntil <= 10 ? 0.2 + 0.1 * Math.sin(Date.now() / 200) : 0.15;
+      ctx.fillStyle = `rgba(239, 68, 68, ${pulseAlpha})`;
+      ctx.fillRect(wipeCol * quadSize + 1, wipeRow * quadSize + 1, quadSize - 2, quadSize - 2);
+      ctx.strokeStyle = wipeInfo.secondsUntil <= 10 ? '#DC2626' : '#EF4444';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(wipeCol * quadSize, wipeRow * quadSize, quadSize, quadSize);
+    }
+
     // Highlight current quadrant
     ctx.strokeStyle = '#FFD700';
     ctx.lineWidth = 3;
@@ -723,7 +817,7 @@ export const Life2: React.FC = () => {
       ctx.lineTo(size, pos);
       ctx.stroke();
     }
-  }, [localCells, currentQuadrant, calculateQuadrantDensity]);
+  }, [localCells, currentQuadrant, calculateQuadrantDensity, wipeInfo]);
 
   // Minimap click handler
   const handleMinimapClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1108,6 +1202,50 @@ export const Life2: React.FC = () => {
               <div className="text-xs text-gray-500 mt-1">
                 Q{currentQuadrant} ({viewX}, {viewY})
               </div>
+
+              {/* Wipe Timer Display */}
+              {wipeInfo && (
+                <div className="mt-3 pt-3 border-t border-white/10">
+                  <div className="text-xs text-gray-500 mb-2">Quadrant Wipes</div>
+                  <div className="flex items-end justify-between gap-1">
+                    {/* Next quadrant to wipe (largest) */}
+                    <button
+                      onClick={() => jumpToQuadrant(wipeInfo.quadrant)}
+                      className={`flex-1 flex flex-col items-center justify-center rounded py-2 transition-colors ${
+                        wipeInfo.secondsUntil <= 10
+                          ? 'bg-red-500/20 border border-red-500/50'
+                          : 'bg-red-500/10 border border-red-500/30 hover:bg-red-500/20'
+                      }`}
+                      title={`Click to view Q${wipeInfo.quadrant}`}
+                    >
+                      <span className="text-red-400 text-sm font-bold font-mono">Q{wipeInfo.quadrant}</span>
+                      <span className={`text-lg font-mono font-bold ${wipeInfo.secondsUntil <= 10 ? 'text-red-500 animate-pulse' : 'text-red-400'}`}>
+                        {wipeInfo.secondsUntil}s
+                      </span>
+                    </button>
+
+                    {/* Second quadrant (medium) - orange */}
+                    <button
+                      onClick={() => jumpToQuadrant((wipeInfo.quadrant + 1) % TOTAL_QUADRANTS)}
+                      className="flex-1 flex flex-col items-center justify-center bg-orange-500/10 border border-orange-500/20 rounded py-1.5 hover:bg-orange-500/20 transition-colors"
+                      title={`Click to view Q${(wipeInfo.quadrant + 1) % TOTAL_QUADRANTS}`}
+                    >
+                      <span className="text-orange-500/70 text-xs font-mono">Q{(wipeInfo.quadrant + 1) % TOTAL_QUADRANTS}</span>
+                      <span className="text-orange-600/70 text-sm font-mono">+5m</span>
+                    </button>
+
+                    {/* Third quadrant (smallest) - yellow */}
+                    <button
+                      onClick={() => jumpToQuadrant((wipeInfo.quadrant + 2) % TOTAL_QUADRANTS)}
+                      className="flex-1 flex flex-col items-center justify-center bg-yellow-500/10 border border-yellow-500/20 rounded py-1 hover:bg-yellow-500/20 transition-colors"
+                      title={`Click to view Q${(wipeInfo.quadrant + 2) % TOTAL_QUADRANTS}`}
+                    >
+                      <span className="text-yellow-500/70 text-xs font-mono">Q{(wipeInfo.quadrant + 2) % TOTAL_QUADRANTS}</span>
+                      <span className="text-yellow-600/70 text-xs">+10m</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Navigation Controls - INLINED */}
@@ -1296,6 +1434,7 @@ export const Life2: React.FC = () => {
             </div>
           )}
 
+
           {/* Canvas */}
           <div ref={containerRef} className="flex-1 w-full h-full min-h-0">
             <canvas
@@ -1322,6 +1461,18 @@ export const Life2: React.FC = () => {
               <span className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }} />
               </span>
+            )}
+            {/* Compact wipe indicator for mobile */}
+            {wipeInfo && (
+              <button
+                onClick={() => jumpToQuadrant(wipeInfo.quadrant)}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded ${
+                  wipeInfo.secondsUntil <= 10 ? 'bg-red-500/30 animate-pulse' : 'bg-red-500/20'
+                }`}
+              >
+                <span className="text-red-400">Q{wipeInfo.quadrant}</span>
+                <span className="text-red-500 font-bold">{wipeInfo.secondsUntil}s</span>
+              </button>
             )}
           </div>
           <div className="flex items-center gap-2">

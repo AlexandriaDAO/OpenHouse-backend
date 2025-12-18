@@ -9,8 +9,6 @@ use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
 use std::cell::RefCell;
 use std::time::Duration;
 
-mod gc;
-
 // ============================================================================
 // CONSTANTS
 // ============================================================================
@@ -27,6 +25,12 @@ const STARTING_BALANCE: u64 = 1000;
 // Simulation timing: 10 generations per second, batched per tick
 const GENERATIONS_PER_TICK: u32 = 10;
 const TICK_INTERVAL_MS: u64 = 1000; // 1 second = 10 generations
+
+// Quadrant wipe system
+const WIPE_INTERVAL_NS: u64 = 300_000_000_000; // 5 minutes
+const QUADRANT_SIZE: usize = 128;
+const QUADRANTS_PER_SIDE: usize = 4;
+const TOTAL_QUADRANTS: usize = 16;
 
 // ============================================================================
 // CELL ENCODING
@@ -72,18 +76,6 @@ fn set_alive(cell: u8, alive: bool) -> u8 {
     } else {
         cell & !ALIVE_BIT
     }
-}
-
-#[inline(always)]
-fn set_coins(cell: u8, coins: u8) -> u8 {
-    (cell & 0x1F) | ((coins & 0x07) << COINS_SHIFT)
-}
-
-#[inline(always)]
-fn add_coins(cell: u8, amount: u8) -> u8 {
-    let current = get_coins(cell);
-    let new_coins = current.saturating_add(amount).min(7);
-    set_coins(cell, new_coins)
 }
 
 // ============================================================================
@@ -186,6 +178,10 @@ thread_local! {
 
     /// Is simulation running?
     static IS_RUNNING: RefCell<bool> = RefCell::new(true);
+
+    /// Quadrant wipe state
+    static NEXT_WIPE_QUADRANT: RefCell<usize> = RefCell::new(0);
+    static LAST_WIPE_TIME_NS: RefCell<u64> = RefCell::new(0);
 }
 
 // ============================================================================
@@ -313,9 +309,6 @@ fn apply_cell_change(
             // Birth cell with 0 coins
             grid[idx] = make_cell(new_owner, true, 0);
             add_with_neighbors(next_potential, idx);
-
-            // Track birth for GC
-            gc::record_birth_idx(idx);
         }
 
         CellChange::Death => {
@@ -328,9 +321,6 @@ fn apply_cell_change(
             for &n_idx in &neighbors {
                 add_with_neighbors(next_potential, n_idx);
             }
-
-            // Track death for GC
-            gc::record_death_idx(idx);
         }
 
         CellChange::StaysDead => {
@@ -406,9 +396,6 @@ fn step_generation() {
     });
 
     GENERATION.with(|g| *g.borrow_mut() += 1);
-
-    // Update GC delta tracking
-    gc::end_generation_delta_check();
 }
 
 /// Rebuild potential bitset by scanning for alive cells
@@ -433,49 +420,67 @@ fn rebuild_potential_from_grid() {
 }
 
 // ============================================================================
-// GARBAGE COLLECTION HELPERS
+// QUADRANT WIPE SYSTEM
 // ============================================================================
 
-/// Kill a cell (for GC use)
-/// Sets alive bit to false, removes from potential, adds neighbors to potential
-fn kill_cell_gc(grid: &mut [u8], potential: &mut [u64; GRID_WORDS], x: usize, y: usize) {
-    let idx = coord_to_index(x, y);
-    let cell = grid[idx];
+/// Wipe all alive cells in a quadrant (preserve owner and coins)
+fn wipe_quadrant(quadrant: usize) {
+    let qx_start = (quadrant % QUADRANTS_PER_SIDE) * QUADRANT_SIZE;
+    let qy_start = (quadrant / QUADRANTS_PER_SIDE) * QUADRANT_SIZE;
 
-    // Set alive bit to false (preserve owner and coins for history)
-    grid[idx] = set_alive(cell, false);
-
-    // Remove from potential set
-    let word_idx = idx >> 6;
-    let bit_mask = 1u64 << (idx & 63);
-    potential[word_idx] &= !bit_mask;
-
-    // Add neighbors to potential set (they might now change)
-    for neighbor_idx in get_neighbor_indices(idx) {
-        set_potential(potential, neighbor_idx);
-    }
-}
-
-/// Wrapper for is_alive that GC can use
-fn is_cell_alive_wrapper(cell: u8) -> bool {
-    is_alive(cell)
-}
-
-/// Run garbage collection pass
-fn run_gc_pass() {
     GRID.with(|g| {
         POTENTIAL.with(|p| {
             let grid = &mut *g.borrow_mut();
             let potential = &mut *p.borrow_mut();
 
-            gc::run_gc_if_needed(
-                grid,
-                potential,
-                is_cell_alive_wrapper,
-                kill_cell_gc,
-            );
+            for y in qy_start..(qy_start + QUADRANT_SIZE) {
+                for x in qx_start..(qx_start + QUADRANT_SIZE) {
+                    let idx = coord_to_index(x, y);
+                    let cell = grid[idx];
+
+                    if is_alive(cell) {
+                        // Kill cell but preserve owner and coins
+                        grid[idx] = set_alive(cell, false);
+
+                        // Remove from potential set
+                        let word_idx = idx >> 6;
+                        let bit_mask = 1u64 << (idx & 63);
+                        potential[word_idx] &= !bit_mask;
+
+                        // Add neighbors to potential (they might now change)
+                        for neighbor_idx in get_neighbor_indices(idx) {
+                            set_potential(potential, neighbor_idx);
+                        }
+                    }
+                }
+            }
         });
     });
+}
+
+/// Run quadrant wipe if 1 minute has passed
+fn run_wipe_if_needed() {
+    let now = ic_cdk::api::time();
+
+    let should_wipe = LAST_WIPE_TIME_NS.with(|t| {
+        now.saturating_sub(*t.borrow()) >= WIPE_INTERVAL_NS
+    });
+
+    if !should_wipe {
+        return;
+    }
+
+    LAST_WIPE_TIME_NS.with(|t| *t.borrow_mut() = now);
+
+    let quadrant = NEXT_WIPE_QUADRANT.with(|q| {
+        let current = *q.borrow();
+        *q.borrow_mut() = (current + 1) % TOTAL_QUADRANTS;
+        current
+    });
+
+    wipe_quadrant(quadrant);
+
+    ic_cdk::println!("Wiped quadrant {}", quadrant);
 }
 
 // ============================================================================
@@ -492,8 +497,8 @@ fn start_simulation_timer() {
                 step_generation();
             }
 
-            // Run garbage collection if enough time has passed
-            run_gc_pass();
+            // Run quadrant wipe if needed
+            run_wipe_if_needed();
         }
     });
 }
@@ -525,13 +530,6 @@ pub struct PlaceResult {
     pub placed: u32,
     pub generation: u64,
     pub new_balance: u64,
-}
-
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct GcStats {
-    pub run_count: u64,
-    pub cells_killed: u64,
-    pub quadrant_activity: Vec<bool>,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug, Default)]
@@ -765,9 +763,6 @@ fn place_cells(cells: Vec<(i32, i32)>) -> Result<PlaceResult, String> {
                 // Add to potential (CRITICAL!)
                 add_with_neighbors(potential, idx);
 
-                // Mark quadrant active to prevent GC from killing fresh placements
-                gc::mark_quadrant_active(wx, wy);
-
                 placed += 1;
             }
         });
@@ -822,10 +817,9 @@ fn reset_game() -> Result<(), String> {
         }
     });
     IS_RUNNING.with(|r| *r.borrow_mut() = true);
-
-    // Reset GC state
-    gc::reset_gc_state();
-
+    // Reset wipe state
+    NEXT_WIPE_QUADRANT.with(|q| *q.borrow_mut() = 0);
+    LAST_WIPE_TIME_NS.with(|t| *t.borrow_mut() = 0);
     Ok(())
 }
 
@@ -932,15 +926,17 @@ fn is_running() -> bool {
     IS_RUNNING.with(|r| *r.borrow())
 }
 
-/// Get garbage collection statistics
+/// Get next quadrant wipe info
+/// Returns (next_quadrant_to_wipe, seconds_until_wipe)
 #[query]
-fn get_gc_stats() -> GcStats {
-    let (run_count, cells_killed, quadrant_activity) = gc::get_gc_stats();
-    GcStats {
-        run_count,
-        cells_killed,
-        quadrant_activity: quadrant_activity.to_vec(),
-    }
+fn get_next_wipe() -> (u8, u64) {
+    let quadrant = NEXT_WIPE_QUADRANT.with(|q| *q.borrow());
+    let last_wipe = LAST_WIPE_TIME_NS.with(|t| *t.borrow());
+    let now = ic_cdk::api::time();
+    let elapsed = now.saturating_sub(last_wipe);
+    let remaining_ns = WIPE_INTERVAL_NS.saturating_sub(elapsed);
+    let remaining_secs = remaining_ns / 1_000_000_000;
+    (quadrant as u8, remaining_secs)
 }
 
 /// Simple greeting
