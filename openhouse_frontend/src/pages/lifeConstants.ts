@@ -5,6 +5,47 @@ export const QUADRANTS_PER_ROW = 4;
 export const TOTAL_QUADRANTS = 16;
 export const TOTAL_CELLS = GRID_SIZE * GRID_SIZE; // 262,144 cells
 
+// Quadrant control system
+export const CONTROLLER_THRESHOLD_PERCENT = 80;
+
+/** Get quadrant index (0-15) from cell coordinates */
+export function getQuadrant(x: number, y: number): number {
+  const qx = Math.floor(x / QUADRANT_SIZE);
+  const qy = Math.floor(y / QUADRANT_SIZE);
+  return qy * QUADRANTS_PER_ROW + qx;
+}
+
+/** Coin display states for quadrant control */
+export type CoinState = 'locked' | 'unlocked' | 'own';
+
+/** Get the coin state based on ownership and quadrant control */
+export function getCoinState(
+  coinOwner: number,
+  myPlayer: number | null,
+  quadrant: number,
+  controllers: number[]
+): CoinState {
+  // Your own coins are always locked (can't collect your own)
+  if (myPlayer !== null && coinOwner === myPlayer) {
+    return 'own';
+  }
+
+  // Check if current player controls this quadrant
+  const controller = controllers[quadrant] ?? 0;
+  if (myPlayer !== null && controller === myPlayer) {
+    return 'unlocked';  // Gold - can collect!
+  }
+
+  return 'locked';  // Steel - cannot collect
+}
+
+/** Coin colors based on state */
+export const COIN_COLORS = {
+  locked: '#8B8B8B',    // Steel gray
+  unlocked: '#FFD700',  // Gold
+  own: '#8B8B8B',       // Steel gray (same as locked - can't collect own coins)
+};
+
 // Legacy constants for backend compatibility
 export const GRID_WIDTH = GRID_SIZE;
 export const GRID_HEIGHT = GRID_SIZE;
@@ -24,8 +65,19 @@ export const DEAD_COLOR = '#000000';
 export const GOLD_BORDER_MIN_OPACITY = 0.3;
 export const GOLD_BORDER_MAX_OPACITY = 1.0;
 
-// Canister ID - Life2 (Sparse)
-export const LIFE2_CANISTER_ID = 'qoski-4yaaa-aaaai-q4g4a-cai';
+// Server definitions
+export interface LifeServer {
+  id: string;
+  name: string;
+  canisterId: string;
+}
+
+export const LIFE_SERVERS: LifeServer[] = [
+  { id: 'server1', name: 'Server 1', canisterId: 'pijnb-7yaaa-aaaae-qgcuq-cai' },
+  { id: 'server2', name: 'Server 2', canisterId: 'qoski-4yaaa-aaaai-q4g4a-cai' },
+];
+
+export const DEFAULT_SERVER_ID = 'server1';
 
 // View modes
 export type ViewMode = 'overview' | 'quadrant';

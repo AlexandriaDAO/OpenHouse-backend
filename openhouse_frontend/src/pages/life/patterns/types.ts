@@ -21,9 +21,34 @@ export interface PatternInfo {
 }
 
 // Category display info for UI
+// Order determines display order in sidebar: Spaceships, Puffers, Guns, Bombs, Defense, Oscillators, Special
 export const CATEGORY_INFO: Record<PatternCategory, { label: string; color: string; icon: string; description: string }> = {
+  spaceship: {
+    label: 'Spaceships',
+    color: 'text-blue-400 border-blue-500/50 bg-blue-500/10',
+    icon: '>',
+    description: 'Mobile attack units',
+  },
+  puffer: {
+    label: 'Puffers',
+    color: 'text-yellow-400 border-yellow-500/50 bg-yellow-500/10',
+    icon: '~',
+    description: 'Trail-leaving ships',
+  },
+  gun: {
+    label: 'Guns',
+    color: 'text-red-400 border-red-500/50 bg-red-500/10',
+    icon: '*',
+    description: 'Spaceship factories',
+  },
+  methuselah: {
+    label: 'Bombs',
+    color: 'text-orange-400 border-orange-500/50 bg-orange-500/10',
+    icon: '!',
+    description: 'Chaos grenades',
+  },
   stillLife: {
-    label: 'Still Lifes',
+    label: 'Defense',
     color: 'text-green-400 border-green-500/50 bg-green-500/10',
     icon: '#',
     description: 'Stable defensive structures',
@@ -33,30 +58,6 @@ export const CATEGORY_INFO: Record<PatternCategory, { label: string; color: stri
     color: 'text-purple-400 border-purple-500/50 bg-purple-500/10',
     icon: 'o',
     description: 'Pulsing territory markers',
-  },
-  spaceship: {
-    label: 'Spaceships',
-    color: 'text-blue-400 border-blue-500/50 bg-blue-500/10',
-    icon: '>',
-    description: 'Mobile attack units',
-  },
-  gun: {
-    label: 'Guns',
-    color: 'text-red-400 border-red-500/50 bg-red-500/10',
-    icon: '*',
-    description: 'Spaceship factories',
-  },
-  methuselah: {
-    label: 'Methuselahs',
-    color: 'text-orange-400 border-orange-500/50 bg-orange-500/10',
-    icon: '!',
-    description: 'Chaos grenades',
-  },
-  puffer: {
-    label: 'Puffers',
-    color: 'text-yellow-400 border-yellow-500/50 bg-yellow-500/10',
-    icon: '~',
-    description: 'Trail-leaving ships',
   },
   special: {
     label: 'Special',

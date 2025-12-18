@@ -6,7 +6,8 @@ import type { _SERVICE, GameState, SparseCell, SlotInfo } from '../declarations/
 
 // Import constants and types from separate file
 import {
-  LIFE2_CANISTER_ID,
+  LIFE_SERVERS,
+  DEFAULT_SERVER_ID,
   GRID_SIZE,
   QUADRANT_SIZE,
   QUADRANTS_PER_ROW,
@@ -25,10 +26,15 @@ import {
   TERRITORY_COLORS,
   CATEGORY_INFO,
   PATTERNS,
+  getQuadrant,
+  getCoinState,
+  COIN_COLORS,
   type ViewMode,
   type PatternCategory,
   type PatternInfo,
   type PendingPlacement,
+  type LifeServer,
+  type CoinState,
 } from './lifeConstants';
 
 // Import utility functions from separate file
@@ -117,7 +123,7 @@ export const Life: React.FC = () => {
 
   // Pattern state
   const [selectedPattern, setSelectedPattern] = useState<PatternInfo>(PATTERNS[0]);
-  const [selectedCategory, setSelectedCategory] = useState<PatternCategory | 'all'>('all');
+  const [selectedCategory, setSelectedCategory] = useState<PatternCategory | 'all'>('spaceship');
   const [parsedPattern, setParsedPattern] = useState<[number, number][]>([]);
   const [patternRotation, setPatternRotation] = useState<0 | 1 | 2 | 3>(0); // 0=0°, 1=90°, 2=180°, 3=270°
 
@@ -134,6 +140,11 @@ export const Life: React.FC = () => {
 
   // Auth from shared provider
   const { identity, isAuthenticated, login, principal } = useAuth();
+
+  // Server selection
+  const [selectedServer, setSelectedServer] = useState<LifeServer>(
+    LIFE_SERVERS.find(s => s.id === DEFAULT_SERVER_ID) || LIFE_SERVERS[0]
+  );
 
   // Actor state (created when authenticated)
   const [actor, setActor] = useState<ActorSubclass<_SERVICE> | null>(null);
@@ -152,6 +163,8 @@ export const Life: React.FC = () => {
   const [myPlayerNum, setMyPlayerNum] = useState<number | null>(null);
   const [myBalance, setMyBalance] = useState(0);
   const [placementError, setPlacementError] = useState<string | null>(null);
+  // Quadrant control state - which player controls each quadrant (0=none, 1-9=player)
+  const [quadrantControllers, setQuadrantControllers] = useState<number[]>(new Array(TOTAL_QUADRANTS).fill(0));
 
   // Pending placements - accumulate patterns before confirming
   const [pendingPlacements, setPendingPlacements] = useState<PendingPlacement[]>([]);
@@ -170,19 +183,19 @@ export const Life: React.FC = () => {
 
   // Sidebar collapsed state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('life2-sidebar-collapsed');
+    const saved = localStorage.getItem('life-sidebar-collapsed');
     return saved === 'true';
   });
 
   // Mobile bottom bar expanded state
   const [mobileExpanded, setMobileExpanded] = useState(false);
 
-  // Pattern filter: show only essential patterns by default
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  // Pattern filter: show all patterns by default (essential filter available)
+  const [showAdvanced, setShowAdvanced] = useState(true);
 
   // Persist sidebar state
   useEffect(() => {
-    localStorage.setItem('life2-sidebar-collapsed', String(sidebarCollapsed));
+    localStorage.setItem('life-sidebar-collapsed', String(sidebarCollapsed));
   }, [sidebarCollapsed]);
 
   // Parse pattern on selection change (reset rotation when pattern changes)
@@ -283,18 +296,26 @@ export const Life: React.FC = () => {
     touchStartRef.current = null;
   }, [viewMode, navigateQuadrant]);
 
-  // Create actor when authenticated with shared identity
+  // Create actor when authenticated with shared identity or server changes
   useEffect(() => {
     if (!isAuthenticated || !identity) {
       setActor(null);
       return;
     }
 
+    // Reset state when switching servers
+    setMyPlayerNum(null);
+    setGameState(null);
+    setLocalCells([]);
+    setMyBalance(0);
+    setPendingPlacements([]);
+    setSelectedPlacementIds(new Set());
+
     const setupActor = async () => {
       setIsLoading(true);
       try {
         const agent = new HttpAgent({ identity, host: 'https://icp-api.io' });
-        const newActor = Actor.createActor<_SERVICE>(idlFactory, { agent, canisterId: LIFE2_CANISTER_ID });
+        const newActor = Actor.createActor<_SERVICE>(idlFactory, { agent, canisterId: selectedServer.canisterId });
         setActor(newActor);
 
         // Check if player already has a slot
@@ -320,7 +341,7 @@ export const Life: React.FC = () => {
     };
 
     setupActor();
-  }, [isAuthenticated, identity]);
+  }, [isAuthenticated, identity, selectedServer]);
 
   // Handle joining a specific slot
   const handleJoinSlot = async (slot: number) => {
@@ -459,6 +480,11 @@ export const Life: React.FC = () => {
             setMyBalance(Number(state.balances[myIdx]));
           }
 
+          // Update quadrant controllers
+          if (state.quadrant_controllers) {
+            setQuadrantControllers(Array.from(state.quadrant_controllers));
+          }
+
           // Fetch wipe timer info
           try {
             const [nextQuadrant, secondsUntil] = await actor.get_next_wipe();
@@ -544,7 +570,7 @@ export const Life: React.FC = () => {
       }
     }
 
-    // Draw coin cells with rich gold texture (both alive and dead territory with coins)
+    // Draw coin cells with color based on quadrant control state
     for (let row = 0; row < height; row++) {
       for (let col = 0; col < width; col++) {
         const gridRow = startY + row;
@@ -558,28 +584,47 @@ export const Life: React.FC = () => {
           const size = cellSize - gap;
           const coinIntensity = Math.min(1, cell.coins / 5); // Scale intensity by coin count
 
-          if (cellSize > 3) {
-            // Large cells: full gold texture filling the entire cell
+          // Determine coin state based on quadrant control
+          const quadrant = getQuadrant(gridCol, gridRow);
+          const coinState = getCoinState(cell.owner, myPlayerNum, quadrant, quadrantControllers);
+          const isUnlocked = coinState === 'unlocked';
 
-            // Base gold gradient (vertical for metallic look)
-            const goldGradient = ctx.createLinearGradient(x, y, x, y + size);
-            if (cell.alive) {
-              // Rich metallic gold for alive cells
-              goldGradient.addColorStop(0, '#FFE55C');    // Bright gold top
-              goldGradient.addColorStop(0.3, '#FFD700'); // Pure gold
-              goldGradient.addColorStop(0.5, '#FFC125'); // Golden
-              goldGradient.addColorStop(0.7, '#DAA520'); // Goldenrod
-              goldGradient.addColorStop(1, '#B8860B');   // Dark goldenrod bottom
+          if (cellSize > 3) {
+            // Large cells: full texture filling the entire cell
+
+            // Base gradient (vertical for metallic look)
+            const gradient = ctx.createLinearGradient(x, y, x, y + size);
+            if (isUnlocked) {
+              // Rich metallic gold for collectible coins
+              if (cell.alive) {
+                gradient.addColorStop(0, '#FFE55C');    // Bright gold top
+                gradient.addColorStop(0.3, '#FFD700'); // Pure gold
+                gradient.addColorStop(0.5, '#FFC125'); // Golden
+                gradient.addColorStop(0.7, '#DAA520'); // Goldenrod
+                gradient.addColorStop(1, '#B8860B');   // Dark goldenrod bottom
+              } else {
+                gradient.addColorStop(0, 'rgba(255, 229, 92, 0.6)');
+                gradient.addColorStop(0.5, 'rgba(255, 215, 0, 0.5)');
+                gradient.addColorStop(1, 'rgba(184, 134, 11, 0.4)');
+              }
             } else {
-              // Muted gold for dead territory cells with coins
-              goldGradient.addColorStop(0, 'rgba(255, 229, 92, 0.6)');
-              goldGradient.addColorStop(0.5, 'rgba(255, 215, 0, 0.5)');
-              goldGradient.addColorStop(1, 'rgba(184, 134, 11, 0.4)');
+              // Steel gray for locked/own coins (cannot collect)
+              if (cell.alive) {
+                gradient.addColorStop(0, '#A8A8A8');    // Light steel
+                gradient.addColorStop(0.3, '#8B8B8B'); // Steel gray
+                gradient.addColorStop(0.5, '#787878'); // Mid gray
+                gradient.addColorStop(0.7, '#656565'); // Darker gray
+                gradient.addColorStop(1, '#525252');   // Dark steel
+              } else {
+                gradient.addColorStop(0, 'rgba(168, 168, 168, 0.6)');
+                gradient.addColorStop(0.5, 'rgba(139, 139, 139, 0.5)');
+                gradient.addColorStop(1, 'rgba(82, 82, 82, 0.4)');
+              }
             }
-            ctx.fillStyle = goldGradient;
+            ctx.fillStyle = gradient;
             ctx.fillRect(x, y, size, size);
 
-            // Diagonal shimmer highlight for 3D metallic effect
+            // Diagonal shimmer highlight for 3D metallic effect (only for alive cells)
             if (cell.alive) {
               const shimmer = ctx.createLinearGradient(x, y, x + size * 0.6, y + size * 0.6);
               shimmer.addColorStop(0, 'rgba(255, 255, 255, 0.5)');
@@ -618,14 +663,15 @@ export const Life: React.FC = () => {
               ctx.fillText(cell.coins.toString(), x + size / 2, y + size / 2);
             }
           } else {
-            // Small cells (overview): bright solid gold
-            ctx.fillStyle = cell.alive ? '#FFD700' : 'rgba(255, 215, 0, 0.6)';
+            // Small cells (overview): solid color based on control state
+            const baseColor = isUnlocked ? '#FFD700' : '#8B8B8B';
+            ctx.fillStyle = cell.alive ? baseColor : (isUnlocked ? 'rgba(255, 215, 0, 0.6)' : 'rgba(139, 139, 139, 0.6)');
             ctx.fillRect(x, y, size, size);
           }
         }
       }
     }
-  }, [localCells]);
+  }, [localCells, myPlayerNum, quadrantControllers]);
 
   // Draw 4x4 quadrant grid lines (overview mode)
   const drawQuadrantGrid = useCallback((ctx: CanvasRenderingContext2D, cellSize: number) => {
@@ -852,7 +898,56 @@ export const Life: React.FC = () => {
         QUADRANT_SIZE * cellSize
       );
 
-      // Draw subtle coin badges in corner of each quadrant
+      // Draw controller badges in top-left corner of each quadrant
+      for (let q = 0; q < TOTAL_QUADRANTS; q++) {
+        const controller = quadrantControllers[q] || 0;
+        if (controller > 0) {
+          const qRow = Math.floor(q / QUADRANTS_PER_ROW);
+          const qCol = q % QUADRANTS_PER_ROW;
+          const quadrantPixelSize = QUADRANT_SIZE * cellSize;
+
+          // Position in top-left corner with padding
+          const padding = Math.max(3, quadrantPixelSize * 0.04);
+          const fontSize = Math.max(7, Math.min(11, quadrantPixelSize * 0.08));
+          const text = `P${controller}`;
+          ctx.font = `bold ${fontSize}px monospace`;
+          const textWidth = ctx.measureText(text).width;
+
+          // Badge dimensions - pill shape
+          const badgeHeight = fontSize + 4;
+          const badgeWidth = textWidth + 8;
+          const badgeX = qCol * quadrantPixelSize + padding;
+          const badgeY = qRow * quadrantPixelSize + padding;
+          const borderRadius = badgeHeight / 2;
+
+          // Get controller's color
+          const controllerColor = PLAYER_COLORS[controller] || '#FFFFFF';
+
+          // Draw rounded rectangle (pill shape)
+          ctx.beginPath();
+          ctx.moveTo(badgeX + borderRadius, badgeY);
+          ctx.lineTo(badgeX + badgeWidth - borderRadius, badgeY);
+          ctx.arc(badgeX + badgeWidth - borderRadius, badgeY + borderRadius, borderRadius, -Math.PI / 2, Math.PI / 2);
+          ctx.lineTo(badgeX + borderRadius, badgeY + badgeHeight);
+          ctx.arc(badgeX + borderRadius, badgeY + borderRadius, borderRadius, Math.PI / 2, -Math.PI / 2);
+          ctx.closePath();
+
+          // Semi-transparent dark background
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+          ctx.fill();
+          ctx.strokeStyle = controllerColor;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          // Controller player text in their color
+          ctx.fillStyle = controllerColor;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(text, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2);
+        }
+      }
+
+      // Draw subtle coin badges in top-right corner of each quadrant
       for (let q = 0; q < TOTAL_QUADRANTS; q++) {
         const coins = calculateQuadrantCoins(q);
         if (coins > 0) {
@@ -927,7 +1022,7 @@ export const Life: React.FC = () => {
 
       ctx.restore();
     }
-  }, [viewMode, viewX, viewY, localCells, drawCells, drawQuadrantGrid, drawGridLines, drawPreviewCells, previewPulse, wipeInfo, calculateQuadrantCoins]);
+  }, [viewMode, viewX, viewY, localCells, drawCells, drawQuadrantGrid, drawGridLines, drawPreviewCells, previewPulse, wipeInfo, calculateQuadrantCoins, quadrantControllers]);
 
   useEffect(() => { draw(); }, [draw]);
 
@@ -945,17 +1040,45 @@ export const Life: React.FC = () => {
     ctx.fillStyle = '#1a1a2e';
     ctx.fillRect(0, 0, size, size);
 
-    // Draw cell density per quadrant (heatmap) and coin badges
+    // Draw cell density per quadrant (heatmap), controller badges, and coin badges
     for (let q = 0; q < TOTAL_QUADRANTS; q++) {
       const qRow = Math.floor(q / QUADRANTS_PER_ROW);
       const qCol = q % QUADRANTS_PER_ROW;
       const density = calculateQuadrantDensity(q);
       const coins = calculateQuadrantCoins(q);
+      const controller = quadrantControllers[q] || 0;
 
       // Color based on density
       const alpha = Math.min(0.8, density * 2);
       ctx.fillStyle = `rgba(57, 255, 20, ${alpha})`;
       ctx.fillRect(qCol * quadSize + 1, qRow * quadSize + 1, quadSize - 2, quadSize - 2);
+
+      // Draw controller badge in top-left corner if quadrant has a controller
+      if (controller > 0) {
+        const text = `P${controller}`;
+        ctx.font = 'bold 5px monospace';
+        const textWidth = ctx.measureText(text).width;
+        const controllerColor = PLAYER_COLORS[controller] || '#FFFFFF';
+
+        // Small pill badge in top-left corner
+        const badgeHeight = 7;
+        const badgeWidth = Math.max(textWidth + 3, 10);
+        const badgeX = qCol * quadSize + 2;
+        const badgeY = qRow * quadSize + 2;
+
+        // Dark background with controller color border
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
+        ctx.strokeStyle = controllerColor;
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(badgeX, badgeY, badgeWidth, badgeHeight);
+
+        // Controller text in their color
+        ctx.fillStyle = controllerColor;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2);
+      }
 
       // Draw subtle coin badge in top-right corner if quadrant has coins
       if (coins > 0) {
@@ -1038,7 +1161,7 @@ export const Life: React.FC = () => {
       ctx.lineTo(size, pos);
       ctx.stroke();
     }
-  }, [localCells, currentQuadrant, calculateQuadrantDensity, calculateQuadrantCoins, wipeInfo]);
+  }, [localCells, currentQuadrant, calculateQuadrantDensity, calculateQuadrantCoins, wipeInfo, quadrantControllers]);
 
   // Minimap click handler
   const handleMinimapClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1396,10 +1519,28 @@ export const Life: React.FC = () => {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-80px)] gap-6">
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-white mb-2">Life 2 (Sparse)</h1>
+          <h1 className="text-3xl font-bold text-white mb-2">Game of Life</h1>
           <p className="text-gray-400">{GRID_WIDTH}x{GRID_HEIGHT} Persistent World</p>
           <p className="text-gray-500 text-sm mt-2">Up to 9 players - your cells, your territory</p>
         </div>
+
+        {/* Server selector */}
+        <div className="flex gap-2">
+          {LIFE_SERVERS.map((server) => (
+            <button
+              key={server.id}
+              onClick={() => setSelectedServer(server)}
+              className={`px-4 py-2 rounded-lg font-mono text-sm transition-all ${
+                selectedServer.id === server.id
+                  ? 'bg-white/20 text-white border border-white/50'
+                  : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+              }`}
+            >
+              {server.name}
+            </button>
+          ))}
+        </div>
+
         <button
           onClick={login}
           disabled={isLoading}
@@ -1539,7 +1680,23 @@ export const Life: React.FC = () => {
           <div className={`${sidebarCollapsed ? 'hidden' : 'flex flex-col'} flex-1 overflow-y-auto p-3`} style={{ overscrollBehavior: 'contain' }}>
             {/* Info Section */}
             <div className="mb-4">
-              <h1 className="text-lg font-bold text-white">Life 2 (Sparse)</h1>
+              <h1 className="text-lg font-bold text-white">Game of Life</h1>
+              {/* Server selector */}
+              <div className="flex gap-1 mt-1 mb-2">
+                {LIFE_SERVERS.map((server) => (
+                  <button
+                    key={server.id}
+                    onClick={() => setSelectedServer(server)}
+                    className={`px-2 py-0.5 rounded text-xs font-mono transition-all ${
+                      selectedServer.id === server.id
+                        ? 'bg-dfinity-turquoise/30 text-dfinity-turquoise border border-dfinity-turquoise/50'
+                        : 'bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10'
+                    }`}
+                  >
+                    {server.name}
+                  </button>
+                ))}
+              </div>
               <p className="text-gray-500 text-xs">
                 {myPlayerNum ? (
                   <>You are Player {myPlayerNum} <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }}></span></>
@@ -1704,36 +1861,6 @@ export const Life: React.FC = () => {
               )}
             </div>
 
-            {/* Navigation Controls - INLINED */}
-            <div className="navigation-controls mb-4">
-              <button
-                onClick={toggleViewMode}
-                className="w-full mb-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm font-mono"
-              >
-                {viewMode === 'overview' ? 'Enter Quadrant' : 'View Overview'}
-              </button>
-
-              {viewMode === 'quadrant' && (
-                <div className="grid grid-cols-3 gap-1 mt-2">
-                  <div />
-                  <button onClick={() => navigateQuadrant('up')} className="p-2 bg-white/10 hover:bg-white/20 rounded text-white text-center">^</button>
-                  <div />
-                  <button onClick={() => navigateQuadrant('left')} className="p-2 bg-white/10 hover:bg-white/20 rounded text-white text-center">&lt;</button>
-                  <div className="p-2 bg-gray-800 rounded text-gray-600 text-center">o</div>
-                  <button onClick={() => navigateQuadrant('right')} className="p-2 bg-white/10 hover:bg-white/20 rounded text-white text-center">&gt;</button>
-                  <div />
-                  <button onClick={() => navigateQuadrant('down')} className="p-2 bg-white/10 hover:bg-white/20 rounded text-white text-center">v</button>
-                  <div />
-                </div>
-              )}
-
-              <div className="text-xs text-gray-500 mt-2">
-                {viewMode === 'quadrant'
-                  ? 'Arrow keys / WASD to navigate'
-                  : 'Click quadrant to enter'}
-              </div>
-            </div>
-
             {/* Pattern Section */}
             <div className="flex-1">
               <div className="flex items-center justify-between mb-2">
@@ -1805,7 +1932,6 @@ export const Life: React.FC = () => {
                   {selectedPattern.name} ({parsedPattern.length} cells)
                 </div>
                 <div className="text-gray-500 mt-1">{selectedPattern.description}</div>
-                <div className="text-gray-400 mt-2">Click grid to place • R to rotate</div>
               </div>
             </div>
           </div>
@@ -1942,8 +2068,8 @@ export const Life: React.FC = () => {
           )}
 
 
-          {/* Canvas */}
-          <div ref={containerRef} className="flex-1 w-full h-full min-h-0">
+          {/* Canvas Container - fills available space */}
+          <div ref={containerRef} className="flex-1 w-full min-h-0 relative">
             <canvas
               ref={canvasRef}
               onClick={handleCanvasClick}
@@ -1953,6 +2079,60 @@ export const Life: React.FC = () => {
               className={`w-full h-full ${viewMode === 'quadrant' ? 'cursor-crosshair' : 'cursor-pointer'}`}
               style={{ display: 'block' }}
             />
+
+            {/* Navigation arrows - subtle, inside grid */}
+            {viewMode === 'quadrant' && (
+              <>
+                <button
+                  onClick={() => navigateQuadrant('up')}
+                  className="hidden md:flex absolute top-2 left-1/2 -translate-x-1/2 items-center justify-center w-10 h-5 bg-white/10 hover:bg-white/30 rounded text-gray-500 hover:text-white transition-colors z-10"
+                  title="W / ↑"
+                >
+                  <span className="text-sm">▲</span>
+                </button>
+                <button
+                  onClick={() => navigateQuadrant('down')}
+                  className="hidden md:flex absolute bottom-2 left-1/2 -translate-x-1/2 items-center justify-center w-10 h-5 bg-white/10 hover:bg-white/30 rounded text-gray-500 hover:text-white transition-colors z-10"
+                  title="S / ↓"
+                >
+                  <span className="text-sm">▼</span>
+                </button>
+                <button
+                  onClick={() => navigateQuadrant('left')}
+                  className="hidden md:flex absolute top-1/2 -translate-y-1/2 items-center justify-center w-5 h-10 bg-white/10 hover:bg-white/30 rounded text-gray-500 hover:text-white transition-colors z-10"
+                  style={{ left: '-1.5rem' }}
+                  title="A / ←"
+                >
+                  <span className="text-sm">◀</span>
+                </button>
+                <button
+                  onClick={() => navigateQuadrant('right')}
+                  className="hidden md:flex absolute top-1/2 -translate-y-1/2 items-center justify-center w-5 h-10 bg-white/10 hover:bg-white/30 rounded text-gray-500 hover:text-white transition-colors z-10"
+                  style={{ right: '-1.5rem' }}
+                  title="D / →"
+                >
+                  <span className="text-sm">▶</span>
+                </button>
+              </>
+            )}
+
+            {/* View Overview button */}
+            {viewMode === 'quadrant' && (
+              <button
+                onClick={toggleViewMode}
+                className="absolute top-2 left-2 z-10 px-2 py-1 bg-black/70 hover:bg-black/90 border border-white/20 hover:border-white/40 rounded text-xs text-gray-300 hover:text-white transition-all font-mono flex items-center gap-1"
+                title="View Overview (Space)"
+              >
+                <span>‹</span> Overview
+              </button>
+            )}
+
+            {/* Keyboard hints */}
+            {viewMode === 'quadrant' && (
+              <div className="hidden sm:block absolute top-2 left-28 z-10 text-xs text-gray-500 font-mono">
+                [Space] • WASD • R rotate
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -2001,24 +2181,10 @@ export const Life: React.FC = () => {
         {/* Expanded view */}
         {mobileExpanded && (
           <div className="p-3 border-t border-white/10 max-h-64 overflow-y-auto" style={{ overscrollBehavior: 'contain' }}>
-            {/* Navigation d-pad for mobile */}
+            {/* Swipe hint for mobile quadrant navigation */}
             {viewMode === 'quadrant' && (
-              <div className="flex items-center gap-4 mb-3">
-                <div className="grid grid-cols-3 gap-1">
-                  <div />
-                  <button onClick={() => navigateQuadrant('up')} className="w-8 h-8 bg-white/10 rounded text-white text-center">^</button>
-                  <div />
-                  <button onClick={() => navigateQuadrant('left')} className="w-8 h-8 bg-white/10 rounded text-white text-center">&lt;</button>
-                  <div className="w-8 h-8 bg-gray-800 rounded text-gray-600 text-center leading-8">o</div>
-                  <button onClick={() => navigateQuadrant('right')} className="w-8 h-8 bg-white/10 rounded text-white text-center">&gt;</button>
-                  <div />
-                  <button onClick={() => navigateQuadrant('down')} className="w-8 h-8 bg-white/10 rounded text-white text-center">v</button>
-                  <div />
-                </div>
-                <div className="text-xs text-gray-500">
-                  Q{currentQuadrant}<br/>
-                  ({viewX}, {viewY})
-                </div>
+              <div className="text-xs text-gray-500 mb-3">
+                Swipe on grid to navigate • Q{currentQuadrant} ({viewX}, {viewY})
               </div>
             )}
 
@@ -2103,7 +2269,7 @@ export const Life: React.FC = () => {
             </div>
             {/* Selected pattern info */}
             <div className="text-xs text-gray-400 mt-2">
-              <span className={CATEGORY_INFO[selectedPattern.category].color.split(' ')[0]}>{selectedPattern.name}</span> ({parsedPattern.length} cells) • R to rotate
+              <span className={CATEGORY_INFO[selectedPattern.category].color.split(' ')[0]}>{selectedPattern.name}</span> ({parsedPattern.length} cells)
             </div>
           </div>
         )}

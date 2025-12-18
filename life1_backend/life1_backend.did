@@ -15,7 +15,6 @@ type GameState = record {
     players: vec principal;
     balances: vec nat64;
     player_num: opt nat8;
-    quadrant_controllers: vec nat8;
 };
 
 type PlaceResult = record {
@@ -32,15 +31,6 @@ type SlotInfo = record {
     territory_coins: nat32;
 };
 
-type QuadrantInfo = record {
-    quadrant: nat8;
-    territory_by_player: vec nat32;
-    total_territory: nat32;
-    coins_by_player: vec nat32;
-    total_coins: nat32;
-    controller: nat8;
-};
-
 service : {
     // Player actions
     join_game: () -> (variant { Ok: nat8; Err: text });
@@ -51,7 +41,6 @@ service : {
     // Queries (FREE - no cycles cost to caller)
     get_state: () -> (GameState) query;
     get_slots_info: () -> (vec SlotInfo) query;
-    get_quadrant_info: () -> (vec QuadrantInfo) query;
     get_generation: () -> (nat64) query;
     get_alive_count: () -> (nat32) query;
     get_potential_count: () -> (nat32) query;

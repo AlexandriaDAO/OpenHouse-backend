@@ -36,9 +36,6 @@ const TOTAL_QUADRANTS: usize = 16;
 // Player slot grace period - how long a player can have 0 cells before losing their slot
 const SLOT_GRACE_PERIOD_NS: u64 = 600_000_000_000; // 10 minutes
 
-// Quadrant control system - 80% of owned territory required to control a quadrant
-const CONTROLLER_THRESHOLD_PERCENT: u32 = 80;
-
 // ============================================================================
 // CELL ENCODING
 // ============================================================================
@@ -197,108 +194,10 @@ thread_local! {
     /// Quadrant wipe state
     static NEXT_WIPE_QUADRANT: RefCell<usize> = RefCell::new(0);
     static LAST_WIPE_TIME_NS: RefCell<u64> = RefCell::new(0);
-
-    /// Territory count per player per quadrant - updated incrementally
-    /// [quadrant][player] where player 0 is unused, 1-9 are valid players
-    /// This avoids expensive periodic full-grid scans
-    static QUADRANT_TERRITORY: RefCell<[[u32; MAX_PLAYERS + 1]; TOTAL_QUADRANTS]> =
-        RefCell::new([[0u32; MAX_PLAYERS + 1]; TOTAL_QUADRANTS]);
-
-    /// Controller of each quadrant (0 = no controller, 1-9 = player number)
-    /// Only the controller can collect coins in their quadrant
-    static QUADRANT_CONTROLLER: RefCell<[u8; TOTAL_QUADRANTS]> =
-        RefCell::new([0u8; TOTAL_QUADRANTS]);
 }
 
 // ============================================================================
 // SIMULATION
-// ============================================================================
-
-// ============================================================================
-// QUADRANT CONTROL SYSTEM
-// ============================================================================
-
-/// Get quadrant index (0-15) from cell index
-#[inline(always)]
-fn get_quadrant(idx: usize) -> usize {
-    let x = idx & GRID_MASK;           // x coordinate
-    let y = idx >> GRID_SHIFT;         // y coordinate
-    let qx = x >> 7;                   // x / 128 = quadrant x (0-3)
-    let qy = y >> 7;                   // y / 128 = quadrant y (0-3)
-    (qy << 2) | qx                     // qy * 4 + qx
-}
-
-/// Update territory count when ownership changes
-/// Returns the new controller if control changed, None otherwise
-#[inline(always)]
-fn update_quadrant_territory(quadrant: usize, old_owner: u8, new_owner: u8) -> Option<u8> {
-    if old_owner == new_owner {
-        return None;
-    }
-
-    QUADRANT_TERRITORY.with(|t| {
-        let mut territory = t.borrow_mut();
-
-        // Decrement old owner's count
-        if old_owner > 0 && old_owner <= MAX_PLAYERS as u8 {
-            territory[quadrant][old_owner as usize] =
-                territory[quadrant][old_owner as usize].saturating_sub(1);
-        }
-
-        // Increment new owner's count
-        if new_owner > 0 && new_owner <= MAX_PLAYERS as u8 {
-            territory[quadrant][new_owner as usize] += 1;
-        }
-
-        // Check if controller needs to change
-        let total: u32 = territory[quadrant][1..=MAX_PLAYERS].iter().sum();
-        if total == 0 {
-            // Empty quadrant
-            QUADRANT_CONTROLLER.with(|c| {
-                let mut controllers = c.borrow_mut();
-                if controllers[quadrant] != 0 {
-                    controllers[quadrant] = 0;
-                    return Some(0);
-                }
-                None
-            })
-        } else {
-            let threshold = (total * CONTROLLER_THRESHOLD_PERCENT) / 100;
-
-            // Check if any player now has 80%+
-            for player in 1..=MAX_PLAYERS as u8 {
-                if territory[quadrant][player as usize] >= threshold {
-                    return QUADRANT_CONTROLLER.with(|c| {
-                        let mut controllers = c.borrow_mut();
-                        if controllers[quadrant] != player {
-                            controllers[quadrant] = player;
-                            ic_cdk::println!(
-                                "Quadrant {} control: Player {} ({}%)",
-                                quadrant,
-                                player,
-                                (territory[quadrant][player as usize] * 100) / total
-                            );
-                            return Some(player);
-                        }
-                        None
-                    });
-                }
-            }
-
-            // No one has 80% - controller stays the same (sticky)
-            None
-        }
-    })
-}
-
-/// Get current controller of a quadrant
-#[inline(always)]
-fn get_quadrant_controller(quadrant: usize) -> u8 {
-    QUADRANT_CONTROLLER.with(|c| c.borrow()[quadrant])
-}
-
-// ============================================================================
-// GAME OF LIFE RULES
 // ============================================================================
 
 /// Find majority owner among neighbors, with FAIR tie-breaking using cell position hash.
@@ -414,23 +313,9 @@ fn apply_cell_change(
         CellChange::Birth { new_owner } => {
             let old_owner = get_owner(cell);
             let old_coins = get_coins(cell);
-            let quadrant = get_quadrant(idx);
 
-            // Update territory tracking (incremental - no full scan needed)
-            update_quadrant_territory(quadrant, old_owner, new_owner);
-
-            // Determine if new_owner can collect coins
-            // Requires: enemy coins exist AND new_owner controls this quadrant
-            let can_collect = if old_owner == 0 || old_owner == new_owner || old_coins == 0 {
-                // No coins, own coins, or unowned territory - nothing to collect
-                false
-            } else {
-                // Check if new_owner controls this quadrant
-                get_quadrant_controller(quadrant) == new_owner
-            };
-
-            if can_collect {
-                // CAPTURE: Controller collecting enemy coins
+            if old_owner > 0 && old_owner != new_owner && old_coins > 0 {
+                // CAPTURE: Enemy territory - transfer coins to captor's wallet
                 let new_owner_idx = (new_owner - 1) as usize;
                 if new_owner_idx < players.len() {
                     let principal = players[new_owner_idx];
@@ -438,14 +323,12 @@ fn apply_cell_change(
                         *balances.entry(principal).or_insert(0) += old_coins as u64;
                     }
                 }
-                // Cell starts with 0 coins (collected)
+                // Captured cell starts with 0 coins
                 grid[idx] = make_cell(new_owner, true, 0);
             } else {
-                // NO CAPTURE: Either not controller, own coins, or no coins
-                // Coins stay on the cell (territory changes hands, coins don't)
+                // RECLAIM: Own territory - preserve coins on the cell (no free money)
                 grid[idx] = make_cell(new_owner, true, old_coins);
             }
-
             add_with_neighbors(next_potential, idx);
             (Some(new_owner), None) // new_owner gained a cell
         }
@@ -624,56 +507,6 @@ fn rebuild_potential_from_grid() {
     });
 }
 
-/// Rebuild QUADRANT_TERRITORY from grid state
-/// Called on post_upgrade if territory data is missing (first deploy with this feature)
-fn rebuild_quadrant_territory() {
-    GRID.with(|g| {
-        QUADRANT_TERRITORY.with(|t| {
-            let grid = g.borrow();
-            let mut territory = t.borrow_mut();
-
-            // Clear all counts
-            for q in 0..TOTAL_QUADRANTS {
-                for p in 0..=MAX_PLAYERS {
-                    territory[q][p] = 0;
-                }
-            }
-
-            // Count from grid - all owned cells (alive or dead) count as territory
-            for (idx, &cell) in grid.iter().enumerate() {
-                let owner = get_owner(cell) as usize;
-                if owner > 0 && owner <= MAX_PLAYERS {
-                    let quadrant = get_quadrant(idx);
-                    territory[quadrant][owner] += 1;
-                }
-            }
-        });
-    });
-
-    // Now calculate initial controllers
-    QUADRANT_TERRITORY.with(|t| {
-        QUADRANT_CONTROLLER.with(|c| {
-            let territory = t.borrow();
-            let mut controllers = c.borrow_mut();
-
-            for q in 0..TOTAL_QUADRANTS {
-                let total: u32 = territory[q][1..=MAX_PLAYERS].iter().sum();
-                if total == 0 {
-                    controllers[q] = 0;
-                    continue;
-                }
-
-                let threshold = (total * CONTROLLER_THRESHOLD_PERCENT) / 100;
-                controllers[q] = (1..=MAX_PLAYERS as u8)
-                    .find(|&p| territory[q][p as usize] >= threshold)
-                    .unwrap_or(0);
-            }
-        });
-    });
-
-    ic_cdk::println!("Rebuilt quadrant territory counts from grid");
-}
-
 // ============================================================================
 // QUADRANT WIPE SYSTEM
 // ============================================================================
@@ -778,7 +611,6 @@ pub struct GameState {
     pub players: Vec<Principal>,
     pub balances: Vec<u64>,
     pub player_num: Option<u8>,
-    pub quadrant_controllers: Vec<u8>,  // 16 values: 0=no controller, 1-9=player
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -797,16 +629,6 @@ pub struct SlotInfo {
     pub territory_coins: u32,         // coins sitting in territory cells
 }
 
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct QuadrantInfo {
-    pub quadrant: u8,                  // 0-15
-    pub territory_by_player: Vec<u32>, // 9 values: [P1, P2, ..., P9]
-    pub total_territory: u32,
-    pub coins_by_player: Vec<u32>,     // 9 values: coins per player in this quadrant
-    pub total_coins: u32,
-    pub controller: u8,                // 0=no controller, 1-9=player number
-}
-
 #[derive(CandidType, Deserialize, Clone, Debug, Default)]
 struct Metadata {
     generation: u64,
@@ -817,11 +639,6 @@ struct Metadata {
     // Added later - optional for backward compatibility
     #[serde(default)]
     zero_cells_since: Vec<Option<u64>>,
-    // Quadrant control state (added for 80% territorial control feature)
-    #[serde(default)]
-    quadrant_territory: Vec<Vec<u32>>,  // [quadrant][player]
-    #[serde(default)]
-    quadrant_controllers: Vec<u8>,       // 16 values, 0=no controller, 1-9=player
 }
 
 // ============================================================================
@@ -856,11 +673,6 @@ fn pre_upgrade() {
         cell_counts: CELL_COUNTS.with(|c| c.borrow().clone()),
         is_running: IS_RUNNING.with(|r| *r.borrow()),
         zero_cells_since: ZERO_CELLS_SINCE.with(|z| z.borrow().clone()),
-        // Save quadrant control state
-        quadrant_territory: QUADRANT_TERRITORY.with(|t| {
-            t.borrow().iter().map(|q| q.to_vec()).collect()
-        }),
-        quadrant_controllers: QUADRANT_CONTROLLER.with(|c| c.borrow().to_vec()),
     };
     let encoded = candid::encode_one(&metadata).unwrap();
     ic_cdk::stable::stable_write(TOTAL_CELLS as u64, &(encoded.len() as u32).to_le_bytes());
@@ -870,8 +682,6 @@ fn pre_upgrade() {
 #[post_upgrade]
 fn post_upgrade() {
     let stable_size = ic_cdk::stable::stable_size();
-    let mut has_territory_data = false;
-
     if stable_size >= 5 {
         // Restore grid
         GRID.with(|g| {
@@ -902,46 +712,11 @@ fn post_upgrade() {
                 CELL_COUNTS.with(|c| *c.borrow_mut() = metadata.cell_counts);
                 IS_RUNNING.with(|r| *r.borrow_mut() = metadata.is_running);
                 ZERO_CELLS_SINCE.with(|z| *z.borrow_mut() = metadata.zero_cells_since);
-
-                // Restore quadrant territory counts
-                has_territory_data = !metadata.quadrant_territory.is_empty();
-                if has_territory_data {
-                    QUADRANT_TERRITORY.with(|t| {
-                        let mut territory = t.borrow_mut();
-                        for (q, counts) in metadata.quadrant_territory.iter().enumerate() {
-                            if q < TOTAL_QUADRANTS {
-                                for (p, &count) in counts.iter().enumerate() {
-                                    if p <= MAX_PLAYERS {
-                                        territory[q][p] = count;
-                                    }
-                                }
-                            }
-                        }
-                    });
-                }
-
-                // Restore quadrant controllers
-                if !metadata.quadrant_controllers.is_empty() {
-                    QUADRANT_CONTROLLER.with(|c| {
-                        let mut controllers = c.borrow_mut();
-                        for (i, &controller) in metadata.quadrant_controllers.iter().enumerate() {
-                            if i < TOTAL_QUADRANTS {
-                                controllers[i] = controller;
-                            }
-                        }
-                    });
-                }
             }
         }
     }
 
     rebuild_potential_from_grid();
-
-    // If no territory data (first deploy with this feature), rebuild from grid
-    if !has_territory_data {
-        rebuild_quadrant_territory();
-    }
-
     start_simulation_timer();
 }
 
@@ -1223,16 +998,6 @@ fn reset_game() -> Result<(), String> {
     // Reset wipe state
     NEXT_WIPE_QUADRANT.with(|q| *q.borrow_mut() = 0);
     LAST_WIPE_TIME_NS.with(|t| *t.borrow_mut() = 0);
-    // Reset quadrant control state
-    QUADRANT_TERRITORY.with(|t| {
-        let mut territory = t.borrow_mut();
-        for q in 0..TOTAL_QUADRANTS {
-            for p in 0..=MAX_PLAYERS {
-                territory[q][p] = 0;
-            }
-        }
-    });
-    QUADRANT_CONTROLLER.with(|c| c.borrow_mut().fill(0));
     Ok(())
 }
 
@@ -1314,9 +1079,6 @@ fn get_state() -> GameState {
             .collect()
     });
 
-    // Get quadrant controllers
-    let quadrant_controllers = QUADRANT_CONTROLLER.with(|c| c.borrow().to_vec());
-
     GameState {
         generation: GENERATION.with(|g| *g.borrow()),
         alive_cells,
@@ -1324,7 +1086,6 @@ fn get_state() -> GameState {
         players,
         balances,
         player_num,
-        quadrant_controllers,
     }
 }
 
@@ -1421,47 +1182,6 @@ fn get_slots_info() -> Vec<SlotInfo> {
             })
             .collect()
     })
-}
-
-/// Get quadrant control information for all 16 quadrants
-#[query]
-fn get_quadrant_info() -> Vec<QuadrantInfo> {
-    // Get territory from incremental tracking (fast - no grid scan needed)
-    let territory = QUADRANT_TERRITORY.with(|t| *t.borrow());
-    let controllers = QUADRANT_CONTROLLER.with(|c| *c.borrow());
-
-    // Scan grid for coins (still needed since coins aren't tracked incrementally)
-    let mut coins: [[u32; MAX_PLAYERS + 1]; TOTAL_QUADRANTS] = [[0; MAX_PLAYERS + 1]; TOTAL_QUADRANTS];
-
-    GRID.with(|g| {
-        let grid = g.borrow();
-        for (idx, &cell) in grid.iter().enumerate() {
-            let owner = get_owner(cell) as usize;
-            let cell_coins = get_coins(cell) as u32;
-            if owner > 0 && owner <= MAX_PLAYERS && cell_coins > 0 {
-                let q = get_quadrant(idx);
-                coins[q][owner] += cell_coins;
-            }
-        }
-    });
-
-    (0..TOTAL_QUADRANTS)
-        .map(|q| {
-            let terr_by_player: Vec<u32> = (1..=MAX_PLAYERS).map(|p| territory[q][p]).collect();
-            let coins_by_player: Vec<u32> = (1..=MAX_PLAYERS).map(|p| coins[q][p]).collect();
-            let total_terr: u32 = terr_by_player.iter().sum();
-            let total_coins: u32 = coins_by_player.iter().sum();
-
-            QuadrantInfo {
-                quadrant: q as u8,
-                territory_by_player: terr_by_player,
-                total_territory: total_terr,
-                coins_by_player,
-                total_coins,
-                controller: controllers[q],
-            }
-        })
-        .collect()
 }
 
 /// Simple greeting

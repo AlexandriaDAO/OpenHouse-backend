@@ -1,4 +1,4 @@
-import { GRID_WIDTH, GRID_HEIGHT } from './life2Constants';
+import { GRID_WIDTH, GRID_HEIGHT } from './lifeConstants';
 
 /**
  * Parse RLE (Run Length Encoded) pattern format into coordinate array

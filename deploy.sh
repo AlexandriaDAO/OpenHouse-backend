@@ -55,8 +55,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --plinko-only      Deploy only plinko backend"
             echo "  --roulette-only   Deploy only roulette backend (Rust)"
             echo "  --dice-only        Deploy only dice backend"
-            echo "  --life-only        Deploy only life1 backend (Game of Life - Hybrid)"
-            echo "  --life2-only       Deploy only life2 backend (Game of Life - Pure IC)"
+            echo "  --life-only        Deploy only life1 backend (Game of Life - Server 1)"
+            echo "  --life2-only       Deploy only life2 backend (Game of Life - Server 2)"
             echo "  --frontend-only    Deploy only the frontend"
             echo "  --test             Run post-deployment tests"
             echo "  --help             Show this help message"
@@ -205,7 +205,7 @@ deploy_dice() {
     echo ""
 }
 
-# Function to deploy life1 backend (Game of Life - Hybrid Architecture)
+# Function to deploy life1 backend (Game of Life - Server 1)
 deploy_life() {
     echo "================================================"
     echo "Deploying Life1 Backend Canister"
@@ -218,22 +218,19 @@ deploy_life() {
     # Skip candid extraction - using manually created .did file
     echo "Using pre-defined candid interface..."
 
-    # Deploy to mainnet (--mode reinstall to handle architecture migration)
+    # Deploy to mainnet
     echo "Deploying life1 backend to mainnet..."
-    echo "WARNING: Using --mode reinstall (wipes existing state for hybrid architecture migration)"
-    dfx deploy life1_backend --network ic --mode reinstall --yes
+    dfx deploy life1_backend --network ic
 
     echo "Life1 backend deployment completed!"
-    echo ""
-    echo "NOTE: For full hybrid architecture, also deploy the Fly.io simulation server:"
-    echo "  cd life_simulation && flyctl deploy"
+    echo "Life1 Canister ID: pijnb-7yaaa-aaaae-qgcuq-cai"
     echo ""
 }
 
-# Function to deploy life2 backend (Game of Life - Pure On-Chain)
+# Function to deploy life2 backend (Game of Life - Server 2)
 deploy_life2() {
     echo "================================================"
-    echo "Deploying Life2 Backend Canister (Pure IC)"
+    echo "Deploying Life2 Backend Canister"
     echo "================================================"
 
     # Build the backend canister
