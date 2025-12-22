@@ -2,13 +2,23 @@
 
 use crate::types::*;
 use crate::board::*;
+use crate::defi_accounting::{self as accounting, liquidity_pool};
+use candid::Principal;
 use ic_cdk::management_canister::raw_rand;
 use sha2::{Sha256, Digest};
 
 const MAX_BETS_PER_SPIN: usize = 20;
+const MAX_PAYOUT_RATIO: u64 = 36; // Straight-up pays 35:1 + original = 36x
 
-/// Execute a spin with the given bets
-pub async fn spin(bets: Vec<Bet>) -> Result<SpinResult, String> {
+/// Get maximum bet allowed based on house balance
+pub fn get_max_bet() -> u64 {
+    let max_allowed_payout = accounting::get_max_allowed_payout();
+    // Max bet is max_payout / 36 (worst case: straight-up win)
+    max_allowed_payout / MAX_PAYOUT_RATIO
+}
+
+/// Execute a spin with real ckUSDT betting
+pub async fn spin_with_betting(bets: Vec<Bet>, caller: Principal) -> Result<SpinResult, String> {
     // 1. Validate inputs
     if bets.is_empty() {
         return Err("No bets placed".to_string());
@@ -17,34 +27,77 @@ pub async fn spin(bets: Vec<Bet>) -> Result<SpinResult, String> {
         return Err(format!("Maximum {} bets per spin", MAX_BETS_PER_SPIN));
     }
 
-    // 2. Validate each bet
+    // 2. Validate each bet and calculate total
+    let mut total_bet: u64 = 0;
     for bet in &bets {
         validate_bet(bet)?;
+        if bet.amount < MIN_BET {
+            return Err(format!("Minimum bet is 0.01 USDT ({} units)", MIN_BET));
+        }
+        total_bet = total_bet.checked_add(bet.amount)
+            .ok_or("Total bet overflow")?;
     }
 
-    // 3. Get VRF randomness from IC
+    // 3. Calculate maximum possible payout to check house can cover
+    let max_possible_payout = calculate_max_possible_payout(&bets)?;
+    let max_allowed = accounting::get_max_allowed_payout();
+    if max_possible_payout > max_allowed {
+        return Err(format!(
+            "Bet too large: max possible payout {} exceeds house limit {}",
+            max_possible_payout as f64 / 1_000_000.0,
+            max_allowed as f64 / 1_000_000.0
+        ));
+    }
+
+    // 4. Get VRF randomness from IC (async call - execution may suspend here)
     let random_bytes = raw_rand().await
         .map_err(|e| format!("Randomness failed: {:?}", e))?;
 
-    // 4. Generate randomness hash for verification
+    if random_bytes.len() < 8 {
+        return Err("Insufficient randomness".to_string());
+    }
+
+    // 5. Atomically deduct bet AFTER await to prevent TOCTOU race condition
+    let _balance_after_bet = accounting::try_deduct_balance(caller, total_bet)?;
+
+    // 6. Record volume for statistics
+    accounting::record_bet_volume(total_bet);
+
+    // 7. Generate randomness hash for verification
     let mut hasher = Sha256::new();
     hasher.update(&random_bytes);
     let hash = hasher.finalize();
     let randomness_hash = hex::encode(hash);
 
-    // 5. Convert to winning number (0-36)
+    // 8. Convert to winning number (0-36)
     let winning_number = bytes_to_number(&random_bytes);
     let color = get_color(winning_number);
 
-    // 6. Evaluate each bet
+    // 9. Evaluate each bet
     let bet_results: Vec<BetResult> = bets.iter()
         .map(|bet| evaluate_bet(bet, winning_number))
         .collect();
 
-    // 7. Calculate totals
-    let total_bet: u64 = bets.iter().map(|b| b.amount).sum();
+    // 10. Calculate totals
     let total_payout: u64 = bet_results.iter().map(|r| r.payout).sum();
     let net_result = total_payout as i64 - total_bet as i64;
+
+    // 11. Credit payout to user
+    let current_balance = accounting::get_balance(caller);
+    let new_balance = current_balance.checked_add(total_payout)
+        .ok_or("Balance overflow when adding winnings")?;
+    accounting::update_balance(caller, new_balance)?;
+
+    // 12. Settle with pool
+    if let Err(e) = liquidity_pool::settle_bet(total_bet, total_payout) {
+        // CRITICAL: Rollback if pool settlement fails
+        let refund_balance = current_balance.checked_add(total_bet)
+            .ok_or("Refund calculation overflow")?;
+        accounting::update_balance(caller, refund_balance)?;
+
+        ic_cdk::println!("CRITICAL: Roulette payout failure. Refunded {} to {}", total_bet, caller);
+        return Err(format!("House settlement failed. Bet refunded. Error: {}", e));
+    }
 
     Ok(SpinResult {
         winning_number,
@@ -56,6 +109,39 @@ pub async fn spin(bets: Vec<Bet>) -> Result<SpinResult, String> {
         randomness_hash,
     })
 }
+
+/// Calculate the maximum possible payout for a set of bets
+/// This is used to ensure house can cover worst-case scenario
+fn calculate_max_possible_payout(bets: &[Bet]) -> Result<u64, String> {
+    // For roulette, max payout occurs when all bets win on same number
+    // But different bet types have different payouts
+    // We calculate the sum of max payouts for each bet
+    let mut total: u64 = 0;
+    for bet in bets {
+        let multiplier = get_payout_multiplier(&bet.bet_type);
+        // Payout = bet + bet * multiplier
+        let payout = bet.amount.checked_add(
+            bet.amount.checked_mul(multiplier)
+                .ok_or("Payout overflow")?
+        ).ok_or("Payout overflow")?;
+        total = total.checked_add(payout).ok_or("Total payout overflow")?;
+    }
+    Ok(total)
+}
+
+fn get_payout_multiplier(bet_type: &BetType) -> u64 {
+    match bet_type {
+        BetType::Straight(_) => 35,
+        BetType::Split(_, _) => 17,
+        BetType::Street(_) => 11,
+        BetType::Corner(_) => 8,
+        BetType::SixLine(_) => 5,
+        BetType::Column(_) | BetType::Dozen(_) => 2,
+        BetType::Red | BetType::Black | BetType::Even |
+        BetType::Odd | BetType::Low | BetType::High => 1,
+    }
+}
+
 
 /// Validate a single bet
 fn validate_bet(bet: &Bet) -> Result<(), String> {

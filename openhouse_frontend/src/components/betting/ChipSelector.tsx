@@ -7,6 +7,10 @@ interface ChipSelectorProps {
   size?: 'xs' | 'mobile' | 'sm' | 'md';
   variant?: 'full' | 'compact';  // 'compact' = 3 chips for mobile (red, green, blue)
   layout?: 'horizontal' | 'vertical';
+  // Selection mode for roulette - clicking selects a chip instead of adding to bet
+  selectionMode?: boolean;
+  selectedValue?: number;
+  onSelect?: (value: number) => void;
 }
 
 export function ChipSelector({
@@ -16,6 +20,9 @@ export function ChipSelector({
   size = 'md',
   variant = 'full',
   layout = 'horizontal',
+  selectionMode = false,
+  selectedValue,
+  onSelect,
 }: ChipSelectorProps) {
   // Filter chips based on variant - compact shows only $0.10, $1, $5 for mobile
   const chips = variant === 'compact'
@@ -33,15 +40,30 @@ export function ChipSelector({
 
   const flexDirection = layout === 'vertical' ? 'flex-col' : '';
 
+  const handleClick = (chip: ChipDenomination) => {
+    if (selectionMode && onSelect) {
+      onSelect(chip.value);
+    } else {
+      onAddChip(chip);
+    }
+  };
+
+  const isSelected = (chip: ChipDenomination) => {
+    if (!selectionMode || selectedValue === undefined) return false;
+    return Math.abs(chip.value - selectedValue) < 0.001;
+  };
+
   return (
     <div className={`flex items-center ${flexDirection} ${gapClass}`}>
       {chips.map(chip => (
         <button
           key={chip.color}
-          onClick={() => onAddChip(chip)}
-          disabled={disabled || !canAddChip(chip.value)}
-          className="chip-button transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed hover:scale-105"
-          title={`Add $${chip.value.toFixed(2)}`}
+          onClick={() => handleClick(chip)}
+          disabled={disabled || (!selectionMode && !canAddChip(chip.value))}
+          className={`chip-button transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed hover:scale-105 ${
+            isSelected(chip) ? 'ring-2 ring-white ring-offset-2 ring-offset-gray-900 scale-110' : ''
+          }`}
+          title={selectionMode ? `Select $${chip.value.toFixed(2)}` : `Add $${chip.value.toFixed(2)}`}
         >
           <img
             src={chip.topImg}

@@ -814,6 +814,15 @@
   overflow: visible;
 }
 
+/* 2-column layout for roulette: balances | chips (no pot display) */
+.mobile-two-col {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  overflow: visible;
+}
+
 /* Left column: balances */
 .mobile-col-balances {
   display: flex;

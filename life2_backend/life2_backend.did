@@ -1,73 +1,63 @@
-// Life2 v2 Backend - Territory-Based Game of Life
-// 512x512 toroidal grid at 10 gen/sec with base-centric territory control
+// Life2 Backend - Sparse On-Chain Implementation
+// 10 generations/second using sparse iteration
 
 type SparseCell = record {
     x: nat16;
     y: nat16;
     owner: nat8;
-};
-
-type BaseInfo = record {
-    x: nat16;
-    y: nat16;
-    coins: nat64;
-};
-
-type PlayerInfo = record {
-    principal: principal;
-    base: opt BaseInfo;
-    alive_cells: nat32;
-    in_grace_period: bool;
-    grace_seconds_remaining: opt nat64;
-    wallet_balance: nat64;
+    coins: nat8;
 };
 
 type GameState = record {
     generation: nat64;
     alive_cells: vec SparseCell;
-    players: vec opt PlayerInfo;
-    next_wipe: record { nat8; nat64 };
-    is_running: bool;
-};
-
-type SlotInfo = record {
-    slot: nat8;
-    occupied: bool;
-    principal: opt principal;
-    base_x: opt nat16;
-    base_y: opt nat16;
-    base_coins: opt nat64;
-    alive_cells: nat32;
-    in_grace_period: bool;
+    territory: vec SparseCell;
+    players: vec principal;
+    balances: vec nat64;
+    player_num: opt nat8;
+    quadrant_controllers: vec nat8;
 };
 
 type PlaceResult = record {
     placed: nat32;
     generation: nat64;
-    new_base_coins: nat64;
+    new_balance: nat64;
 };
 
-type JoinResult = record {
+type SlotInfo = record {
     slot: nat8;
-    base_x: nat16;
-    base_y: nat16;
+    occupied: bool;
+    cell_count: nat32;
+    territory_cells: nat32;
+    territory_coins: nat32;
+};
+
+type QuadrantInfo = record {
+    quadrant: nat8;
+    territory_by_player: vec nat32;
+    total_territory: nat32;
+    coins_by_player: vec nat32;
+    total_coins: nat32;
+    controller: nat8;
 };
 
 service : {
     // Player actions
-    faucet: () -> (variant { Ok: nat64; Err: text });
-    join_game: (int32, int32) -> (variant { Ok: JoinResult; Err: text });
+    join_game: () -> (variant { Ok: nat8; Err: text });
+    join_slot: (nat8) -> (variant { Ok: nat8; Err: text });
     place_cells: (vec record { int32; int32 }) -> (variant { Ok: PlaceResult; Err: text });
+    faucet: () -> (variant { Ok: nat64; Err: text });
 
-    // Queries
+    // Queries (FREE - no cycles cost to caller)
     get_state: () -> (GameState) query;
     get_slots_info: () -> (vec SlotInfo) query;
-    get_balance: () -> (nat64) query;
-    get_next_wipe: () -> (nat8, nat64) query;
+    get_quadrant_info: () -> (vec QuadrantInfo) query;
     get_generation: () -> (nat64) query;
-    is_running: () -> (bool) query;
     get_alive_count: () -> (nat32) query;
-    get_territory: (nat8) -> (vec record { nat16; nat16 }) query;
+    get_potential_count: () -> (nat32) query;
+    get_balance: () -> (variant { Ok: nat64; Err: text }) query;
+    get_next_wipe: () -> (nat8, nat64) query;
+    is_running: () -> (bool) query;
     greet: (text) -> (text) query;
 
     // Admin (requires admin principal)

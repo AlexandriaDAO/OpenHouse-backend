@@ -1,11 +1,8 @@
-//! Life2 v2: Territory-Based Game of Life
+//! Life2: Sparse On-Chain Game of Life
 //!
-//! A 512x512 toroidal grid running Conway's Game of Life at 10 generations/second
-//! with base-centric territory control. Key v2 changes:
-//! - No coins on cells - coins centralized in player bases
-//! - Territory must connect orthogonally to base
-//! - 8x8 bases with siege mechanics
-//! - Optimized bitmap-based implementation
+//! A 100% on-chain multiplayer Game of Life running at 10 generations/second
+//! using sparse iteration. Instead of processing all 262,144 cells every generation,
+//! we only process cells that can possibly change state (~20,000 typical).
 
 use candid::{CandidType, Deserialize, Principal};
 use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
@@ -17,116 +14,147 @@ use std::time::Duration;
 // CONSTANTS
 // ============================================================================
 
-const GRID_SIZE: u16 = 512;
+const GRID_SIZE: usize = 512;
 const GRID_SHIFT: usize = 9; // 2^9 = 512
-const GRID_MASK: u16 = 0x1FF; // 511
+const GRID_MASK: usize = 0x1FF; // 511
 const TOTAL_CELLS: usize = 512 * 512; // 262,144
 const GRID_WORDS: usize = TOTAL_CELLS / 64; // 4,096 u64s for bitsets
-const WORDS_PER_ROW: usize = 8; // 512 cells / 64 bits = 8 words
 
-// Chunks for sparse territory
-const CHUNK_SIZE: u16 = 64;
-const CHUNKS_PER_ROW: usize = 8; // 512 / 64
-const TOTAL_CHUNKS: usize = 64; // 8 × 8
-
-// Quadrants for wipe
-const QUADRANT_SIZE: u16 = 128;
-const QUADRANTS_PER_ROW: usize = 4; // 512 / 128
-const TOTAL_QUADRANTS: usize = 16; // 4 × 4
-
-// Players
-const MAX_PLAYERS: usize = 8;
-
-// Economy
+const MAX_PLAYERS: usize = 9;
 const FAUCET_AMOUNT: u64 = 1000;
-const BASE_COST: u64 = 100;
-const PLACEMENT_COST: u64 = 1;
-const MAX_PLACE_CELLS: usize = 1000;
 
-// Timing
+// Simulation timing: 10 generations per second, batched per tick
 const GENERATIONS_PER_TICK: u32 = 10;
-const TICK_INTERVAL_MS: u64 = 1000;
+const TICK_INTERVAL_MS: u64 = 1000; // 1 second = 10 generations
+
+// Quadrant wipe system
 const WIPE_INTERVAL_NS: u64 = 300_000_000_000; // 5 minutes
-const GRACE_PERIOD_NS: u64 = 600_000_000_000; // 10 minutes
+const QUADRANT_SIZE: usize = 128;
+const QUADRANTS_PER_SIDE: usize = 4;
+const TOTAL_QUADRANTS: usize = 16;
 
-// Base
-const BASE_SIZE: u16 = 8;
-const BASE_INTERIOR: u16 = 6;
+// Player slot grace period - how long a player can have 0 cells before losing their slot
+const SLOT_GRACE_PERIOD_NS: u64 = 600_000_000_000; // 10 minutes
+
+// Quadrant control system - 80% of owned territory required to control a quadrant
+const CONTROLLER_THRESHOLD_PERCENT: u32 = 80;
 
 // ============================================================================
-// DATA STRUCTURES
+// CELL ENCODING
+// ============================================================================
+//
+// Each cell is 1 byte with three fields packed:
+// ┌─────────┬────────┬──────────┐
+// │ bits 7-5│ bit 4  │ bits 3-0 │
+// │  coins  │ alive  │  owner   │
+// │  (0-7)  │ (0/1)  │  (0-9)   │
+// └─────────┴────────┴──────────┘
+
+const OWNER_MASK: u8 = 0x0F; // bits 0-3
+const ALIVE_BIT: u8 = 0x10; // bit 4
+const COINS_SHIFT: u8 = 5; // bits 5-7
+
+#[inline(always)]
+fn get_owner(cell: u8) -> u8 {
+    cell & OWNER_MASK
+}
+
+#[inline(always)]
+fn is_alive(cell: u8) -> bool {
+    cell & ALIVE_BIT != 0
+}
+
+#[inline(always)]
+fn get_coins(cell: u8) -> u8 {
+    cell >> COINS_SHIFT
+}
+
+#[inline(always)]
+fn make_cell(owner: u8, alive: bool, coins: u8) -> u8 {
+    ((coins & 0x07) << COINS_SHIFT)
+        | (if alive { ALIVE_BIT } else { 0 })
+        | (owner & OWNER_MASK)
+}
+
+#[inline(always)]
+fn set_alive(cell: u8, alive: bool) -> u8 {
+    if alive {
+        cell | ALIVE_BIT
+    } else {
+        cell & !ALIVE_BIT
+    }
+}
+
+// ============================================================================
+// COORDINATE HELPERS
 // ============================================================================
 
-/// Sparse territory storage for a single player
-/// Uses chunk_mask to track which 64x64 chunks contain territory
-#[derive(Clone, Default, CandidType, Deserialize)]
-struct PlayerTerritory {
-    /// Bit mask where bit i = 1 means chunk i has territory data
-    chunk_mask: u64,
-    /// Only non-empty chunks are stored (indexed via popcount)
-    chunks: Vec<[u64; 64]>,
+/// Convert (x, y) to flat array index
+/// Uses bit operations for speed: y * 512 + x = (y << 9) | x
+#[inline(always)]
+fn coord_to_index(x: usize, y: usize) -> usize {
+    ((y & GRID_MASK) << GRID_SHIFT) | (x & GRID_MASK)
 }
 
-/// Player base structure
-#[derive(Clone, Copy, CandidType, Deserialize)]
-struct Base {
-    x: u16,      // Top-left X coordinate
-    y: u16,      // Top-left Y coordinate
-    coins: u64,  // Treasury (0 = eliminated)
+/// Convert flat index to (x, y)
+#[inline(always)]
+fn index_to_coord(idx: usize) -> (usize, usize) {
+    let x = idx & GRID_MASK; // idx % 512
+    let y = idx >> GRID_SHIFT; // idx / 512
+    (x, y)
 }
 
-/// BFS workspace for disconnection detection
-/// Pre-allocated to avoid runtime allocation
-struct BFSWorkspace {
-    visited: [u64; GRID_WORDS], // Dense bitmap for fast lookup
-    touched_words: Vec<u16>,    // Track words to clear
-    queue: Vec<u32>,            // BFS queue of cell indices
+/// Get 8 neighbor indices with TOROIDAL wrapping
+/// Grid wraps: x=-1 becomes x=511, x=512 becomes x=0, etc.
+#[inline(always)]
+fn get_neighbor_indices(idx: usize) -> [usize; 8] {
+    let x = idx & GRID_MASK;
+    let y = idx >> GRID_SHIFT;
+
+    // Wrapping arithmetic: (x - 1) & MASK handles underflow
+    // (x + 1) & MASK handles overflow
+    let xm = (x.wrapping_sub(1)) & GRID_MASK; // x - 1, wrapped
+    let xp = (x + 1) & GRID_MASK; // x + 1, wrapped
+    let ym = (y.wrapping_sub(1)) & GRID_MASK; // y - 1, wrapped
+    let yp = (y + 1) & GRID_MASK; // y + 1, wrapped
+
+    [
+        (ym << GRID_SHIFT) | xm, // NW
+        (ym << GRID_SHIFT) | x,  // N
+        (ym << GRID_SHIFT) | xp, // NE
+        (y << GRID_SHIFT) | xm,  // W
+        (y << GRID_SHIFT) | xp,  // E
+        (yp << GRID_SHIFT) | xm, // SW
+        (yp << GRID_SHIFT) | x,  // S
+        (yp << GRID_SHIFT) | xp, // SE
+    ]
 }
 
-impl BFSWorkspace {
-    fn new() -> Self {
-        Self {
-            visited: [0u64; GRID_WORDS],
-            touched_words: Vec::with_capacity(512),
-            queue: Vec::with_capacity(5000),
-        }
-    }
+// ============================================================================
+// BITSET OPERATIONS
+// ============================================================================
 
-    fn clear(&mut self) {
-        for &word_idx in &self.touched_words {
-            self.visited[word_idx as usize] = 0;
-        }
-        self.touched_words.clear();
-        self.queue.clear();
-    }
+/// Set a single bit in the potential set
+#[inline(always)]
+fn set_potential(potential: &mut [u64; GRID_WORDS], idx: usize) {
+    let word_idx = idx >> 6;
+    let bit_mask = 1u64 << (idx & 63);
+    potential[word_idx] |= bit_mask;
+}
 
-    fn mark_visited(&mut self, x: u16, y: u16) -> bool {
-        let idx = coords_to_idx(x, y);
-        let word_idx = idx >> 6;
-        let bit_pos = idx & 63;
-
-        let was_visited = (self.visited[word_idx] >> bit_pos) & 1 == 1;
-        if !was_visited {
-            if self.visited[word_idx] == 0 {
-                self.touched_words.push(word_idx as u16);
-            }
-            self.visited[word_idx] |= 1u64 << bit_pos;
-        }
-        was_visited
-    }
-
-    fn is_visited(&self, x: u16, y: u16) -> bool {
-        let idx = coords_to_idx(x, y);
-        let word_idx = idx >> 6;
-        let bit_pos = idx & 63;
-        (self.visited[word_idx] >> bit_pos) & 1 == 1
+/// Add cell AND all 8 neighbors to potential set
+/// This is the key operation for maintaining INVARIANT 1
+#[inline(always)]
+fn add_with_neighbors(potential: &mut [u64; GRID_WORDS], idx: usize) {
+    set_potential(potential, idx);
+    for neighbor_idx in get_neighbor_indices(idx) {
+        set_potential(potential, neighbor_idx);
     }
 }
 
-impl Default for BFSWorkspace {
-    fn default() -> Self {
-        Self::new()
-    }
+/// Count set bits in potential (for diagnostics)
+fn count_potential(potential: &[u64; GRID_WORDS]) -> u32 {
+    potential.iter().map(|w| w.count_ones()).sum()
 }
 
 // ============================================================================
@@ -134,697 +162,433 @@ impl Default for BFSWorkspace {
 // ============================================================================
 
 thread_local! {
-    // Hot path - accessed every generation
-    static ALIVE: RefCell<[u64; GRID_WORDS]> = RefCell::new([0u64; GRID_WORDS]);
+    /// Main grid: 1 byte per cell = 256 KB
+    /// Index formula: y * 512 + x  OR  (y << 9) | x
+    static GRID: RefCell<[u8; TOTAL_CELLS]> = RefCell::new([0u8; TOTAL_CELLS]);
+
+    /// Potential bitset: cells to check THIS generation = 32 KB
+    /// Bit is SET if cell might change state
     static POTENTIAL: RefCell<[u64; GRID_WORDS]> = RefCell::new([0u64; GRID_WORDS]);
+
+    /// Next potential bitset: being built DURING simulation = 32 KB
+    /// After step_generation(), this becomes the new POTENTIAL
     static NEXT_POTENTIAL: RefCell<[u64; GRID_WORDS]> = RefCell::new([0u64; GRID_WORDS]);
 
-    // Warm path - accessed on births, place_cells
-    static TERRITORY: RefCell<[PlayerTerritory; MAX_PLAYERS]> = RefCell::new(
-        std::array::from_fn(|_| PlayerTerritory::default())
-    );
+    /// Player principals (index 0 = player 1, etc.)
+    /// Empty slots use Principal::anonymous() as a sentinel
+    static PLAYERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
 
-    // Cold path - rarely accessed
-    static PLAYERS: RefCell<[Option<Principal>; MAX_PLAYERS]> = RefCell::new([None; MAX_PLAYERS]);
-    static BASES: RefCell<[Option<Base>; MAX_PLAYERS]> = RefCell::new([None; MAX_PLAYERS]);
-    static WALLETS: RefCell<HashMap<Principal, u64>> = RefCell::new(HashMap::new());
-    static CELL_COUNTS: RefCell<[u32; MAX_PLAYERS]> = RefCell::new([0u32; MAX_PLAYERS]);
-    static ZERO_CELLS_SINCE: RefCell<[Option<u64>; MAX_PLAYERS]> = RefCell::new([None; MAX_PLAYERS]);
+    /// Player balances keyed by principal (persists even after "death")
+    static BALANCES: RefCell<HashMap<Principal, u64>> = RefCell::new(HashMap::new());
 
-    // Game state
+    /// Alive cell count per player slot (parallel to PLAYERS)
+    static CELL_COUNTS: RefCell<Vec<u32>> = RefCell::new(Vec::new());
+
+    /// Timestamp (ns) when each player's cells first hit 0 (None if they have cells)
+    /// After SLOT_GRACE_PERIOD_NS, the slot is freed for reuse
+    static ZERO_CELLS_SINCE: RefCell<Vec<Option<u64>>> = RefCell::new(Vec::new());
+
+    /// Current generation counter
     static GENERATION: RefCell<u64> = RefCell::new(0);
+
+    /// Is simulation running?
     static IS_RUNNING: RefCell<bool> = RefCell::new(true);
-    static NEXT_WIPE_QUADRANT: RefCell<u8> = RefCell::new(0);
-    static LAST_WIPE_NS: RefCell<u64> = RefCell::new(0);
 
-    // BFS workspace for disconnection detection
-    static BFS_WORKSPACE: RefCell<BFSWorkspace> = RefCell::new(BFSWorkspace::new());
+    /// Quadrant wipe state
+    static NEXT_WIPE_QUADRANT: RefCell<usize> = RefCell::new(0);
+    static LAST_WIPE_TIME_NS: RefCell<u64> = RefCell::new(0);
+
+    /// Territory count per player per quadrant - updated incrementally
+    /// [quadrant][player] where player 0 is unused, 1-9 are valid players
+    /// This avoids expensive periodic full-grid scans
+    static QUADRANT_TERRITORY: RefCell<[[u32; MAX_PLAYERS + 1]; TOTAL_QUADRANTS]> =
+        RefCell::new([[0u32; MAX_PLAYERS + 1]; TOTAL_QUADRANTS]);
+
+    /// Controller of each quadrant (0 = no controller, 1-9 = player number)
+    /// Only the controller can collect coins in their quadrant
+    static QUADRANT_CONTROLLER: RefCell<[u8; TOTAL_QUADRANTS]> =
+        RefCell::new([0u8; TOTAL_QUADRANTS]);
 }
 
 // ============================================================================
-// COORDINATE & BITMAP HELPERS
+// SIMULATION
 // ============================================================================
 
+// ============================================================================
+// QUADRANT CONTROL SYSTEM
+// ============================================================================
+
+/// Get quadrant index (0-15) from cell index
 #[inline(always)]
-fn coords_to_idx(x: u16, y: u16) -> usize {
-    ((y as usize) << GRID_SHIFT) | (x as usize)
+fn get_quadrant(idx: usize) -> usize {
+    let x = idx & GRID_MASK;           // x coordinate
+    let y = idx >> GRID_SHIFT;         // y coordinate
+    let qx = x >> 7;                   // x / 128 = quadrant x (0-3)
+    let qy = y >> 7;                   // y / 128 = quadrant y (0-3)
+    (qy << 2) | qx                     // qy * 4 + qx
 }
 
+/// Update territory count when ownership changes
+/// Returns the new controller if control changed, None otherwise
 #[inline(always)]
-fn idx_to_coords(idx: usize) -> (u16, u16) {
-    ((idx & 0x1FF) as u16, (idx >> GRID_SHIFT) as u16)
-}
-
-#[inline(always)]
-fn wrap_coord(v: i32) -> u16 {
-    ((v % 512 + 512) % 512) as u16
-}
-
-#[inline(always)]
-fn orthogonal_neighbors(x: u16, y: u16) -> [(u16, u16); 4] {
-    [
-        (x.wrapping_sub(1) & GRID_MASK, y),       // West
-        (x.wrapping_add(1) & GRID_MASK, y),       // East
-        (x, y.wrapping_sub(1) & GRID_MASK),       // North
-        (x, y.wrapping_add(1) & GRID_MASK),       // South
-    ]
-}
-
-#[inline(always)]
-fn all_neighbors(x: u16, y: u16) -> [(u16, u16); 8] {
-    let xm = x.wrapping_sub(1) & GRID_MASK;
-    let xp = x.wrapping_add(1) & GRID_MASK;
-    let ym = y.wrapping_sub(1) & GRID_MASK;
-    let yp = y.wrapping_add(1) & GRID_MASK;
-    [
-        (xm, ym), // NW
-        (x, ym),  // N
-        (xp, ym), // NE
-        (xm, y),  // W
-        (xp, y),  // E
-        (xm, yp), // SW
-        (x, yp),  // S
-        (xp, yp), // SE
-    ]
-}
-
-// ALIVE bitmap operations
-#[inline(always)]
-fn is_alive_at(alive: &[u64; GRID_WORDS], x: u16, y: u16) -> bool {
-    let idx = coords_to_idx(x, y);
-    (alive[idx >> 6] >> (idx & 63)) & 1 == 1
-}
-
-#[inline(always)]
-fn is_alive_idx(alive: &[u64; GRID_WORDS], idx: usize) -> bool {
-    (alive[idx >> 6] >> (idx & 63)) & 1 == 1
-}
-
-#[inline(always)]
-fn set_alive_at(alive: &mut [u64; GRID_WORDS], x: u16, y: u16) {
-    let idx = coords_to_idx(x, y);
-    alive[idx >> 6] |= 1u64 << (idx & 63);
-}
-
-#[inline(always)]
-fn clear_alive_idx(alive: &mut [u64; GRID_WORDS], idx: usize) {
-    alive[idx >> 6] &= !(1u64 << (idx & 63));
-}
-
-// POTENTIAL bitmap operations
-#[inline(always)]
-fn set_potential_bit(potential: &mut [u64; GRID_WORDS], idx: usize) {
-    potential[idx >> 6] |= 1u64 << (idx & 63);
-}
-
-fn mark_with_neighbors_potential(potential: &mut [u64; GRID_WORDS], idx: usize) {
-    let (x, y) = idx_to_coords(idx);
-    set_potential_bit(potential, idx);
-    for (nx, ny) in all_neighbors(x, y) {
-        set_potential_bit(potential, coords_to_idx(nx, ny));
+fn update_quadrant_territory(quadrant: usize, old_owner: u8, new_owner: u8) -> Option<u8> {
+    if old_owner == new_owner {
+        return None;
     }
-}
 
-fn mark_neighbors_potential(potential: &mut [u64; GRID_WORDS], idx: usize) {
-    let (x, y) = idx_to_coords(idx);
-    for (nx, ny) in all_neighbors(x, y) {
-        set_potential_bit(potential, coords_to_idx(nx, ny));
-    }
-}
+    QUADRANT_TERRITORY.with(|t| {
+        let mut territory = t.borrow_mut();
 
-// ============================================================================
-// QUADRANT HELPERS
-// ============================================================================
+        // Decrement old owner's count
+        if old_owner > 0 && old_owner <= MAX_PLAYERS as u8 {
+            territory[quadrant][old_owner as usize] =
+                territory[quadrant][old_owner as usize].saturating_sub(1);
+        }
 
-#[inline(always)]
-fn get_quadrant(x: u16, y: u16) -> u8 {
-    ((y >> 7) * 4 + (x >> 7)) as u8
-}
+        // Increment new owner's count
+        if new_owner > 0 && new_owner <= MAX_PLAYERS as u8 {
+            territory[quadrant][new_owner as usize] += 1;
+        }
 
-fn quadrant_bounds(q: u8) -> (u16, u16, u16, u16) {
-    let qx = (q % 4) as u16;
-    let qy = (q / 4) as u16;
-    (qx * 128, qy * 128, 128, 128)
-}
+        // Check if controller needs to change
+        let total: u32 = territory[quadrant][1..=MAX_PLAYERS].iter().sum();
+        if total == 0 {
+            // Empty quadrant
+            QUADRANT_CONTROLLER.with(|c| {
+                let mut controllers = c.borrow_mut();
+                if controllers[quadrant] != 0 {
+                    controllers[quadrant] = 0;
+                    return Some(0);
+                }
+                None
+            })
+        } else {
+            let threshold = (total * CONTROLLER_THRESHOLD_PERCENT) / 100;
 
-fn quadrant_has_base(q: u8) -> bool {
-    BASES.with(|b| {
-        let bases = b.borrow();
-        for base_opt in bases.iter() {
-            if let Some(base) = base_opt {
-                if get_quadrant(base.x, base.y) == q {
-                    return true;
+            // Check if any player now has 80%+
+            for player in 1..=MAX_PLAYERS as u8 {
+                if territory[quadrant][player as usize] >= threshold {
+                    return QUADRANT_CONTROLLER.with(|c| {
+                        let mut controllers = c.borrow_mut();
+                        if controllers[quadrant] != player {
+                            controllers[quadrant] = player;
+                            ic_cdk::println!(
+                                "Quadrant {} control: Player {} ({}%)",
+                                quadrant,
+                                player,
+                                (territory[quadrant][player as usize] * 100) / total
+                            );
+                            return Some(player);
+                        }
+                        None
+                    });
                 }
             }
+
+            // No one has 80% - controller stays the same (sticky)
+            None
         }
-        false
     })
 }
 
-// ============================================================================
-// TERRITORY MANAGEMENT
-// ============================================================================
-
-fn popcount_below(mask: u64, idx: usize) -> usize {
-    (mask & ((1u64 << idx) - 1)).count_ones() as usize
-}
-
-fn player_owns(territory: &[PlayerTerritory; MAX_PLAYERS], player: usize, x: u16, y: u16) -> bool {
-    if player >= MAX_PLAYERS {
-        return false;
-    }
-
-    let chunk_x = (x / CHUNK_SIZE) as usize;
-    let chunk_y = (y / CHUNK_SIZE) as usize;
-    let chunk_idx = chunk_y * CHUNKS_PER_ROW + chunk_x;
-
-    if (territory[player].chunk_mask >> chunk_idx) & 1 == 0 {
-        return false;
-    }
-
-    let vec_idx = popcount_below(territory[player].chunk_mask, chunk_idx);
-    let local_x = (x % CHUNK_SIZE) as usize;
-    let local_y = (y % CHUNK_SIZE) as usize;
-    (territory[player].chunks[vec_idx][local_y] >> local_x) & 1 == 1
-}
-
-fn find_owner(territory: &[PlayerTerritory; MAX_PLAYERS], x: u16, y: u16) -> Option<usize> {
-    for player in 0..MAX_PLAYERS {
-        if player_owns(territory, player, x, y) {
-            return Some(player);
-        }
-    }
-    None
-}
-
-fn set_territory(territory: &mut [PlayerTerritory; MAX_PLAYERS], player: usize, x: u16, y: u16) {
-    if player >= MAX_PLAYERS {
-        return;
-    }
-
-    let chunk_x = (x / CHUNK_SIZE) as usize;
-    let chunk_y = (y / CHUNK_SIZE) as usize;
-    let chunk_idx = chunk_y * CHUNKS_PER_ROW + chunk_x;
-
-    let pt = &mut territory[player];
-
-    // Check if chunk exists
-    if (pt.chunk_mask >> chunk_idx) & 1 == 0 {
-        // Allocate new chunk
-        let insert_pos = popcount_below(pt.chunk_mask, chunk_idx);
-        pt.chunks.insert(insert_pos, [0u64; 64]);
-        pt.chunk_mask |= 1u64 << chunk_idx;
-    }
-
-    // Set bit
-    let vec_idx = popcount_below(pt.chunk_mask, chunk_idx);
-    let local_x = (x % CHUNK_SIZE) as usize;
-    let local_y = (y % CHUNK_SIZE) as usize;
-    pt.chunks[vec_idx][local_y] |= 1u64 << local_x;
-}
-
-fn clear_territory(territory: &mut [PlayerTerritory; MAX_PLAYERS], player: usize, x: u16, y: u16) {
-    if player >= MAX_PLAYERS {
-        return;
-    }
-
-    let chunk_x = (x / CHUNK_SIZE) as usize;
-    let chunk_y = (y / CHUNK_SIZE) as usize;
-    let chunk_idx = chunk_y * CHUNKS_PER_ROW + chunk_x;
-
-    let pt = &mut territory[player];
-
-    if (pt.chunk_mask >> chunk_idx) & 1 == 0 {
-        return; // Chunk doesn't exist
-    }
-
-    let vec_idx = popcount_below(pt.chunk_mask, chunk_idx);
-    let local_x = (x % CHUNK_SIZE) as usize;
-    let local_y = (y % CHUNK_SIZE) as usize;
-    pt.chunks[vec_idx][local_y] &= !(1u64 << local_x);
-
-    // Check if chunk is now empty
-    let chunk_empty = pt.chunks[vec_idx].iter().all(|&w| w == 0);
-    if chunk_empty {
-        pt.chunks.remove(vec_idx);
-        pt.chunk_mask &= !(1u64 << chunk_idx);
-    }
-}
-
-// ============================================================================
-// BASE HELPERS
-// ============================================================================
-
+/// Get current controller of a quadrant
 #[inline(always)]
-fn is_in_base(base: &Base, x: u16, y: u16) -> bool {
-    let dx = x.wrapping_sub(base.x);
-    let dy = y.wrapping_sub(base.y);
-    dx < BASE_SIZE && dy < BASE_SIZE
-}
-
-#[inline(always)]
-fn is_wall(base: &Base, x: u16, y: u16) -> bool {
-    let dx = x.wrapping_sub(base.x);
-    let dy = y.wrapping_sub(base.y);
-    dx < BASE_SIZE && dy < BASE_SIZE && (dx == 0 || dx == BASE_SIZE - 1 || dy == 0 || dy == BASE_SIZE - 1)
-}
-
-#[inline(always)]
-fn is_interior(base: &Base, x: u16, y: u16) -> bool {
-    let dx = x.wrapping_sub(base.x);
-    let dy = y.wrapping_sub(base.y);
-    dx >= 1 && dx <= BASE_INTERIOR && dy >= 1 && dy <= BASE_INTERIOR
-}
-
-fn in_protection_zone(bases: &[Option<Base>; MAX_PLAYERS], x: u16, y: u16) -> Option<usize> {
-    for (i, base_opt) in bases.iter().enumerate() {
-        if let Some(base) = base_opt {
-            if is_in_base(base, x, y) {
-                return Some(i);
-            }
-        }
-    }
-    None
-}
-
-fn bases_would_overlap(new_x: u16, new_y: u16, existing: &Base) -> bool {
-    let dx = new_x.abs_diff(existing.x);
-    let dy = new_y.abs_diff(existing.y);
-    // Handle toroidal wrap
-    let dx = dx.min(GRID_SIZE - dx);
-    let dy = dy.min(GRID_SIZE - dy);
-    dx < BASE_SIZE && dy < BASE_SIZE
+fn get_quadrant_controller(quadrant: usize) -> u8 {
+    QUADRANT_CONTROLLER.with(|c| c.borrow()[quadrant])
 }
 
 // ============================================================================
-// PLAYER HELPERS
+// GAME OF LIFE RULES
 // ============================================================================
 
-fn find_player_slot(caller: Principal) -> Option<usize> {
-    PLAYERS.with(|p| {
-        p.borrow().iter().position(|opt| *opt == Some(caller))
-    })
-}
-
-// ============================================================================
-// CONWAY'S GAME OF LIFE
-// ============================================================================
-
-/// Represents a change to apply after computing fates
-#[derive(Clone, Copy)]
-enum CellChange {
-    Survives(usize),  // idx
-    Birth { idx: usize, owner: usize },
-    Death { idx: usize, owner: usize },
-}
-
-/// Find majority owner among 3 alive neighbors for birth
-fn find_majority_owner(
-    territory: &[PlayerTerritory; MAX_PLAYERS],
-    alive: &[u64; GRID_WORDS],
-    x: u16,
-    y: u16,
-    cell_idx: usize,
-) -> usize {
-    let mut owner_counts = [0u8; MAX_PLAYERS];
-
-    for (nx, ny) in all_neighbors(x, y) {
-        if is_alive_at(alive, nx, ny) {
-            if let Some(owner) = find_owner(territory, nx, ny) {
-                owner_counts[owner] += 1;
-            }
-        }
-    }
-
-    // Find max count
-    let max_count = *owner_counts.iter().max().unwrap_or(&0);
+/// Find majority owner among neighbors, with FAIR tie-breaking using cell position hash.
+///
+/// Why cell position hash? The old "lowest player wins" approach gave P1 unfair advantage
+/// in every tie. Using cell position distributes ties fairly across the grid.
+fn find_majority_owner(counts: &[u8; 10], cell_idx: usize) -> u8 {
+    // Find the maximum neighbor count
+    let max_count = counts[1..=9].iter().max().copied().unwrap_or(0);
     if max_count == 0 {
-        return 0; // Default to player 0 (shouldn't happen with 3 alive neighbors)
+        return 1; // No neighbors with owners, default to P1
     }
 
-    // Collect tied players
-    let tied: Vec<usize> = owner_counts
-        .iter()
-        .enumerate()
-        .filter(|(_, &c)| c == max_count)
-        .map(|(i, _)| i)
+    // Collect all players tied at max_count (ascending order)
+    let tied: Vec<u8> = (1..=9)
+        .filter(|&p| counts[p] == max_count)
+        .map(|p| p as u8)
         .collect();
 
+    // Single winner - no tie to break
     if tied.len() == 1 {
-        tied[0]
-    } else {
-        // Tie-break using cell position
-        tied[cell_idx % tied.len()]
+        return tied[0];
     }
+
+    // FAIR TIE-BREAKING: Use cell position to deterministically pick winner
+    // Each cell location favors a different player among the tied ones
+    // Result: ties distributed evenly across the grid
+    let hash = cell_idx % tied.len();
+    tied[hash]
 }
 
-/// Compute cell fate - read-only on grid
-fn compute_cell_fate(
-    alive: &[u64; GRID_WORDS],
-    territory: &[PlayerTerritory; MAX_PLAYERS],
-    idx: usize,
-) -> Option<CellChange> {
-    let (x, y) = idx_to_coords(idx);
-    let currently_alive = is_alive_idx(alive, idx);
+/// Represents a change to be applied after computing the full generation
+#[derive(Clone, Copy)]
+enum CellChange {
+    /// Cell survives - no grid change needed, just add to next_potential
+    Survives,
+    /// Cell is born with new owner (coins captured separately)
+    Birth { new_owner: u8 },
+    /// Cell dies - keep owner and coins, mark as dead
+    Death,
+    /// Cell stays dead - no action needed
+    StaysDead,
+}
 
-    // Count alive neighbors
+/// Compute what should happen to a cell WITHOUT modifying the grid.
+/// This is critical for correct Game of Life: all cells must see the SAME
+/// state (the state at the START of the generation).
+fn compute_cell_fate(
+    grid: &[u8; TOTAL_CELLS],
+    idx: usize,
+) -> (CellChange, [u8; 10]) {
+    let cell = grid[idx];
+    let currently_alive = is_alive(cell);
+    let neighbors = get_neighbor_indices(idx);
+
+    // Count alive neighbors and their owners
     let mut alive_count = 0u8;
-    for (nx, ny) in all_neighbors(x, y) {
-        if is_alive_at(alive, nx, ny) {
+    let mut owner_counts = [0u8; 10];
+
+    for &n_idx in &neighbors {
+        let n = grid[n_idx];
+        if is_alive(n) {
             alive_count += 1;
+            let owner = get_owner(n);
+            if owner > 0 && (owner as usize) < owner_counts.len() {
+                owner_counts[owner as usize] += 1;
+            }
         }
     }
 
-    match (currently_alive, alive_count) {
+    let change = match (currently_alive, alive_count) {
         // Survival: 2 or 3 neighbors
-        (true, 2) | (true, 3) => Some(CellChange::Survives(idx)),
+        (true, 2) | (true, 3) => CellChange::Survives,
 
         // Birth: exactly 3 neighbors
         (false, 3) => {
-            let owner = find_majority_owner(territory, alive, x, y, idx);
-            Some(CellChange::Birth { idx, owner })
+            let new_owner = find_majority_owner(&owner_counts, idx);
+            CellChange::Birth { new_owner }
         }
 
-        // Death: wrong neighbor count
-        (true, _) => {
-            let owner = find_owner(territory, x, y).unwrap_or(0);
-            Some(CellChange::Death { idx, owner })
-        }
+        // Death: wrong neighbor count (0, 1, 4, 5, 6, 7, or 8)
+        (true, _) => CellChange::Death,
 
-        // Stays dead
-        (false, _) => None,
-    }
+        // Stays dead: wrong neighbor count for birth
+        (false, _) => CellChange::StaysDead,
+    };
+
+    (change, owner_counts)
 }
 
-// ============================================================================
-// DISCONNECTION ALGORITHM
-// ============================================================================
+/// Apply a computed change to the grid and update next_potential.
+/// Called in a second pass AFTER all fates are computed.
+/// Returns (owner_born, owner_died) for cell count tracking.
+fn apply_cell_change(
+    grid: &mut [u8; TOTAL_CELLS],
+    next_potential: &mut [u64; GRID_WORDS],
+    balances: &mut HashMap<Principal, u64>,
+    players: &[Principal],
+    idx: usize,
+    change: CellChange,
+) -> (Option<u8>, Option<u8>) {
+    let cell = grid[idx];
+    let neighbors = get_neighbor_indices(idx);
 
-/// Check if disconnection occurred and apply it
-fn check_disconnection(
-    workspace: &mut BFSWorkspace,
-    territory: &mut [PlayerTerritory; MAX_PLAYERS],
-    alive: &mut [u64; GRID_WORDS],
-    potential: &mut [u64; GRID_WORDS],
-    cell_counts: &mut [u32; MAX_PLAYERS],
-    bases: &[Option<Base>; MAX_PLAYERS],
-    player: usize,
-    lost_x: u16,
-    lost_y: u16,
-) {
-    // Phase 1: Find affected neighbors
-    let mut affected: Vec<(u16, u16)> = Vec::with_capacity(4);
-    for (nx, ny) in orthogonal_neighbors(lost_x, lost_y) {
-        if player_owns(territory, player, nx, ny) {
-            affected.push((nx, ny));
-        }
-    }
-
-    if affected.is_empty() {
-        return; // No neighbors = no disconnection possible
-    }
-
-    // Phase 2: Check if all in base interior
-    if let Some(base) = bases[player].as_ref() {
-        if affected.iter().all(|&(x, y)| is_interior(base, x, y)) {
-            return; // All in base interior = always connected
+    match change {
+        CellChange::Survives => {
+            // Cell stays alive - no grid change needed
+            // Add to next_potential because neighbors might change
+            add_with_neighbors(next_potential, idx);
+            (None, None)
         }
 
-        // Phase 3: BFS from base to find reachable territory
-        workspace.clear();
+        CellChange::Birth { new_owner } => {
+            let old_owner = get_owner(cell);
+            let old_coins = get_coins(cell);
+            let quadrant = get_quadrant(idx);
 
-        // Seed from base interior
-        for dy in 1..=BASE_INTERIOR {
-            for dx in 1..=BASE_INTERIOR {
-                let x = base.x.wrapping_add(dx) & GRID_MASK;
-                let y = base.y.wrapping_add(dy) & GRID_MASK;
-                if player_owns(territory, player, x, y) && !workspace.mark_visited(x, y) {
-                    let idx = coords_to_idx(x, y);
-                    workspace.queue.push(idx as u32);
-                }
-            }
-        }
+            // Update territory tracking (incremental - no full scan needed)
+            update_quadrant_territory(quadrant, old_owner, new_owner);
 
-        // BFS with early termination
-        let mut affected_found = [false; 4];
-        let mut found_count = 0;
-        let mut queue_idx = 0;
+            // Determine if new_owner can collect coins
+            // Requires: enemy coins exist AND new_owner controls this quadrant
+            let can_collect = if old_owner == 0 || old_owner == new_owner || old_coins == 0 {
+                // No coins, own coins, or unowned territory - nothing to collect
+                false
+            } else {
+                // Check if new_owner controls this quadrant
+                get_quadrant_controller(quadrant) == new_owner
+            };
 
-        while queue_idx < workspace.queue.len() {
-            let cell_idx = workspace.queue[queue_idx] as usize;
-            queue_idx += 1;
-
-            let (x, y) = idx_to_coords(cell_idx);
-
-            // Check if this is an affected neighbor
-            for (i, &(ax, ay)) in affected.iter().enumerate() {
-                if !affected_found[i] && x == ax && y == ay {
-                    affected_found[i] = true;
-                    found_count += 1;
-                    if found_count == affected.len() {
-                        return; // All affected neighbors reachable
+            if can_collect {
+                // CAPTURE: Controller collecting enemy coins
+                let new_owner_idx = (new_owner - 1) as usize;
+                if new_owner_idx < players.len() {
+                    let principal = players[new_owner_idx];
+                    if principal != Principal::anonymous() {
+                        *balances.entry(principal).or_insert(0) += old_coins as u64;
                     }
                 }
+                // Cell starts with 0 coins (collected)
+                grid[idx] = make_cell(new_owner, true, 0);
+            } else {
+                // NO CAPTURE: Either not controller, own coins, or no coins
+                // Coins stay on the cell (territory changes hands, coins don't)
+                grid[idx] = make_cell(new_owner, true, old_coins);
             }
 
-            // Explore orthogonal neighbors
-            for (nx, ny) in orthogonal_neighbors(x, y) {
-                if !workspace.is_visited(nx, ny) && player_owns(territory, player, nx, ny) {
-                    workspace.mark_visited(nx, ny);
-                    workspace.queue.push(coords_to_idx(nx, ny) as u32);
-                }
-            }
+            add_with_neighbors(next_potential, idx);
+            (Some(new_owner), None) // new_owner gained a cell
         }
 
-        // Phase 4: Find disconnected components
-        let mut unreached: Vec<(u16, u16)> = Vec::new();
-        for (i, &(ax, ay)) in affected.iter().enumerate() {
-            if !affected_found[i] {
-                unreached.push((ax, ay));
+        CellChange::Death => {
+            // Cell dies - keep owner and coins
+            let owner = get_owner(cell);
+            let coins = get_coins(cell);
+            grid[idx] = make_cell(owner, false, coins);
+
+            // Neighbors might now be able to change state
+            for &n_idx in &neighbors {
+                add_with_neighbors(next_potential, n_idx);
             }
+            (None, Some(owner)) // owner lost a cell
         }
 
-        if unreached.is_empty() {
-            return;
-        }
-
-        // BFS to find all disconnected cells
-        let mut disconnected: Vec<(u16, u16)> = Vec::new();
-
-        for (start_x, start_y) in unreached {
-            if workspace.is_visited(start_x, start_y) {
-                continue; // Already processed
-            }
-
-            workspace.mark_visited(start_x, start_y);
-            let mut local_queue = vec![(start_x, start_y)];
-            let mut q_idx = 0;
-
-            while q_idx < local_queue.len() {
-                let (x, y) = local_queue[q_idx];
-                q_idx += 1;
-                disconnected.push((x, y));
-
-                for (nx, ny) in orthogonal_neighbors(x, y) {
-                    if !workspace.is_visited(nx, ny) && player_owns(territory, player, nx, ny) {
-                        workspace.mark_visited(nx, ny);
-                        local_queue.push((nx, ny));
-                    }
-                }
-            }
-        }
-
-        // Phase 5: Apply disconnection
-        for (x, y) in disconnected {
-            clear_territory(territory, player, x, y);
-
-            let idx = coords_to_idx(x, y);
-            if is_alive_idx(alive, idx) {
-                clear_alive_idx(alive, idx);
-                cell_counts[player] = cell_counts[player].saturating_sub(1);
-                mark_neighbors_potential(potential, idx);
-            }
+        CellChange::StaysDead => {
+            // Nothing to do
+            (None, None)
         }
     }
 }
-
-// ============================================================================
-// STEP GENERATION
-// ============================================================================
 
 fn step_generation() {
-    // Collect changes in first pass
-    let mut changes: Vec<CellChange> = Vec::new();
+    // TWO-PASS ALGORITHM for correct Game of Life simulation:
+    // Pass 1: Compute all cell fates (READ-ONLY on grid)
+    // Pass 2: Apply all changes to grid
+    //
+    // This ensures all cells see the SAME state (start of generation),
+    // which is required for Conway's simultaneous update rule.
 
-    // PASS 1: Compute fates (read-only)
-    ALIVE.with(|a| {
-        POTENTIAL.with(|p| {
-            TERRITORY.with(|t| {
-                let alive = a.borrow();
-                let potential = p.borrow();
-                let territory = t.borrow();
+    // Collect all changes in first pass
+    let mut changes: Vec<(usize, CellChange)> = Vec::new();
 
-                for word_idx in 0..GRID_WORDS {
-                    let mut word = potential[word_idx];
-                    if word == 0 {
-                        continue;
-                    }
+    // PASS 1: Compute fates (grid is read-only)
+    GRID.with(|grid| {
+        POTENTIAL.with(|potential| {
+            let grid = &*grid.borrow();
+            let potential = &*potential.borrow();
 
-                    while word != 0 {
-                        let bit_pos = word.trailing_zeros() as usize;
-                        let idx = (word_idx << 6) | bit_pos;
-
-                        if let Some(change) = compute_cell_fate(&alive, &territory, idx) {
-                            changes.push(change);
-                        }
-
-                        word &= word - 1;
-                    }
+            for word_idx in 0..GRID_WORDS {
+                let mut word = potential[word_idx];
+                if word == 0 {
+                    continue;
                 }
-            });
-        });
-    });
 
-    // Track territory changes for batched disconnection
-    let mut territory_changes: [Vec<(u16, u16)>; MAX_PLAYERS] = Default::default();
+                while word != 0 {
+                    let bit_pos = word.trailing_zeros() as usize;
+                    let idx = (word_idx << 6) | bit_pos;
 
-    // PASS 2: Apply changes
-    ALIVE.with(|a| {
-        NEXT_POTENTIAL.with(|np| {
-            TERRITORY.with(|t| {
-                BASES.with(|b| {
-                    WALLETS.with(|w| {
-                        PLAYERS.with(|pl| {
-                            CELL_COUNTS.with(|c| {
-                                let alive = &mut *a.borrow_mut();
-                                let next_potential = &mut *np.borrow_mut();
-                                let territory = &mut *t.borrow_mut();
-                                let bases = &mut *b.borrow_mut();
-                                let wallets = &mut *w.borrow_mut();
-                                let players = &*pl.borrow();
-                                let cell_counts = &mut *c.borrow_mut();
+                    let (change, _owner_counts) = compute_cell_fate(grid, idx);
 
-                                // Clear next_potential
-                                next_potential.fill(0);
+                    // Only record changes that need action
+                    if !matches!(change, CellChange::StaysDead) {
+                        changes.push((idx, change));
+                    }
 
-                                for change in changes {
-                                    match change {
-                                        CellChange::Survives(idx) => {
-                                            mark_with_neighbors_potential(next_potential, idx);
-                                        }
-
-                                        CellChange::Birth { idx, owner } => {
-                                            let (x, y) = idx_to_coords(idx);
-
-                                            // Check siege mechanic
-                                            if let Some(base_owner) = in_protection_zone(bases, x, y) {
-                                                if base_owner != owner {
-                                                    // SIEGE! Birth prevented, transfer coin
-                                                    if let Some(ref mut base) = bases[base_owner] {
-                                                        base.coins = base.coins.saturating_sub(1);
-
-                                                        // Transfer to attacker's wallet
-                                                        if let Some(attacker_principal) = players[owner] {
-                                                            *wallets.entry(attacker_principal).or_insert(0) += 1;
-                                                        }
-
-                                                        // Check for base destruction
-                                                        if base.coins == 0 {
-                                                            // Will be handled after this pass
-                                                        }
-                                                    }
-                                                    continue; // Birth prevented
-                                                }
-                                            }
-
-                                            // Normal birth
-                                            alive[idx >> 6] |= 1u64 << (idx & 63);
-                                            cell_counts[owner] += 1;
-
-                                            // Update territory
-                                            let old_owner = find_owner(territory, x, y);
-                                            if old_owner != Some(owner) {
-                                                if let Some(old) = old_owner {
-                                                    clear_territory(territory, old, x, y);
-                                                    territory_changes[old].push((x, y));
-                                                }
-                                                set_territory(territory, owner, x, y);
-                                            }
-
-                                            mark_with_neighbors_potential(next_potential, idx);
-                                        }
-
-                                        CellChange::Death { idx, owner } => {
-                                            alive[idx >> 6] &= !(1u64 << (idx & 63));
-                                            cell_counts[owner] = cell_counts[owner].saturating_sub(1);
-                                            mark_neighbors_potential(next_potential, idx);
-                                        }
-                                    }
-                                }
-                            });
-                        });
-                    });
-                });
-            });
-        });
-    });
-
-    // Handle base destructions and disconnections
-    BASES.with(|b| {
-        let mut bases = b.borrow_mut();
-        let mut eliminated_players = Vec::new();
-
-        for (player, base_opt) in bases.iter().enumerate() {
-            if let Some(base) = base_opt {
-                if base.coins == 0 {
-                    eliminated_players.push(player);
+                    word &= word - 1;
                 }
             }
-        }
-
-        drop(bases);
-
-        for player in eliminated_players {
-            eliminate_player(player);
-        }
+        });
     });
 
-    // Check disconnections for affected players
-    BFS_WORKSPACE.with(|ws| {
-        TERRITORY.with(|t| {
-            ALIVE.with(|a| {
-                NEXT_POTENTIAL.with(|np| {
-                    CELL_COUNTS.with(|c| {
-                        BASES.with(|b| {
-                            let workspace = &mut *ws.borrow_mut();
-                            let territory = &mut *t.borrow_mut();
-                            let alive = &mut *a.borrow_mut();
-                            let potential = &mut *np.borrow_mut();
-                            let cell_counts = &mut *c.borrow_mut();
-                            let bases = &*b.borrow();
+    // Track cell count deltas: [births, deaths] per owner
+    let mut count_deltas = [0i32; MAX_PLAYERS + 1]; // Index 0 unused, 1-9 for players
 
-                            for (player, changes) in territory_changes.iter().enumerate() {
-                                if changes.is_empty() {
-                                    continue;
-                                }
+    // PASS 2: Apply all changes
+    GRID.with(|grid| {
+        NEXT_POTENTIAL.with(|next_potential| {
+            BALANCES.with(|balances| {
+                PLAYERS.with(|players| {
+                    let grid = &mut *grid.borrow_mut();
+                    let next_potential = &mut *next_potential.borrow_mut();
+                    let balances = &mut *balances.borrow_mut();
+                    let players = &*players.borrow();
 
-                                for &(x, y) in changes {
-                                    check_disconnection(
-                                        workspace,
-                                        territory,
-                                        alive,
-                                        potential,
-                                        cell_counts,
-                                        bases,
-                                        player,
-                                        x,
-                                        y,
-                                    );
+                    // Clear next_potential
+                    next_potential.fill(0);
+
+                    // Apply each computed change
+                    for (idx, change) in changes {
+                        let (born, died) =
+                            apply_cell_change(grid, next_potential, balances, players, idx, change);
+
+                        if let Some(owner) = born {
+                            if (owner as usize) <= MAX_PLAYERS {
+                                count_deltas[owner as usize] += 1;
+                            }
+                        }
+                        if let Some(owner) = died {
+                            if (owner as usize) <= MAX_PLAYERS {
+                                count_deltas[owner as usize] -= 1;
+                            }
+                        }
+                    }
+                });
+            });
+        });
+    });
+
+    // Update cell counts and manage grace period for dead players
+    let now = ic_cdk::api::time();
+    CELL_COUNTS.with(|counts| {
+        ZERO_CELLS_SINCE.with(|zero_since| {
+            PLAYERS.with(|players| {
+                let counts = &mut *counts.borrow_mut();
+                let zero_since = &mut *zero_since.borrow_mut();
+                let players = &mut *players.borrow_mut();
+
+                for (owner, &delta) in count_deltas.iter().enumerate().skip(1) {
+                    let idx = owner - 1;
+                    if idx < counts.len() {
+                        let old_count = counts[idx];
+                        // Apply delta (can go negative temporarily, saturate to 0)
+                        let new_count = (old_count as i32 + delta).max(0) as u32;
+                        counts[idx] = new_count;
+
+                        // Extend zero_since vec if needed
+                        while zero_since.len() <= idx {
+                            zero_since.push(None);
+                        }
+
+                        if new_count == 0 && old_count > 0 {
+                            // Just hit 0 cells - start grace period
+                            zero_since[idx] = Some(now);
+                        } else if new_count > 0 && old_count == 0 {
+                            // Recovered from 0 cells - clear grace period
+                            zero_since[idx] = None;
+                        } else if new_count == 0 {
+                            // Still at 0 - check if grace period expired
+                            if let Some(since) = zero_since[idx] {
+                                if now.saturating_sub(since) >= SLOT_GRACE_PERIOD_NS {
+                                    // Grace period expired - free the slot
+                                    if idx < players.len() {
+                                        players[idx] = Principal::anonymous();
+                                    }
+                                    zero_since[idx] = None;
                                 }
                             }
-                        });
-                    });
-                });
+                        }
+                    }
+                }
             });
         });
     });
@@ -836,199 +600,142 @@ fn step_generation() {
         });
     });
 
-    // Update grace periods
-    let now = ic_cdk::api::time();
-    CELL_COUNTS.with(|c| {
-        ZERO_CELLS_SINCE.with(|z| {
-            BASES.with(|b| {
-                let counts = c.borrow();
-                let mut zero_since = z.borrow_mut();
-                let bases = b.borrow();
-
-                for player in 0..MAX_PLAYERS {
-                    if bases[player].is_some() {
-                        if counts[player] == 0 && zero_since[player].is_none() {
-                            zero_since[player] = Some(now);
-                        } else if counts[player] > 0 {
-                            zero_since[player] = None;
-                        }
-                    }
-                }
-            });
-        });
-    });
-
     GENERATION.with(|g| *g.borrow_mut() += 1);
 }
 
+/// Rebuild potential bitset by scanning for alive cells
+/// Called after upgrade or when potential might be corrupted
+fn rebuild_potential_from_grid() {
+    GRID.with(|g| {
+        POTENTIAL.with(|p| {
+            let grid = g.borrow();
+            let potential = &mut *p.borrow_mut();
+
+            // Clear potential
+            potential.fill(0);
+
+            // Add every alive cell and its neighbors
+            for idx in 0..TOTAL_CELLS {
+                if is_alive(grid[idx]) {
+                    add_with_neighbors(potential, idx);
+                }
+            }
+        });
+    });
+}
+
+/// Rebuild QUADRANT_TERRITORY from grid state
+/// Called on post_upgrade if territory data is missing (first deploy with this feature)
+fn rebuild_quadrant_territory() {
+    GRID.with(|g| {
+        QUADRANT_TERRITORY.with(|t| {
+            let grid = g.borrow();
+            let mut territory = t.borrow_mut();
+
+            // Clear all counts
+            for q in 0..TOTAL_QUADRANTS {
+                for p in 0..=MAX_PLAYERS {
+                    territory[q][p] = 0;
+                }
+            }
+
+            // Count from grid - all owned cells (alive or dead) count as territory
+            for (idx, &cell) in grid.iter().enumerate() {
+                let owner = get_owner(cell) as usize;
+                if owner > 0 && owner <= MAX_PLAYERS {
+                    let quadrant = get_quadrant(idx);
+                    territory[quadrant][owner] += 1;
+                }
+            }
+        });
+    });
+
+    // Now calculate initial controllers
+    QUADRANT_TERRITORY.with(|t| {
+        QUADRANT_CONTROLLER.with(|c| {
+            let territory = t.borrow();
+            let mut controllers = c.borrow_mut();
+
+            for q in 0..TOTAL_QUADRANTS {
+                let total: u32 = territory[q][1..=MAX_PLAYERS].iter().sum();
+                if total == 0 {
+                    controllers[q] = 0;
+                    continue;
+                }
+
+                let threshold = (total * CONTROLLER_THRESHOLD_PERCENT) / 100;
+                controllers[q] = (1..=MAX_PLAYERS as u8)
+                    .find(|&p| territory[q][p as usize] >= threshold)
+                    .unwrap_or(0);
+            }
+        });
+    });
+
+    ic_cdk::println!("Rebuilt quadrant territory counts from grid");
+}
+
 // ============================================================================
-// PLAYER ELIMINATION
+// QUADRANT WIPE SYSTEM
 // ============================================================================
 
-fn eliminate_player(player: usize) {
-    TERRITORY.with(|t| {
-        ALIVE.with(|a| {
-            POTENTIAL.with(|p| {
-                CELL_COUNTS.with(|c| {
-                    let territory = &mut *t.borrow_mut();
-                    let alive = &mut *a.borrow_mut();
-                    let potential = &mut *p.borrow_mut();
-                    let cell_counts = &mut *c.borrow_mut();
+/// Wipe all alive cells in a quadrant (preserve owner and coins)
+fn wipe_quadrant(quadrant: usize) {
+    let qx_start = (quadrant % QUADRANTS_PER_SIDE) * QUADRANT_SIZE;
+    let qy_start = (quadrant / QUADRANTS_PER_SIDE) * QUADRANT_SIZE;
 
-                    // Kill all cells and clear territory
-                    let pt = &territory[player];
-                    for chunk_idx in 0..TOTAL_CHUNKS {
-                        if (pt.chunk_mask >> chunk_idx) & 1 == 0 {
-                            continue;
-                        }
+    GRID.with(|g| {
+        POTENTIAL.with(|p| {
+            let grid = &mut *g.borrow_mut();
+            let potential = &mut *p.borrow_mut();
 
-                        let vec_idx = popcount_below(pt.chunk_mask, chunk_idx);
-                        let chunk = &pt.chunks[vec_idx];
+            for y in qy_start..(qy_start + QUADRANT_SIZE) {
+                for x in qx_start..(qx_start + QUADRANT_SIZE) {
+                    let idx = coord_to_index(x, y);
+                    let cell = grid[idx];
 
-                        let chunk_base_x = ((chunk_idx % CHUNKS_PER_ROW) * CHUNK_SIZE as usize) as u16;
-                        let chunk_base_y = ((chunk_idx / CHUNKS_PER_ROW) * CHUNK_SIZE as usize) as u16;
+                    if is_alive(cell) {
+                        // Kill cell but preserve owner and coins
+                        grid[idx] = set_alive(cell, false);
 
-                        for local_y in 0..64 {
-                            let mut word = chunk[local_y];
-                            while word != 0 {
-                                let local_x = word.trailing_zeros() as usize;
-                                word &= word - 1;
+                        // Remove from potential set
+                        let word_idx = idx >> 6;
+                        let bit_mask = 1u64 << (idx & 63);
+                        potential[word_idx] &= !bit_mask;
 
-                                let x = chunk_base_x + local_x as u16;
-                                let y = chunk_base_y + local_y as u16;
-                                let idx = coords_to_idx(x, y);
-
-                                if is_alive_idx(alive, idx) {
-                                    clear_alive_idx(alive, idx);
-                                    mark_neighbors_potential(potential, idx);
-                                }
-                            }
+                        // Add neighbors to potential (they might now change)
+                        for neighbor_idx in get_neighbor_indices(idx) {
+                            set_potential(potential, neighbor_idx);
                         }
                     }
-
-                    // Clear territory
-                    territory[player] = PlayerTerritory::default();
-                    cell_counts[player] = 0;
-                });
-            });
-        });
-    });
-
-    // Clear player data
-    BASES.with(|b| b.borrow_mut()[player] = None);
-    PLAYERS.with(|p| p.borrow_mut()[player] = None);
-    ZERO_CELLS_SINCE.with(|z| z.borrow_mut()[player] = None);
-}
-
-// ============================================================================
-// QUADRANT WIPE
-// ============================================================================
-
-fn wipe_quadrant(quadrant: u8) {
-    let (x_start, y_start, _, _) = quadrant_bounds(quadrant);
-
-    ALIVE.with(|a| {
-        POTENTIAL.with(|p| {
-            TERRITORY.with(|t| {
-                CELL_COUNTS.with(|c| {
-                    ZERO_CELLS_SINCE.with(|z| {
-                        BASES.with(|b| {
-                            let alive = &mut *a.borrow_mut();
-                            let potential = &mut *p.borrow_mut();
-                            let territory = &*t.borrow();
-                            let cell_counts = &mut *c.borrow_mut();
-                            let zero_since = &mut *z.borrow_mut();
-                            let bases = &*b.borrow();
-
-                            let now = ic_cdk::api::time();
-
-                            for row_offset in 0..QUADRANT_SIZE {
-                                let y = y_start + row_offset;
-                                let word_row_base = (y as usize) * WORDS_PER_ROW;
-                                let word_col_start = (x_start / 64) as usize;
-
-                                for word_offset in 0..2 {
-                                    let word_idx = word_row_base + word_col_start + word_offset;
-                                    let mut alive_word = alive[word_idx];
-
-                                    if alive_word == 0 {
-                                        continue;
-                                    }
-
-                                    while alive_word != 0 {
-                                        let bit_pos = alive_word.trailing_zeros() as usize;
-                                        alive_word &= alive_word - 1;
-
-                                        let x = (word_col_start * 64 + word_offset * 64 + bit_pos) as u16;
-                                        let idx = coords_to_idx(x, y);
-
-                                        if let Some(owner) = find_owner(territory, x, y) {
-                                            cell_counts[owner] = cell_counts[owner].saturating_sub(1);
-
-                                            if cell_counts[owner] == 0 && bases[owner].is_some() {
-                                                zero_since[owner] = Some(now);
-                                            }
-                                        }
-
-                                        mark_neighbors_potential(potential, idx);
-                                    }
-
-                                    alive[word_idx] = 0;
-                                }
-                            }
-                        });
-                    });
-                });
-            });
+                }
+            }
         });
     });
 }
 
+/// Run quadrant wipe if 1 minute has passed
 fn run_wipe_if_needed() {
     let now = ic_cdk::api::time();
 
-    let should_wipe = LAST_WIPE_NS.with(|t| now.saturating_sub(*t.borrow()) >= WIPE_INTERVAL_NS);
+    let should_wipe = LAST_WIPE_TIME_NS.with(|t| {
+        now.saturating_sub(*t.borrow()) >= WIPE_INTERVAL_NS
+    });
 
     if !should_wipe {
         return;
     }
 
-    LAST_WIPE_NS.with(|t| *t.borrow_mut() = now);
+    LAST_WIPE_TIME_NS.with(|t| *t.borrow_mut() = now);
 
     let quadrant = NEXT_WIPE_QUADRANT.with(|q| {
         let current = *q.borrow();
-        *q.borrow_mut() = (current + 1) % TOTAL_QUADRANTS as u8;
+        *q.borrow_mut() = (current + 1) % TOTAL_QUADRANTS;
         current
     });
 
     wipe_quadrant(quadrant);
-}
 
-fn check_grace_periods() {
-    let now = ic_cdk::api::time();
-
-    ZERO_CELLS_SINCE.with(|z| {
-        BASES.with(|b| {
-            let zero_since = z.borrow();
-            let bases = b.borrow();
-            let mut to_eliminate = Vec::new();
-
-            for player in 0..MAX_PLAYERS {
-                if let Some(since) = zero_since[player] {
-                    if now.saturating_sub(since) >= GRACE_PERIOD_NS && bases[player].is_some() {
-                        to_eliminate.push(player);
-                    }
-                }
-            }
-
-            drop(zero_since);
-            drop(bases);
-
-            for player in to_eliminate {
-                eliminate_player(player);
-            }
-        });
-    });
+    ic_cdk::println!("Wiped quadrant {}", quadrant);
 }
 
 // ============================================================================
@@ -1036,44 +743,23 @@ fn check_grace_periods() {
 // ============================================================================
 
 fn start_simulation_timer() {
-    ic_cdk_timers::set_timer_interval(Duration::from_millis(TICK_INTERVAL_MS), || {
+    // IC CDK timers expect an async function that returns a Future.
+    // The async block runs synchronously (no .await points), so it executes immediately.
+    ic_cdk_timers::set_timer_interval(Duration::from_millis(TICK_INTERVAL_MS), || async {
         let is_running = IS_RUNNING.with(|r| *r.borrow());
         if is_running {
             for _ in 0..GENERATIONS_PER_TICK {
                 step_generation();
             }
+
+            // Run quadrant wipe if needed
             run_wipe_if_needed();
-            check_grace_periods();
         }
     });
 }
 
 // ============================================================================
-// REBUILD HELPERS
-// ============================================================================
-
-fn rebuild_potential_from_alive() {
-    ALIVE.with(|a| {
-        POTENTIAL.with(|p| {
-            let alive = a.borrow();
-            let potential = &mut *p.borrow_mut();
-            potential.fill(0);
-
-            for word_idx in 0..GRID_WORDS {
-                let mut word = alive[word_idx];
-                while word != 0 {
-                    let bit = word.trailing_zeros() as usize;
-                    word &= word - 1;
-                    let idx = word_idx * 64 + bit;
-                    mark_with_neighbors_potential(potential, idx);
-                }
-            }
-        });
-    });
-}
-
-// ============================================================================
-// CANDID TYPES
+// TYPES FOR CANDID
 // ============================================================================
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -1081,77 +767,61 @@ pub struct SparseCell {
     pub x: u16,
     pub y: u16,
     pub owner: u8,
-}
-
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct BaseInfo {
-    pub x: u16,
-    pub y: u16,
-    pub coins: u64,
-}
-
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct PlayerInfo {
-    pub principal: Principal,
-    pub base: Option<BaseInfo>,
-    pub alive_cells: u32,
-    pub in_grace_period: bool,
-    pub grace_seconds_remaining: Option<u64>,
-    pub wallet_balance: u64,
+    pub coins: u8,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct GameState {
     pub generation: u64,
     pub alive_cells: Vec<SparseCell>,
-    pub players: Vec<Option<PlayerInfo>>,
-    pub next_wipe: (u8, u64),
-    pub is_running: bool,
-}
-
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct SlotInfo {
-    pub slot: u8,
-    pub occupied: bool,
-    pub principal: Option<Principal>,
-    pub base_x: Option<u16>,
-    pub base_y: Option<u16>,
-    pub base_coins: Option<u64>,
-    pub alive_cells: u32,
-    pub in_grace_period: bool,
+    pub territory: Vec<SparseCell>,
+    pub players: Vec<Principal>,
+    pub balances: Vec<u64>,
+    pub player_num: Option<u8>,
+    pub quadrant_controllers: Vec<u8>,  // 16 values: 0=no controller, 1-9=player
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct PlaceResult {
     pub placed: u32,
     pub generation: u64,
-    pub new_base_coins: u64,
+    pub new_balance: u64,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct JoinResult {
-    pub slot: u8,
-    pub base_x: u16,
-    pub base_y: u16,
+pub struct SlotInfo {
+    pub slot: u8,                     // 1-9
+    pub occupied: bool,               // true if a player is in this slot
+    pub cell_count: u32,              // alive cells owned by this slot
+    pub territory_cells: u32,         // dead cells (territory) owned by this slot
+    pub territory_coins: u32,         // coins sitting in territory cells
 }
 
-// ============================================================================
-// STABLE MEMORY
-// ============================================================================
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct QuadrantInfo {
+    pub quadrant: u8,                  // 0-15
+    pub territory_by_player: Vec<u32>, // 9 values: [P1, P2, ..., P9]
+    pub total_territory: u32,
+    pub coins_by_player: Vec<u32>,     // 9 values: coins per player in this quadrant
+    pub total_coins: u32,
+    pub controller: u8,                // 0=no controller, 1-9=player number
+}
 
-#[derive(CandidType, Deserialize, Default)]
-struct PersistedState {
-    alive: Vec<u64>,
-    territory: Vec<PlayerTerritory>,
-    bases: Vec<Option<Base>>,
-    players: Vec<Option<Principal>>,
-    wallets: Vec<(Principal, u64)>,
-    cell_counts: Vec<u32>,
-    zero_cells_since: Vec<Option<u64>>,
+#[derive(CandidType, Deserialize, Clone, Debug, Default)]
+struct Metadata {
     generation: u64,
+    players: Vec<Principal>,
+    balances: Vec<(Principal, u64)>,
+    cell_counts: Vec<u32>,
     is_running: bool,
-    next_wipe_quadrant: u8,
-    last_wipe_ns: u64,
+    // Added later - optional for backward compatibility
+    #[serde(default)]
+    zero_cells_since: Vec<Option<u64>>,
+    // Quadrant control state (added for 80% territorial control feature)
+    #[serde(default)]
+    quadrant_territory: Vec<Vec<u32>>,  // [quadrant][player]
+    #[serde(default)]
+    quadrant_controllers: Vec<u8>,       // 16 values, 0=no controller, 1-9=player
 }
 
 // ============================================================================
@@ -1163,107 +833,115 @@ fn init() {
     IS_RUNNING.with(|r| *r.borrow_mut() = true);
     start_simulation_timer();
     ic_cdk::println!(
-        "Life2 v2 Backend Initialized - {}x{} territory-based world",
+        "Life2 Backend Initialized - {}x{} sparse world, {} gen/sec",
         GRID_SIZE,
-        GRID_SIZE
+        GRID_SIZE,
+        GENERATIONS_PER_TICK
     );
 }
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    let state = PersistedState {
-        alive: ALIVE.with(|a| a.borrow().to_vec()),
-        territory: TERRITORY.with(|t| t.borrow().to_vec()),
-        bases: BASES.with(|b| b.borrow().to_vec()),
-        players: PLAYERS.with(|p| p.borrow().to_vec()),
-        wallets: WALLETS.with(|w| w.borrow().iter().map(|(&k, &v)| (k, v)).collect()),
-        cell_counts: CELL_COUNTS.with(|c| c.borrow().to_vec()),
-        zero_cells_since: ZERO_CELLS_SINCE.with(|z| z.borrow().to_vec()),
-        generation: GENERATION.with(|g| *g.borrow()),
-        is_running: IS_RUNNING.with(|r| *r.borrow()),
-        next_wipe_quadrant: NEXT_WIPE_QUADRANT.with(|q| *q.borrow()),
-        last_wipe_ns: LAST_WIPE_NS.with(|t| *t.borrow()),
-    };
+    // Save grid (256 KB)
+    GRID.with(|g| {
+        ic_cdk::stable::stable_grow(5).ok();
+        ic_cdk::stable::stable_write(0, &g.borrow()[..]);
+    });
 
-    ic_cdk::storage::stable_save((state,)).expect("Failed to save state");
+    // Save metadata at offset 256KB
+    let metadata = Metadata {
+        generation: GENERATION.with(|g| *g.borrow()),
+        players: PLAYERS.with(|p| p.borrow().clone()),
+        balances: BALANCES.with(|b| b.borrow().iter().map(|(&k, &v)| (k, v)).collect()),
+        cell_counts: CELL_COUNTS.with(|c| c.borrow().clone()),
+        is_running: IS_RUNNING.with(|r| *r.borrow()),
+        zero_cells_since: ZERO_CELLS_SINCE.with(|z| z.borrow().clone()),
+        // Save quadrant control state
+        quadrant_territory: QUADRANT_TERRITORY.with(|t| {
+            t.borrow().iter().map(|q| q.to_vec()).collect()
+        }),
+        quadrant_controllers: QUADRANT_CONTROLLER.with(|c| c.borrow().to_vec()),
+    };
+    let encoded = candid::encode_one(&metadata).unwrap();
+    ic_cdk::stable::stable_write(TOTAL_CELLS as u64, &(encoded.len() as u32).to_le_bytes());
+    ic_cdk::stable::stable_write(TOTAL_CELLS as u64 + 4, &encoded);
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    match ic_cdk::storage::stable_restore::<(PersistedState,)>() {
-        Ok((state,)) => {
-            ALIVE.with(|a| {
-                let mut alive = a.borrow_mut();
-                for (i, &val) in state.alive.iter().enumerate() {
-                    if i < alive.len() {
-                        alive[i] = val;
+    let stable_size = ic_cdk::stable::stable_size();
+    let mut has_territory_data = false;
+
+    if stable_size >= 5 {
+        // Restore grid
+        GRID.with(|g| {
+            let mut grid = g.borrow_mut();
+            let mut buf = [0u8; TOTAL_CELLS];
+            ic_cdk::stable::stable_read(0, &mut buf);
+            *grid = buf;
+        });
+
+        // Restore metadata
+        let mut len_buf = [0u8; 4];
+        ic_cdk::stable::stable_read(TOTAL_CELLS as u64, &mut len_buf);
+        let len = u32::from_le_bytes(len_buf) as usize;
+
+        if len > 0 && len < 100_000 {
+            let mut meta_buf = vec![0u8; len];
+            ic_cdk::stable::stable_read(TOTAL_CELLS as u64 + 4, &mut meta_buf);
+
+            if let Ok(metadata) = candid::decode_one::<Metadata>(&meta_buf) {
+                GENERATION.with(|g| *g.borrow_mut() = metadata.generation);
+                PLAYERS.with(|p| *p.borrow_mut() = metadata.players);
+                BALANCES.with(|b| {
+                    let mut balances = b.borrow_mut();
+                    for (principal, amount) in metadata.balances {
+                        balances.insert(principal, amount);
                     }
-                }
-            });
+                });
+                CELL_COUNTS.with(|c| *c.borrow_mut() = metadata.cell_counts);
+                IS_RUNNING.with(|r| *r.borrow_mut() = metadata.is_running);
+                ZERO_CELLS_SINCE.with(|z| *z.borrow_mut() = metadata.zero_cells_since);
 
-            TERRITORY.with(|t| {
-                let mut territory = t.borrow_mut();
-                for (i, val) in state.territory.into_iter().enumerate() {
-                    if i < territory.len() {
-                        territory[i] = val;
-                    }
+                // Restore quadrant territory counts
+                has_territory_data = !metadata.quadrant_territory.is_empty();
+                if has_territory_data {
+                    QUADRANT_TERRITORY.with(|t| {
+                        let mut territory = t.borrow_mut();
+                        for (q, counts) in metadata.quadrant_territory.iter().enumerate() {
+                            if q < TOTAL_QUADRANTS {
+                                for (p, &count) in counts.iter().enumerate() {
+                                    if p <= MAX_PLAYERS {
+                                        territory[q][p] = count;
+                                    }
+                                }
+                            }
+                        }
+                    });
                 }
-            });
 
-            BASES.with(|b| {
-                let mut bases = b.borrow_mut();
-                for (i, val) in state.bases.into_iter().enumerate() {
-                    if i < bases.len() {
-                        bases[i] = val;
-                    }
+                // Restore quadrant controllers
+                if !metadata.quadrant_controllers.is_empty() {
+                    QUADRANT_CONTROLLER.with(|c| {
+                        let mut controllers = c.borrow_mut();
+                        for (i, &controller) in metadata.quadrant_controllers.iter().enumerate() {
+                            if i < TOTAL_QUADRANTS {
+                                controllers[i] = controller;
+                            }
+                        }
+                    });
                 }
-            });
-
-            PLAYERS.with(|p| {
-                let mut players = p.borrow_mut();
-                for (i, val) in state.players.into_iter().enumerate() {
-                    if i < players.len() {
-                        players[i] = val;
-                    }
-                }
-            });
-
-            WALLETS.with(|w| {
-                let mut wallets = w.borrow_mut();
-                for (k, v) in state.wallets {
-                    wallets.insert(k, v);
-                }
-            });
-
-            CELL_COUNTS.with(|c| {
-                let mut counts = c.borrow_mut();
-                for (i, val) in state.cell_counts.into_iter().enumerate() {
-                    if i < counts.len() {
-                        counts[i] = val;
-                    }
-                }
-            });
-
-            ZERO_CELLS_SINCE.with(|z| {
-                let mut zero_since = z.borrow_mut();
-                for (i, val) in state.zero_cells_since.into_iter().enumerate() {
-                    if i < zero_since.len() {
-                        zero_since[i] = val;
-                    }
-                }
-            });
-
-            GENERATION.with(|g| *g.borrow_mut() = state.generation);
-            IS_RUNNING.with(|r| *r.borrow_mut() = state.is_running);
-            NEXT_WIPE_QUADRANT.with(|q| *q.borrow_mut() = state.next_wipe_quadrant);
-            LAST_WIPE_NS.with(|t| *t.borrow_mut() = state.last_wipe_ns);
-        }
-        Err(_) => {
-            ic_cdk::println!("No previous state to restore");
+            }
         }
     }
 
-    rebuild_potential_from_alive();
+    rebuild_potential_from_grid();
+
+    // If no territory data (first deploy with this feature), rebuild from grid
+    if !has_territory_data {
+        rebuild_quadrant_territory();
+    }
+
     start_simulation_timer();
 }
 
@@ -1271,20 +949,30 @@ fn post_upgrade() {
 // AUTHENTICATION
 // ============================================================================
 
+/// Admin principal (daopad identity) - only this principal can pause/resume/reset
 const ADMIN_PRINCIPAL: &str = "67ktx-ln42b-uzmo5-bdiyn-gu62c-cd4h4-a5qt3-2w3rs-cixdl-iaso2-mqe";
 
+/// Check if caller is anonymous (not authenticated)
+/// Anonymous principal is "2vxsx-fae"
+fn is_anonymous(principal: &Principal) -> bool {
+    *principal == Principal::anonymous()
+}
+
+/// Require authenticated caller, return error if anonymous
 fn require_authenticated() -> Result<Principal, String> {
-    let caller = ic_cdk::api::caller();
-    if caller == Principal::anonymous() {
-        return Err("Authentication required".to_string());
+    let caller = ic_cdk::api::msg_caller();
+    if is_anonymous(&caller) {
+        return Err("Authentication required. Please log in with Internet Identity.".to_string());
     }
     Ok(caller)
 }
 
+/// Require admin caller, return error if not admin
 fn require_admin() -> Result<(), String> {
-    let caller = ic_cdk::api::caller();
+    let caller = ic_cdk::api::msg_caller();
     let admin = Principal::from_text(ADMIN_PRINCIPAL)
-        .map_err(|_| "Invalid admin principal")?;
+        .map_err(|_| "Invalid admin principal configured".to_string())?;
+
     if caller != admin {
         return Err("Admin access required".to_string());
     }
@@ -1295,210 +983,212 @@ fn require_admin() -> Result<(), String> {
 // UPDATE METHODS
 // ============================================================================
 
-/// Get coins from faucet
-#[update]
-fn faucet() -> Result<u64, String> {
-    let caller = require_authenticated()?;
+/// Find or create a player slot for a principal.
+/// Returns (player_number, is_new_player).
+/// Reuses empty slots (where previous player died) before adding new ones.
+fn get_or_create_player_slot(caller: Principal) -> Result<(u8, bool), String> {
+    PLAYERS.with(|p| {
+        CELL_COUNTS.with(|c| {
+            let mut players = p.borrow_mut();
+            let mut counts = c.borrow_mut();
 
-    let balance = WALLETS.with(|w| {
-        let mut wallets = w.borrow_mut();
-        let balance = wallets.entry(caller).or_insert(0);
-        *balance += FAUCET_AMOUNT;
-        *balance
-    });
+            // Check if already has an active slot
+            if let Some(pos) = players.iter().position(|&p| p == caller) {
+                return Ok(((pos + 1) as u8, false));
+            }
 
-    Ok(balance)
+            // Look for an empty slot (Principal::anonymous())
+            if let Some(pos) = players.iter().position(|&p| p == Principal::anonymous()) {
+                players[pos] = caller;
+                counts[pos] = 0;
+                return Ok(((pos + 1) as u8, true));
+            }
+
+            // No empty slots, try to add a new one
+            if players.len() >= MAX_PLAYERS {
+                return Err("Game full - max 9 players".to_string());
+            }
+
+            players.push(caller);
+            counts.push(0);
+            Ok((players.len() as u8, true))
+        })
+    })
 }
 
-/// Join the game by placing a base
+/// Join the game and get assigned a player number (1-9)
+/// Requires authentication - anonymous users cannot join.
 #[update]
-fn join_game(base_x: i32, base_y: i32) -> Result<JoinResult, String> {
+fn join_game() -> Result<u8, String> {
     let caller = require_authenticated()?;
 
-    // Validate coordinates
-    if base_x < 0 || base_x >= GRID_SIZE as i32 || base_y < 0 || base_y >= GRID_SIZE as i32 {
-        return Err("Coordinates out of range".to_string());
-    }
-    let base_x = base_x as u16;
-    let base_y = base_y as u16;
+    let (player_num, _is_new) = get_or_create_player_slot(caller)?;
 
-    // Check not already playing
-    if find_player_slot(caller).is_some() {
-        return Err("Already in game".to_string());
-    }
+    // No automatic starting balance - players use faucet() to get coins
+    Ok(player_num)
+}
 
-    // Check wallet balance
-    let balance = WALLETS.with(|w| w.borrow().get(&caller).copied().unwrap_or(0));
-    if balance < BASE_COST {
-        return Err(format!("Need {} coins, have {}", BASE_COST, balance));
+/// Join the game at a specific slot (1-9).
+/// Lets player choose their color and potentially inherit territory from dead players.
+#[update]
+fn join_slot(slot: u8) -> Result<u8, String> {
+    let caller = require_authenticated()?;
+
+    if slot < 1 || slot > MAX_PLAYERS as u8 {
+        return Err(format!("Invalid slot: must be 1-{}", MAX_PLAYERS));
     }
 
-    // Check quadrant is free
-    let quadrant = get_quadrant(base_x, base_y);
-    if quadrant_has_base(quadrant) {
-        return Err("Quadrant already has a base".to_string());
-    }
+    let now = ic_cdk::api::time();
 
-    // Check no overlap with existing bases
-    BASES.with(|b| {
-        let bases = b.borrow();
-        for base_opt in bases.iter() {
-            if let Some(existing) = base_opt {
-                if bases_would_overlap(base_x, base_y, existing) {
-                    return Err("Overlaps existing base".to_string());
+    PLAYERS.with(|p| {
+        CELL_COUNTS.with(|c| {
+            ZERO_CELLS_SINCE.with(|z| {
+                let mut players = p.borrow_mut();
+                let mut counts = c.borrow_mut();
+                let mut zero_since = z.borrow_mut();
+
+                // Check if caller already has a slot
+                if let Some(pos) = players.iter().position(|&p| p == caller) {
+                    return Ok((pos + 1) as u8); // Return existing slot
                 }
+
+                let idx = (slot - 1) as usize;
+
+                // Extend vectors if needed
+                while players.len() <= idx {
+                    players.push(Principal::anonymous());
+                    counts.push(0);
+                }
+                while zero_since.len() <= idx {
+                    zero_since.push(None);
+                }
+
+                // Check if slot is available (empty or Principal::anonymous)
+                if players[idx] != Principal::anonymous() {
+                    return Err(format!("Slot {} is already occupied", slot));
+                }
+
+                // Claim the slot
+                players[idx] = caller;
+                counts[idx] = 0;
+                // Start grace period since they have 0 cells
+                zero_since[idx] = Some(now);
+
+                // No automatic starting balance - players use faucet() to get coins
+                Ok(slot)
+            })
+        })
+    })
+}
+
+/// Place cells on the grid. Costs 1 coin per cell.
+/// Requires authentication - anonymous users cannot place cells.
+#[update]
+fn place_cells(cells: Vec<(i32, i32)>) -> Result<PlaceResult, String> {
+    let caller = require_authenticated()?;
+
+    // Get or assign player slot (reuses empty slots)
+    let (player_num, _is_new) = get_or_create_player_slot(caller)?;
+
+    // No automatic starting balance - players use faucet() to get coins
+
+    let player_idx = (player_num - 1) as usize;
+    let cost = cells.len() as u64;
+
+    // Check balance (from HashMap keyed by principal)
+    let balance = BALANCES.with(|b| b.borrow().get(&caller).copied().unwrap_or(0));
+    if balance < cost {
+        return Err(format!("Need {} coins, have {}", cost, balance));
+    }
+
+    // Pre-compute wrapped coordinates for all cells
+    let wrapped_cells: Vec<usize> = cells
+        .iter()
+        .map(|(x, y)| {
+            let wx = ((*x % 512) + 512) as usize % 512;
+            let wy = ((*y % 512) + 512) as usize % 512;
+            coord_to_index(wx, wy)
+        })
+        .collect();
+
+    // VALIDATION PASS: Check ALL cells before placing any (all-or-nothing)
+    GRID.with(|g| {
+        let grid = g.borrow();
+        for &idx in &wrapped_cells {
+            let cell = grid[idx];
+
+            // Fail if cell is alive
+            if is_alive(cell) {
+                return Err("Cannot place on living cells".to_string());
+            }
+
+            // Fail if cell has 7 coins (cap)
+            if get_coins(cell) >= 7 {
+                return Err("Cannot place on cells with max coins".to_string());
+            }
+
+            // Fail if cell has coins belonging to another player's territory
+            let cell_owner = get_owner(cell);
+            if get_coins(cell) > 0 && cell_owner > 0 && cell_owner != player_num {
+                return Err("Cannot place on enemy territory with coins".to_string());
             }
         }
         Ok(())
     })?;
 
-    // Find free slot
-    let slot = PLAYERS.with(|p| {
-        let players = p.borrow();
-        players.iter().position(|opt| opt.is_none())
-    }).ok_or("No free slots")?;
+    // PLACEMENT PASS: All validation passed, now place all cells
+    let placed = wrapped_cells.len() as u32;
 
-    // Deduct coins
-    WALLETS.with(|w| {
-        let mut wallets = w.borrow_mut();
-        if let Some(bal) = wallets.get_mut(&caller) {
-            *bal -= BASE_COST;
-        }
-    });
-
-    // Create base
-    let base = Base {
-        x: base_x,
-        y: base_y,
-        coins: BASE_COST,
-    };
-
-    BASES.with(|b| b.borrow_mut()[slot] = Some(base));
-    PLAYERS.with(|p| p.borrow_mut()[slot] = Some(caller));
-
-    // Initialize 6x6 interior territory
-    TERRITORY.with(|t| {
-        let mut territory = t.borrow_mut();
-        for dy in 1..=BASE_INTERIOR {
-            for dx in 1..=BASE_INTERIOR {
-                let x = base_x.wrapping_add(dx) & GRID_MASK;
-                let y = base_y.wrapping_add(dy) & GRID_MASK;
-                set_territory(&mut territory, slot, x, y);
-            }
-        }
-    });
-
-    Ok(JoinResult {
-        slot: slot as u8,
-        base_x,
-        base_y,
-    })
-}
-
-/// Place cells on your territory
-#[update]
-fn place_cells(cells: Vec<(i32, i32)>) -> Result<PlaceResult, String> {
-    let caller = require_authenticated()?;
-
-    if cells.len() > MAX_PLACE_CELLS {
-        return Err(format!("Max {} cells per call", MAX_PLACE_CELLS));
-    }
-
-    if cells.is_empty() {
-        return Err("No cells provided".to_string());
-    }
-
-    let slot = find_player_slot(caller).ok_or("Not in game")?;
-
-    // Get base info
-    let base = BASES.with(|b| b.borrow()[slot]).ok_or("No base")?;
-
-    // Check wallet balance
-    let cost = cells.len() as u64;
-    let balance = WALLETS.with(|w| w.borrow().get(&caller).copied().unwrap_or(0));
-    if balance < cost {
-        return Err(format!("Need {} coins, have {}", cost, balance));
-    }
-
-    // Validate all cells first
-    TERRITORY.with(|t| {
-        ALIVE.with(|a| {
-            let territory = t.borrow();
-            let alive = a.borrow();
-
-            for &(x, y) in &cells {
-                if x < 0 || x >= GRID_SIZE as i32 || y < 0 || y >= GRID_SIZE as i32 {
-                    return Err("Coordinates out of range".to_string());
-                }
-                let x = x as u16;
-                let y = y as u16;
-
-                if !player_owns(&territory, slot, x, y) {
-                    return Err("Not your territory".to_string());
-                }
-
-                if is_wall(&base, x, y) {
-                    return Err("Cannot place on walls".to_string());
-                }
-
-                if is_alive_at(&alive, x, y) {
-                    return Err("Cell already alive".to_string());
-                }
-            }
-            Ok(())
-        })
-    })?;
-
-    // Deduct from wallet, add to base treasury
-    WALLETS.with(|w| {
-        if let Some(bal) = w.borrow_mut().get_mut(&caller) {
-            *bal -= cost;
-        }
-    });
-
-    let new_base_coins = BASES.with(|b| {
-        let mut bases = b.borrow_mut();
-        if let Some(ref mut base) = bases[slot] {
-            base.coins += cost;
-            base.coins
-        } else {
-            0
-        }
-    });
-
-    // Place cells
-    ALIVE.with(|a| {
+    GRID.with(|g| {
         POTENTIAL.with(|p| {
-            CELL_COUNTS.with(|c| {
-                let alive = &mut *a.borrow_mut();
-                let potential = &mut *p.borrow_mut();
-                let cell_counts = &mut *c.borrow_mut();
+            let grid = &mut *g.borrow_mut();
+            let potential = &mut *p.borrow_mut();
 
-                for &(x, y) in &cells {
-                    let x = x as u16;
-                    let y = y as u16;
-                    set_alive_at(alive, x, y);
-                    mark_with_neighbors_potential(potential, coords_to_idx(x, y));
-                }
+            for &idx in &wrapped_cells {
+                let cell = grid[idx];
+                let new_coins = get_coins(cell).saturating_add(1).min(7);
+                grid[idx] = make_cell(player_num, true, new_coins);
 
-                cell_counts[slot] += cells.len() as u32;
-            });
+                // Add to potential (CRITICAL!)
+                add_with_neighbors(potential, idx);
+            }
         });
     });
 
-    // Clear grace period
-    ZERO_CELLS_SINCE.with(|z| z.borrow_mut()[slot] = None);
+    // Deduct balance (from HashMap keyed by principal)
+    BALANCES.with(|b| {
+        if let Some(bal) = b.borrow_mut().get_mut(&caller) {
+            *bal = bal.saturating_sub(placed as u64);
+        }
+    });
+
+    // Update cell count for this player
+    CELL_COUNTS.with(|c| {
+        if let Some(count) = c.borrow_mut().get_mut(player_idx) {
+            *count += placed;
+        }
+    });
+
+    // Clear grace period if cells were placed
+    if placed > 0 {
+        ZERO_CELLS_SINCE.with(|z| {
+            if let Some(since) = z.borrow_mut().get_mut(player_idx) {
+                *since = None;
+            }
+        });
+    }
 
     let generation = GENERATION.with(|g| *g.borrow());
+    let new_balance = BALANCES.with(|b| b.borrow().get(&caller).copied().unwrap_or(0));
 
     Ok(PlaceResult {
-        placed: cells.len() as u32,
+        placed,
         generation,
-        new_base_coins,
+        new_balance,
     })
 }
 
-/// Pause the game (admin only)
+/// Pause the simulation (admin only)
 #[update]
 fn pause_game() -> Result<(), String> {
     require_admin()?;
@@ -1506,7 +1196,7 @@ fn pause_game() -> Result<(), String> {
     Ok(())
 }
 
-/// Resume the game (admin only)
+/// Resume the simulation (admin only)
 #[update]
 fn resume_game() -> Result<(), String> {
     require_admin()?;
@@ -1514,254 +1204,282 @@ fn resume_game() -> Result<(), String> {
     Ok(())
 }
 
-/// Reset the game (admin only)
+/// Reset the game to initial state (admin only)
+/// Note: Wallets are tied to principal identity and persist across resets
 #[update]
 fn reset_game() -> Result<(), String> {
     require_admin()?;
-
-    ALIVE.with(|a| a.borrow_mut().fill(0));
+    GRID.with(|g| g.borrow_mut().fill(0));
     POTENTIAL.with(|p| p.borrow_mut().fill(0));
     NEXT_POTENTIAL.with(|np| np.borrow_mut().fill(0));
-    TERRITORY.with(|t| {
+    GENERATION.with(|g| *g.borrow_mut() = 0);
+    // Clear player slots (all become available)
+    PLAYERS.with(|p| p.borrow_mut().clear());
+    CELL_COUNTS.with(|c| c.borrow_mut().clear());
+    ZERO_CELLS_SINCE.with(|z| z.borrow_mut().clear());
+    // Wallets persist - they're tied to principal, not game state
+    // Players can use faucet() to get more coins
+    IS_RUNNING.with(|r| *r.borrow_mut() = true);
+    // Reset wipe state
+    NEXT_WIPE_QUADRANT.with(|q| *q.borrow_mut() = 0);
+    LAST_WIPE_TIME_NS.with(|t| *t.borrow_mut() = 0);
+    // Reset quadrant control state
+    QUADRANT_TERRITORY.with(|t| {
         let mut territory = t.borrow_mut();
-        for pt in territory.iter_mut() {
-            *pt = PlayerTerritory::default();
+        for q in 0..TOTAL_QUADRANTS {
+            for p in 0..=MAX_PLAYERS {
+                territory[q][p] = 0;
+            }
         }
     });
-    BASES.with(|b| b.borrow_mut().fill(None));
-    PLAYERS.with(|p| p.borrow_mut().fill(None));
-    CELL_COUNTS.with(|c| c.borrow_mut().fill(0));
-    ZERO_CELLS_SINCE.with(|z| z.borrow_mut().fill(None));
-    GENERATION.with(|g| *g.borrow_mut() = 0);
-    IS_RUNNING.with(|r| *r.borrow_mut() = true);
-    NEXT_WIPE_QUADRANT.with(|q| *q.borrow_mut() = 0);
-    LAST_WIPE_NS.with(|t| *t.borrow_mut() = 0);
-
+    QUADRANT_CONTROLLER.with(|c| c.borrow_mut().fill(0));
     Ok(())
+}
+
+/// Faucet: Add 1000 coins to caller's wallet
+/// Requires authentication - anonymous users cannot use faucet.
+/// No limits - can be called multiple times.
+#[update]
+fn faucet() -> Result<u64, String> {
+    let caller = require_authenticated()?;
+
+    let new_balance = BALANCES.with(|b| {
+        let mut balances = b.borrow_mut();
+        let balance = balances.entry(caller).or_insert(0);
+        *balance += FAUCET_AMOUNT;
+        *balance
+    });
+
+    Ok(new_balance)
 }
 
 // ============================================================================
 // QUERY METHODS
 // ============================================================================
 
-/// Get full game state
+/// Get current game state (sparse format - only non-empty cells)
 #[query]
 fn get_state() -> GameState {
-    let now = ic_cdk::api::time();
+    let caller = ic_cdk::api::msg_caller();
 
-    let alive_cells = ALIVE.with(|a| {
-        TERRITORY.with(|t| {
-            let alive = a.borrow();
-            let territory = t.borrow();
-            let mut cells = Vec::new();
+    let mut alive_cells = Vec::new();
+    let mut territory = Vec::new();
 
-            for word_idx in 0..GRID_WORDS {
-                let mut word = alive[word_idx];
-                while word != 0 {
-                    let bit = word.trailing_zeros() as usize;
-                    word &= word - 1;
+    GRID.with(|g| {
+        let grid = g.borrow();
 
-                    let idx = word_idx * 64 + bit;
-                    let (x, y) = idx_to_coords(idx);
-                    let owner = find_owner(&territory, x, y).unwrap_or(0) as u8;
+        for idx in 0..TOTAL_CELLS {
+            let cell = grid[idx];
 
-                    cells.push(SparseCell { x, y, owner });
-                }
+            // Skip completely empty cells
+            if cell == 0 {
+                continue;
             }
 
-            cells
-        })
+            let (x, y) = index_to_coord(idx);
+            let owner = get_owner(cell);
+            let coins = get_coins(cell);
+
+            let sparse = SparseCell {
+                x: x as u16,
+                y: y as u16,
+                owner,
+                coins,
+            };
+
+            if is_alive(cell) {
+                alive_cells.push(sparse);
+            } else {
+                // Dead but has territory or coins
+                territory.push(sparse);
+            }
+        }
     });
 
-    let players = PLAYERS.with(|p| {
-        BASES.with(|b| {
-            CELL_COUNTS.with(|c| {
-                ZERO_CELLS_SINCE.with(|z| {
-                    WALLETS.with(|w| {
-                        let players = p.borrow();
-                        let bases = b.borrow();
-                        let counts = c.borrow();
-                        let zero_since = z.borrow();
-                        let wallets = w.borrow();
-
-                        (0..MAX_PLAYERS)
-                            .map(|i| {
-                                players[i].map(|principal| {
-                                    let base = bases[i].map(|b| BaseInfo {
-                                        x: b.x,
-                                        y: b.y,
-                                        coins: b.coins,
-                                    });
-
-                                    let (in_grace, grace_remaining) = if let Some(since) = zero_since[i] {
-                                        let elapsed = now.saturating_sub(since);
-                                        let remaining = GRACE_PERIOD_NS.saturating_sub(elapsed);
-                                        (true, Some(remaining / 1_000_000_000))
-                                    } else {
-                                        (false, None)
-                                    };
-
-                                    PlayerInfo {
-                                        principal,
-                                        base,
-                                        alive_cells: counts[i],
-                                        in_grace_period: in_grace,
-                                        grace_seconds_remaining: grace_remaining,
-                                        wallet_balance: wallets.get(&principal).copied().unwrap_or(0),
-                                    }
-                                })
-                            })
-                            .collect()
-                    })
-                })
-            })
-        })
+    let (players, player_num) = PLAYERS.with(|p| {
+        let players = p.borrow();
+        let player_num = players
+            .iter()
+            .position(|&p| p == caller)
+            .map(|i| (i + 1) as u8);
+        (players.clone(), player_num)
     });
 
-    let next_wipe = {
-        let quadrant = NEXT_WIPE_QUADRANT.with(|q| *q.borrow());
-        let last_wipe = LAST_WIPE_NS.with(|t| *t.borrow());
-        let elapsed = now.saturating_sub(last_wipe);
-        let remaining = WIPE_INTERVAL_NS.saturating_sub(elapsed);
-        (quadrant, remaining / 1_000_000_000)
-    };
+    // Build balances Vec parallel to players Vec (lookup each principal in HashMap)
+    let balances = BALANCES.with(|b| {
+        let balances_map = b.borrow();
+        players
+            .iter()
+            .map(|principal| balances_map.get(principal).copied().unwrap_or(0))
+            .collect()
+    });
 
-    let is_running = IS_RUNNING.with(|r| *r.borrow());
+    // Get quadrant controllers
+    let quadrant_controllers = QUADRANT_CONTROLLER.with(|c| c.borrow().to_vec());
 
     GameState {
         generation: GENERATION.with(|g| *g.borrow()),
         alive_cells,
+        territory,
         players,
-        next_wipe,
-        is_running,
+        balances,
+        player_num,
+        quadrant_controllers,
     }
 }
 
-/// Get info for all slots
-#[query]
-fn get_slots_info() -> Vec<SlotInfo> {
-    let now = ic_cdk::api::time();
-
-    PLAYERS.with(|p| {
-        BASES.with(|b| {
-            CELL_COUNTS.with(|c| {
-                ZERO_CELLS_SINCE.with(|z| {
-                    let players = p.borrow();
-                    let bases = b.borrow();
-                    let counts = c.borrow();
-                    let zero_since = z.borrow();
-
-                    (0..MAX_PLAYERS)
-                        .map(|i| {
-                            let occupied = players[i].is_some();
-                            let in_grace = zero_since[i].map(|since| {
-                                now.saturating_sub(since) < GRACE_PERIOD_NS
-                            }).unwrap_or(false);
-
-                            SlotInfo {
-                                slot: i as u8,
-                                occupied,
-                                principal: players[i],
-                                base_x: bases[i].map(|b| b.x),
-                                base_y: bases[i].map(|b| b.y),
-                                base_coins: bases[i].map(|b| b.coins),
-                                alive_cells: counts[i],
-                                in_grace_period: in_grace,
-                            }
-                        })
-                        .collect()
-                })
-            })
-        })
-    })
-}
-
-/// Get wallet balance
-#[query]
-fn get_balance() -> u64 {
-    let caller = ic_cdk::api::caller();
-    WALLETS.with(|w| w.borrow().get(&caller).copied().unwrap_or(0))
-}
-
-/// Get next wipe info
-#[query]
-fn get_next_wipe() -> (u8, u64) {
-    let now = ic_cdk::api::time();
-    let quadrant = NEXT_WIPE_QUADRANT.with(|q| *q.borrow());
-    let last_wipe = LAST_WIPE_NS.with(|t| *t.borrow());
-    let elapsed = now.saturating_sub(last_wipe);
-    let remaining = WIPE_INTERVAL_NS.saturating_sub(elapsed);
-    (quadrant, remaining / 1_000_000_000)
-}
-
-/// Get generation number
+/// Get current generation number
 #[query]
 fn get_generation() -> u64 {
     GENERATION.with(|g| *g.borrow())
 }
 
-/// Check if running
+/// Get number of alive cells
+#[query]
+fn get_alive_count() -> u32 {
+    GRID.with(|g| {
+        g.borrow()
+            .iter()
+            .filter(|&&cell| is_alive(cell))
+            .count() as u32
+    })
+}
+
+/// Get number of cells in potential set (diagnostic)
+#[query]
+fn get_potential_count() -> u32 {
+    POTENTIAL.with(|p| count_potential(&p.borrow()))
+}
+
+/// Get player's balance (stored by principal, persists across slot changes)
+#[query]
+fn get_balance() -> Result<u64, String> {
+    let caller = ic_cdk::api::msg_caller();
+    BALANCES.with(|b| {
+        b.borrow()
+            .get(&caller)
+            .copied()
+            .ok_or_else(|| "Not a player".to_string())
+    })
+}
+
+/// Check if simulation is running
 #[query]
 fn is_running() -> bool {
     IS_RUNNING.with(|r| *r.borrow())
 }
 
-/// Get alive cell count
+/// Get next quadrant wipe info
+/// Returns (next_quadrant_to_wipe, seconds_until_wipe)
 #[query]
-fn get_alive_count() -> u32 {
-    ALIVE.with(|a| {
-        a.borrow().iter().map(|w| w.count_ones()).sum()
+fn get_next_wipe() -> (u8, u64) {
+    let quadrant = NEXT_WIPE_QUADRANT.with(|q| *q.borrow());
+    let last_wipe = LAST_WIPE_TIME_NS.with(|t| *t.borrow());
+    let now = ic_cdk::api::time();
+    let elapsed = now.saturating_sub(last_wipe);
+    let remaining_ns = WIPE_INTERVAL_NS.saturating_sub(elapsed);
+    let remaining_secs = remaining_ns / 1_000_000_000;
+    (quadrant as u8, remaining_secs)
+}
+
+/// Get info about all 9 player slots (for slot selection UI)
+#[query]
+fn get_slots_info() -> Vec<SlotInfo> {
+    // Count cells and coins per owner by scanning grid
+    let mut alive_counts = [0u32; MAX_PLAYERS + 1];
+    let mut territory_counts = [0u32; MAX_PLAYERS + 1];
+    let mut coin_counts = [0u32; MAX_PLAYERS + 1];
+
+    GRID.with(|g| {
+        let grid = g.borrow();
+        for cell in grid.iter() {
+            let owner = get_owner(*cell) as usize;
+            if owner > 0 && owner <= MAX_PLAYERS {
+                if is_alive(*cell) {
+                    alive_counts[owner] += 1;
+                } else {
+                    territory_counts[owner] += 1;
+                }
+                coin_counts[owner] += get_coins(*cell) as u32;
+            }
+        }
+    });
+
+    PLAYERS.with(|p| {
+        let players = p.borrow();
+        (1..=MAX_PLAYERS as u8)
+            .map(|slot| {
+                let idx = (slot - 1) as usize;
+                let occupied = idx < players.len() && players[idx] != Principal::anonymous();
+                SlotInfo {
+                    slot,
+                    occupied,
+                    cell_count: alive_counts[slot as usize],
+                    territory_cells: territory_counts[slot as usize],
+                    territory_coins: coin_counts[slot as usize],
+                }
+            })
+            .collect()
     })
 }
 
-/// Get player's territory as coordinate list
+/// Get quadrant control information for all 16 quadrants
 #[query]
-fn get_territory(slot: u8) -> Vec<(u16, u16)> {
-    if slot as usize >= MAX_PLAYERS {
-        return Vec::new();
-    }
+fn get_quadrant_info() -> Vec<QuadrantInfo> {
+    // Get territory from incremental tracking (fast - no grid scan needed)
+    let territory = QUADRANT_TERRITORY.with(|t| *t.borrow());
+    let controllers = QUADRANT_CONTROLLER.with(|c| *c.borrow());
 
-    TERRITORY.with(|t| {
-        let territory = t.borrow();
-        let pt = &territory[slot as usize];
-        let mut coords = Vec::new();
+    // Scan grid for coins (still needed since coins aren't tracked incrementally)
+    let mut coins: [[u32; MAX_PLAYERS + 1]; TOTAL_QUADRANTS] = [[0; MAX_PLAYERS + 1]; TOTAL_QUADRANTS];
 
-        for chunk_idx in 0..TOTAL_CHUNKS {
-            if (pt.chunk_mask >> chunk_idx) & 1 == 0 {
-                continue;
-            }
-
-            let vec_idx = popcount_below(pt.chunk_mask, chunk_idx);
-            let chunk = &pt.chunks[vec_idx];
-
-            let chunk_base_x = ((chunk_idx % CHUNKS_PER_ROW) * CHUNK_SIZE as usize) as u16;
-            let chunk_base_y = ((chunk_idx / CHUNKS_PER_ROW) * CHUNK_SIZE as usize) as u16;
-
-            for local_y in 0..64 {
-                let mut word = chunk[local_y];
-                while word != 0 {
-                    let local_x = word.trailing_zeros() as usize;
-                    word &= word - 1;
-
-                    let x = chunk_base_x + local_x as u16;
-                    let y = chunk_base_y + local_y as u16;
-                    coords.push((x, y));
-                }
+    GRID.with(|g| {
+        let grid = g.borrow();
+        for (idx, &cell) in grid.iter().enumerate() {
+            let owner = get_owner(cell) as usize;
+            let cell_coins = get_coins(cell) as u32;
+            if owner > 0 && owner <= MAX_PLAYERS && cell_coins > 0 {
+                let q = get_quadrant(idx);
+                coins[q][owner] += cell_coins;
             }
         }
+    });
 
-        coords
-    })
+    (0..TOTAL_QUADRANTS)
+        .map(|q| {
+            let terr_by_player: Vec<u32> = (1..=MAX_PLAYERS).map(|p| territory[q][p]).collect();
+            let coins_by_player: Vec<u32> = (1..=MAX_PLAYERS).map(|p| coins[q][p]).collect();
+            let total_terr: u32 = terr_by_player.iter().sum();
+            let total_coins: u32 = coins_by_player.iter().sum();
+
+            QuadrantInfo {
+                quadrant: q as u8,
+                territory_by_player: terr_by_player,
+                total_territory: total_terr,
+                coins_by_player,
+                total_coins,
+                controller: controllers[q],
+            }
+        })
+        .collect()
 }
 
 /// Simple greeting
 #[query]
 fn greet(name: String) -> String {
     format!(
-        "Hello, {}! Welcome to Life2 v2 - a {}x{} territory-based Game of Life.",
-        name, GRID_SIZE, GRID_SIZE
+        "Hello, {}! Welcome to Life2 - a {}x{} sparse Game of Life at {} gen/sec.",
+        name, GRID_SIZE, GRID_SIZE, GENERATIONS_PER_TICK
     )
 }
+
+// ============================================================================
+// TESTS
+// ============================================================================
+
+// Tests are in a separate file for cleaner organization
+#[cfg(test)]
+mod tests;
 
 // Export Candid interface
 ic_cdk::export_candid!();

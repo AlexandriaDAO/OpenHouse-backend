@@ -46,6 +46,58 @@ type PlayerInfo = record {
     grace_seconds_remaining : opt nat64;
 };
 
+// Benchmark Types
+type OperationStats = record {
+    call_count : nat64;
+    total_cycles : nat64;
+    min_cycles : nat64;
+    max_cycles : nat64;
+    recent_samples : vec nat64;
+};
+
+type BenchmarkData = record {
+    tick : OperationStats;
+    step_generation : OperationStats;
+    compute_fates : OperationStats;
+    apply_changes : OperationStats;
+    disconnection_check : OperationStats;
+    wipe_quadrant : OperationStats;
+    timer_callback : OperationStats;
+    place_cells : OperationStats;
+    join_game : OperationStats;
+    get_state : OperationStats;
+    last_reset_ns : nat64;
+    tracking_duration_ns : nat64;
+};
+
+type CycleBreakdown = record {
+    tick_total : nat64;
+    compute_fates : nat64;
+    apply_changes : nat64;
+    disconnection : nat64;
+    wipe : nat64;
+    timer_overhead : nat64;
+};
+
+type IdleBurnInfo = record {
+    estimated_daily_cycles : nat64;
+    timer_cycles_per_day : nat64;
+    potential_savings : nat64;
+    is_idle : bool;
+    alive_cell_count : nat32;
+};
+
+type BenchmarkReport = record {
+    tracking_hours : float64;
+    total_ticks : nat64;
+    total_generations : nat64;
+    cycles_per_tick_avg : nat64;
+    cycles_per_generation_avg : nat64;
+    cycles_per_day_estimated : nat64;
+    cycles_per_day_breakdown : CycleBreakdown;
+    idle_burn_rate : IdleBurnInfo;
+};
+
 service : {
     // Player Actions
     faucet : () -> (variant { Ok : nat64; Err : text });
@@ -67,4 +119,9 @@ service : {
     get_alive_cells : () -> (vec record { nat16; nat16 }) query;
     get_alive_bitmap : () -> (vec nat64) query;
     greet : (text) -> (text) query;
+
+    // Benchmark Functions
+    get_benchmarks : () -> (BenchmarkData) query;
+    get_benchmark_report : () -> (BenchmarkReport) query;
+    reset_benchmarks : () -> ();
 }

@@ -3,6 +3,11 @@
 //! A 512x512 toroidal grid running Conway's Game of Life at 10 generations/second
 //! with base-centric territory control.
 
+mod benchmarks;
+
+// Re-export benchmark types for candid export
+pub use benchmarks::{BenchmarkData, BenchmarkReport, CycleBreakdown, IdleBurnInfo, OperationStats};
+
 use arrayvec::ArrayVec;
 use candid::{CandidType, Deserialize, Principal};
 use ic_cdk_timers::TimerId;
@@ -593,11 +598,19 @@ fn count_territory_cells(player: usize) -> u32 {
 // =============================================================================
 
 fn step_generation() {
+    benchmark!(StepGeneration);
+
     // Phase 1: Compute fates (read-only pass)
-    let (births, deaths, survivors) = compute_fates();
+    let (births, deaths, survivors) = {
+        benchmark!(ComputeFates);
+        compute_fates()
+    };
 
     // Phase 2: Apply changes
-    apply_changes(births, deaths, survivors);
+    {
+        benchmark!(ApplyChanges);
+        apply_changes(births, deaths, survivors);
+    }
 
     // Increment generation
     GENERATION.with(|gen| {
@@ -921,6 +934,8 @@ fn apply_changes(births: Vec<(usize, usize)>, deaths: Vec<usize>, survivors: Vec
 // =============================================================================
 
 fn check_all_disconnections(changes: &TerritoryChanges) {
+    benchmark!(DisconnectionCheck);
+
     for player in 0..MAX_PLAYERS {
         if (changes.affected_players >> player) & 1 == 0 {
             continue;
@@ -1166,6 +1181,8 @@ fn eliminate_player(player: usize) {
 }
 
 fn wipe_quadrant(quadrant: u8) {
+    benchmark!(WipeQuadrant);
+
     let (x_start, y_start, _, _) = quadrant_bounds(quadrant);
 
     ALIVE.with(|alive| {
@@ -1258,21 +1275,42 @@ fn check_grace_periods() {
 // =============================================================================
 
 fn tick() {
+    benchmark!(Tick);
+
     let running = IS_RUNNING.with(|r| *r.borrow());
     if !running {
         return;
     }
 
-    // Run 10 generations
-    for _ in 0..GENERATIONS_PER_TICK {
-        step_generation();
+    // OPTIMIZATION: Check if there are any alive cells or potential cells
+    // If not, skip expensive generation computation entirely
+    let has_activity = POTENTIAL.with(|p| {
+        p.borrow().iter().any(|&w| w != 0)
+    });
+
+    if has_activity {
+        // Run 10 generations
+        for _ in 0..GENERATIONS_PER_TICK {
+            step_generation();
+        }
+    } else {
+        // Just increment generation counter (no computation needed)
+        GENERATION.with(|gen| {
+            *gen.borrow_mut() += GENERATIONS_PER_TICK as u64;
+        });
     }
 
-    // Check quadrant wipe timer
+    // Check quadrant wipe timer (still needed even when idle)
     run_wipe_if_needed();
 
     // Check grace periods
     check_grace_periods();
+
+    // Stop timer if board is completely empty (saves cycles)
+    let board_empty = ALIVE.with(|a| a.borrow().iter().all(|&w| w == 0));
+    if board_empty {
+        stop_timer();
+    }
 }
 
 fn start_timer() {
@@ -1283,6 +1321,18 @@ fn start_timer() {
     TIMER_ID.with(|t| {
         *t.borrow_mut() = Some(timer_id);
     });
+}
+
+fn stop_timer() {
+    TIMER_ID.with(|t| {
+        if let Some(id) = t.borrow_mut().take() {
+            ic_cdk_timers::clear_timer(id);
+        }
+    });
+}
+
+fn is_timer_running() -> bool {
+    TIMER_ID.with(|t| t.borrow().is_some())
 }
 
 // =============================================================================
@@ -1375,6 +1425,39 @@ fn join_game(base_x: i32, base_y: i32) -> Result<u8, String> {
         players.borrow_mut()[slot] = Some(caller);
     });
 
+    // CRITICAL: Clear the entire 8x8 base area of enemy territory and cells
+    // This prevents the bug where overlapping territory causes cells to "siege" their own base
+    for dy in 0..BASE_SIZE {
+        for dx in 0..BASE_SIZE {
+            let x = base_x.wrapping_add(dx) & 511;
+            let y = base_y.wrapping_add(dy) & 511;
+            let idx = coords_to_idx(x, y);
+
+            // Kill any alive cells in the base area
+            if is_alive_idx(idx) {
+                clear_alive_idx(idx);
+                mark_neighbors_potential(idx);
+
+                // Decrement the owner's cell count
+                if let Some(owner) = find_owner(x, y) {
+                    CELL_COUNTS.with(|cc| {
+                        let mut cc = cc.borrow_mut();
+                        if cc[owner] > 0 {
+                            cc[owner] -= 1;
+                        }
+                    });
+                }
+            }
+
+            // Clear territory from ALL other players in the base area
+            for other_player in 0..MAX_PLAYERS {
+                if other_player != slot && player_owns(other_player, x, y) {
+                    clear_territory(other_player, x, y);
+                }
+            }
+        }
+    }
+
     // Initialize 6x6 interior territory (walls excluded)
     for dy in 1..7u16 {
         for dx in 1..7u16 {
@@ -1390,6 +1473,11 @@ fn join_game(base_x: i32, base_y: i32) -> Result<u8, String> {
 #[ic_cdk::update]
 fn place_cells(cells: Vec<(i32, i32)>) -> Result<u32, String> {
     let caller = ic_cdk::api::msg_caller();
+
+    // Restart timer if it was stopped (board was empty)
+    if !is_timer_running() {
+        start_timer();
+    }
 
     // Size limit validation
     if cells.len() > MAX_PLACE_CELLS {
@@ -1419,12 +1507,14 @@ fn place_cells(cells: Vec<(i32, i32)>) -> Result<u32, String> {
         let x = x as u16;
         let y = y as u16;
 
-        if !player_owns(slot, x, y) {
-            return Err("Not your territory".to_string());
-        }
-
         if is_wall(&base, x, y) {
             return Err("Cannot place on walls".to_string());
+        }
+
+        // Base interior is ALWAYS the owner's territory - no bitmap check needed
+        // For positions outside base, must own the territory
+        if !is_interior(&base, x, y) && !player_owns(slot, x, y) {
+            return Err("Not your territory".to_string());
         }
 
         if is_alive(x, y) {
@@ -1452,6 +1542,18 @@ fn place_cells(cells: Vec<(i32, i32)>) -> Result<u32, String> {
         set_alive(x, y);
         mark_with_neighbors_potential(coords_to_idx(x, y));
     }
+
+    // IMPORTANT: Copy NEXT_POTENTIAL to POTENTIAL so tick() detects activity
+    // Without this, if POTENTIAL was empty, tick() would skip simulation forever
+    NEXT_POTENTIAL.with(|np| {
+        POTENTIAL.with(|p| {
+            let np_ref = np.borrow();
+            let mut p_ref = p.borrow_mut();
+            for i in 0..TOTAL_WORDS {
+                p_ref[i] |= np_ref[i];
+            }
+        });
+    });
 
     // Update cell count
     CELL_COUNTS.with(|cc| {
@@ -1669,6 +1771,15 @@ fn greet(name: String) -> String {
     format!("Hello, {}! Welcome to Life2 v2.", name)
 }
 
+// Benchmark query functions are in benchmarks.rs
+
+/// Helper for benchmarks module to count alive cells
+pub(crate) fn get_alive_cell_count() -> u32 {
+    ALIVE.with(|alive| {
+        alive.borrow().iter().map(|w| w.count_ones()).sum()
+    })
+}
+
 // =============================================================================
 // STABLE MEMORY PERSISTENCE
 // =============================================================================
@@ -1792,6 +1903,8 @@ fn init() {
     LAST_WIPE_NS.with(|lw| {
         *lw.borrow_mut() = ic_cdk::api::time();
     });
+    // Rebuild POTENTIAL in case there are any alive cells (shouldn't be on fresh init, but be safe)
+    rebuild_potential_from_alive();
     start_timer();
 }
 

@@ -8,6 +8,9 @@ import { type IdentityProviderConfig, DEFAULT_PROVIDER, setPreferredProvider } f
 // 7 days in nanoseconds for longer session persistence
 const SEVEN_DAYS_IN_NANOSECONDS = BigInt(7 * 24 * 60 * 60 * 1_000_000_000);
 
+// Canonical origin for consistent principal derivation across all domains
+const DERIVATION_ORIGIN = "https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io";
+
 function login(loginOptions?: LoginOptions, providerConfig?: IdentityProviderConfig): void {
   const context = store.getSnapshot().context;
 
@@ -45,6 +48,7 @@ function login(loginOptions?: LoginOptions, providerConfig?: IdentityProviderCon
     onError: onLoginError,
     maxTimeToLive: SEVEN_DAYS_IN_NANOSECONDS,
     windowOpenerFeatures: "width=400,height=650,left=100,top=100",
+    derivationOrigin: DERIVATION_ORIGIN,
     ...loginOptions,
   };
 

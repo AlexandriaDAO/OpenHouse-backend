@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import useRouletteActor from '@/hooks/actors/useRouletteActor';
 import useLedgerActor from '@/hooks/actors/useLedgerActor';
 import { GameLayout } from '@/components/game-ui';
@@ -6,8 +6,6 @@ import { BettingRail } from '@/components/betting';
 import {
   RouletteWheel,
   BettingBoard,
-  ChipSelector,
-  PreviousNumbers,
   PlacedBet
 } from '@/components/game-specific/roulette';
 import { useGameBalance } from '@/providers/GameBalanceProvider';
@@ -36,11 +34,10 @@ export function RouletteGame() {
 
   // Game State
   const [bets, setBets] = useState<PlacedBet[]>([]);
-  const [chipValue, setChipValue] = useState(1);
+  const [selectedChipValue, setSelectedChipValue] = useState(1); // Selected chip denomination
   const [isSpinning, setIsSpinning] = useState(false);
   const [winningNumber, setWinningNumber] = useState<number | null>(null);
   const [lastResult, setLastResult] = useState<SpinResult | null>(null);
-  const [previousNumbers, setPreviousNumbers] = useState<{ number: number; color: any }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [maxBet] = useState(100); // Could be dynamic based on house balance
 
@@ -51,6 +48,23 @@ export function RouletteGame() {
   });
 
   const totalBetAmount = bets.reduce((sum, bet) => sum + bet.amount, 0);
+
+  // Calculate max potential payout (sum of all bet payouts if they hit)
+  const getPayoutMultiplier = (betType: BetType): number => {
+    if ('Straight' in betType) return 36; // 35:1 + stake
+    if ('Split' in betType) return 18;     // 17:1 + stake
+    if ('Street' in betType) return 12;    // 11:1 + stake
+    if ('Corner' in betType) return 9;     // 8:1 + stake
+    if ('SixLine' in betType) return 6;    // 5:1 + stake
+    if ('Column' in betType) return 3;     // 2:1 + stake
+    if ('Dozen' in betType) return 3;      // 2:1 + stake
+    if ('Red' in betType || 'Black' in betType) return 2;
+    if ('Odd' in betType || 'Even' in betType) return 2;
+    if ('High' in betType || 'Low' in betType) return 2;
+    return 2; // Default for even money
+  };
+
+  const maxPayout = bets.reduce((sum, bet) => sum + (bet.amount * getPayoutMultiplier(bet.betType)), 0);
 
   const handlePlaceBet = useCallback((newBet: PlacedBet) => {
     if (isSpinning) return;
@@ -92,21 +106,21 @@ export function RouletteGame() {
         const updated = [...prevBets];
         const currentAmount = updated[existingIndex].amount;
 
-        if (currentAmount <= chipValue) {
+        if (currentAmount <= selectedChipValue) {
           // Remove bet entirely
           updated.splice(existingIndex, 1);
         } else {
           // Reduce bet amount
           updated[existingIndex] = {
             ...updated[existingIndex],
-            amount: currentAmount - chipValue
+            amount: currentAmount - selectedChipValue
           };
         }
         return updated;
       }
       return prevBets;
     });
-  }, [chipValue, isSpinning]);
+  }, [selectedChipValue, isSpinning]);
 
   const handleClearBets = useCallback(() => {
     if (!isSpinning) {
@@ -141,12 +155,6 @@ export function RouletteGame() {
         setWinningNumber(spinResult.winning_number);
         setLastResult(spinResult);
 
-        // Add to previous numbers
-        setPreviousNumbers(prev => [
-          ...prev,
-          { number: spinResult.winning_number, color: spinResult.color }
-        ]);
-
         // Clear bets after spin completes (10 seconds)
         setTimeout(() => {
           setBets([]);
@@ -174,101 +182,97 @@ export function RouletteGame() {
           </div>
         )}
 
-        {/* Wheel */}
-        <div className="mb-6">
-          <RouletteWheel winningNumber={winningNumber} isSpinning={isSpinning} />
-        </div>
-
-        {/* Result display */}
-        {lastResult && !isSpinning && (
-          <div className="mb-4 text-center animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="text-2xl font-bold mb-2">
-              {Number(lastResult.net_result) > 0 ? (
-                <span className="text-green-400">WON ${formatUSDT(lastResult.total_payout)}</span>
-              ) : Number(lastResult.net_result) < 0 ? (
-                <span className="text-red-400">LOST ${formatUSDT(lastResult.total_bet)}</span>
-              ) : (
-                <span className="text-gray-400">PUSH</span>
-              )}
-            </div>
+        {/* Wheel + Controls Section */}
+        <div className="flex flex-col lg:flex-row items-center justify-center gap-4 lg:gap-8 mb-4">
+          {/* Wheel */}
+          <div className="flex-shrink-0">
+            <RouletteWheel winningNumber={winningNumber} isSpinning={isSpinning} />
           </div>
-        )}
 
-        {/* Previous numbers */}
-        <div className="w-full max-w-3xl mb-4">
-          <PreviousNumbers numbers={previousNumbers} />
+          {/* Controls & Info Panel */}
+          <div className="flex flex-col items-center gap-3">
+            {/* Result display */}
+            {lastResult && !isSpinning && (
+              <div className="text-center animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <div className="text-2xl font-bold">
+                  {Number(lastResult.net_result) > 0 ? (
+                    <span className="text-green-400">WON ${formatUSDT(lastResult.total_payout)}</span>
+                  ) : Number(lastResult.net_result) < 0 ? (
+                    <span className="text-red-400">LOST ${formatUSDT(lastResult.total_bet)}</span>
+                  ) : (
+                    <span className="text-gray-400">PUSH</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Stats Row - Signature info bar */}
+            <div className="flex items-center justify-between bg-[#0a0a14] rounded-lg p-3 border border-gray-800/50 w-full max-w-xs">
+              <div className="flex flex-col items-center flex-1">
+                <span className="text-[10px] text-gray-500 uppercase tracking-wider">Bets</span>
+                <span className="text-yellow-400 font-mono font-bold">{bets.length}</span>
+              </div>
+              <div className="h-6 w-px bg-gray-800"></div>
+              <div className="flex flex-col items-center flex-1">
+                <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total Bet</span>
+                <span className="text-white font-mono font-bold">${totalBetAmount.toFixed(2)}</span>
+              </div>
+              <div className="h-6 w-px bg-gray-800"></div>
+              <div className="flex flex-col items-center flex-1">
+                <span className="text-[10px] text-gray-500 uppercase tracking-wider">Max Payout</span>
+                <span className="text-dfinity-turquoise font-mono font-bold">${maxPayout.toFixed(2)}</span>
+              </div>
+              <div className="h-6 w-px bg-gray-800"></div>
+              <div className="flex flex-col items-center flex-1">
+                <span className="text-[10px] text-gray-500 uppercase tracking-wider">House Edge</span>
+                <span className="text-red-400 font-mono font-bold">2.7%</span>
+              </div>
+            </div>
+
+            {/* Controls */}
+            <div className="flex gap-3">
+              <button
+                onClick={handleClearBets}
+                disabled={isSpinning || bets.length === 0}
+                className="px-5 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                CLEAR BETS
+              </button>
+              <button
+                onClick={handleSpin}
+                disabled={isSpinning || !isAuthenticated || bets.length === 0}
+                className="px-8 py-2.5 bg-green-600 hover:bg-green-500 rounded-lg font-bold text-lg shadow-lg transform active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
+              >
+                {isSpinning ? 'SPINNING...' : `SPIN ($${totalBetAmount.toFixed(2)})`}
+              </button>
+            </div>
+
+            {/* Error display */}
+            {error && (
+              <div className="text-red-400 bg-red-900/20 border border-red-900/50 p-3 rounded-lg text-sm max-w-xs">
+                {error}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Chip selector */}
-        <div className="mb-4">
-          <ChipSelector
-            selectedValue={chipValue}
-            onSelect={setChipValue}
-            disabled={isSpinning}
-          />
-        </div>
-
-        {/* Betting board */}
+        {/* Betting board - uses chip value from betting rail */}
         <div className="mb-4">
           <BettingBoard
             bets={bets}
-            chipValue={chipValue}
+            chipValue={selectedChipValue}
             onPlaceBet={handlePlaceBet}
             onRemoveBet={handleRemoveBet}
             disabled={isSpinning}
           />
         </div>
-
-        {/* Controls */}
-        <div className="flex gap-4 mb-4">
-          <button
-            onClick={handleClearBets}
-            disabled={isSpinning || bets.length === 0}
-            className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            CLEAR BETS
-          </button>
-          <button
-            onClick={handleSpin}
-            disabled={isSpinning || !isAuthenticated || bets.length === 0}
-            className="px-12 py-3 bg-green-600 hover:bg-green-500 rounded-lg font-bold text-xl shadow-lg transform active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
-          >
-            {isSpinning ? 'SPINNING...' : `SPIN ($${totalBetAmount.toFixed(2)})`}
-          </button>
-        </div>
-
-        {/* Current bet summary */}
-        {bets.length > 0 && (
-          <div className="bg-black/30 rounded-lg p-3 mb-4 max-w-md w-full">
-            <div className="text-xs text-gray-400 mb-2">ACTIVE BETS:</div>
-            <div className="space-y-1 max-h-32 overflow-y-auto">
-              {bets.map((bet, idx) => (
-                <div key={idx} className="flex justify-between text-sm">
-                  <span className="text-gray-300">{bet.displayText}</span>
-                  <span className="text-white font-bold">${bet.amount.toFixed(2)}</span>
-                </div>
-              ))}
-            </div>
-            <div className="border-t border-gray-700 mt-2 pt-2 flex justify-between font-bold">
-              <span>TOTAL:</span>
-              <span className="text-dfinity-turquoise">${totalBetAmount.toFixed(2)}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Error display */}
-        {error && (
-          <div className="text-red-400 bg-red-900/20 border border-red-900/50 p-4 rounded-lg mb-4 max-w-md">
-            {error}
-          </div>
-        )}
       </div>
 
-      {/* Betting Rail */}
+      {/* Betting Rail - roulette mode: chips select denomination, not accumulate */}
       <div className="flex-shrink-0">
         <BettingRail
           betAmount={totalBetAmount}
-          onBetChange={() => {}} // Bets managed via chip placement
+          onBetChange={() => {}} // Bets managed via chip placement on board
           maxBet={maxBet}
           gameBalance={balance.game}
           walletBalance={walletBalance}
@@ -281,6 +285,10 @@ export function RouletteGame() {
           canisterId={ROULETTE_BACKEND_CANISTER_ID}
           isBalanceLoading={gameBalanceContext.isLoading}
           isBalanceInitialized={gameBalanceContext.isInitialized}
+          rouletteMode={true}
+          selectedChipValue={selectedChipValue}
+          onChipSelect={setSelectedChipValue}
+          onClearBets={handleClearBets}
         />
       </div>
     </GameLayout>

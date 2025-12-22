@@ -18,6 +18,33 @@ interface BettingBoardProps {
 
 const RED_NUMBERS = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
 
+// Chip configuration matching the betting rail
+const CHIP_CONFIG = [
+  { value: 0.01, color: 'white', img: '/chips/optimized/white_top.png' },
+  { value: 0.10, color: 'red', img: '/chips/optimized/red_top.png' },
+  { value: 1.00, color: 'green', img: '/chips/optimized/green_top.png' },
+  { value: 5.00, color: 'blue', img: '/chips/optimized/blue_top.png' },
+  { value: 10.00, color: 'black', img: '/chips/optimized/black_top.png' },
+];
+
+// Get best chip representation for an amount
+const getChipsForAmount = (amount: number): { img: string; count: number }[] => {
+  const chips: { img: string; count: number }[] = [];
+  let remaining = Math.round(amount * 100) / 100;
+
+  // Go from highest to lowest
+  for (let i = CHIP_CONFIG.length - 1; i >= 0 && remaining > 0; i--) {
+    const chip = CHIP_CONFIG[i];
+    const count = Math.floor(remaining / chip.value);
+    if (count > 0) {
+      chips.push({ img: chip.img, count: Math.min(count, 3) }); // Max 3 of each for visual
+      remaining = Math.round((remaining - count * chip.value) * 100) / 100;
+    }
+  }
+
+  return chips;
+};
+
 export const BettingBoard: React.FC<BettingBoardProps> = ({
   bets,
   chipValue,
@@ -48,20 +75,36 @@ export const BettingBoard: React.FC<BettingBoardProps> = ({
     }
   };
 
-  const getChipColor = (amount: number): string => {
-    if (amount >= 100) return 'bg-yellow-500 border-yellow-600';
-    if (amount >= 10) return 'bg-orange-500 border-orange-600';
-    if (amount >= 5) return 'bg-blue-500 border-blue-600';
-    return 'bg-red-500 border-red-600';
-  };
-
   const renderChip = (numbers: number[], betType: BetType) => {
     const amount = getBetAmount(numbers, betType);
     if (amount === 0) return null;
 
+    const chipStack = getChipsForAmount(amount);
+
     return (
-      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-6 rounded-full ${getChipColor(amount)} border-2 flex items-center justify-center text-white text-[10px] font-bold shadow-lg z-10 pointer-events-none`}>
-        {amount}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none">
+        {/* Chip stack */}
+        <div className="relative">
+          {chipStack.flatMap(({ img, count }, stackIdx) =>
+            Array.from({ length: count }).map((_, i) => (
+              <img
+                key={`${stackIdx}-${i}`}
+                src={img}
+                alt="chip"
+                className="w-6 h-6 absolute drop-shadow-md"
+                style={{
+                  top: `-${(stackIdx * count + i) * 2}px`,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                }}
+              />
+            ))
+          )}
+          {/* Amount label */}
+          <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-black/80 px-1 rounded text-[9px] text-white font-bold whitespace-nowrap">
+            ${amount.toFixed(amount < 1 ? 2 : 0)}
+          </div>
+        </div>
       </div>
     );
   };
@@ -112,23 +155,24 @@ export const BettingBoard: React.FC<BettingBoardProps> = ({
   return (
     <div className="bg-gradient-to-b from-green-900 to-green-950 p-3 sm:p-4 rounded-lg border-4 border-yellow-700 shadow-2xl select-none">
       {/* Main betting area */}
-      <div className="flex gap-2">
-        {/* Zero */}
+      <div className="flex">
+        {/* Zero - spans only the number rows (3 rows × cell height) */}
         <div
-          className="relative w-10 sm:w-12 bg-green-600 border border-gray-700 flex items-center justify-center cursor-pointer hover:bg-green-500 transition text-white font-bold text-sm rounded"
+          className="relative w-10 sm:w-12 h-[calc(3*2.5rem)] sm:h-[calc(3*3rem)] bg-green-600 border border-gray-700 flex items-center justify-center cursor-pointer hover:bg-green-500 transition text-white font-bold text-sm rounded-l self-start"
           onClick={(e) => handleBetClick([0], { Straight: 0 }, '0', e)}
           onContextMenu={(e) => handleBetClick([0], { Straight: 0 }, '0', e)}
-          style={{ writingMode: 'vertical-rl', height: '100%' }}
+          style={{ writingMode: 'vertical-rl' }}
         >
           <span className="py-4">0</span>
           {renderChip([0], { Straight: 0 })}
         </div>
 
-        {/* Numbers grid + columns */}
-        <div className="flex flex-col gap-0">
+        {/* Right side: numbers + outside bets */}
+        <div className="flex flex-col">
+          {/* Numbers grid + 2:1 columns */}
           {renderNumberGrid()}
 
-          {/* Dozen bets */}
+          {/* Dozen bets - use same 12-column grid as numbers */}
           <div className="flex mt-1">
             {[
               { label: '1st 12', nums: Array.from({ length: 12 }, (_, i) => i + 1), variant: 1 },
@@ -137,7 +181,7 @@ export const BettingBoard: React.FC<BettingBoardProps> = ({
             ].map(({ label, nums, variant }) => (
               <div
                 key={label}
-                className="relative flex-1 h-8 bg-gray-800 border border-gray-700 flex items-center justify-center cursor-pointer hover:bg-gray-700 transition text-white font-bold text-xs"
+                className="relative w-[calc(4*2.5rem)] sm:w-[calc(4*3rem)] h-8 bg-gray-800 border border-gray-700 flex items-center justify-center cursor-pointer hover:bg-gray-700 transition text-white font-bold text-xs"
                 onClick={(e) => handleBetClick(nums, { Dozen: variant }, label, e)}
                 onContextMenu={(e) => handleBetClick(nums, { Dozen: variant }, label, e)}
               >
@@ -145,11 +189,10 @@ export const BettingBoard: React.FC<BettingBoardProps> = ({
                 {renderChip(nums, { Dozen: variant })}
               </div>
             ))}
-            <div className="w-16" /> {/* Spacer for column alignment */}
           </div>
 
-          {/* Even money bets */}
-          <div className="grid grid-cols-3 gap-1 mt-1">
+          {/* Even money bets - single row of 6, each spans 2 number columns */}
+          <div className="flex mt-1">
             {[
               { label: '1-18', nums: Array.from({ length: 18 }, (_, i) => i + 1), betType: { Low: null } },
               { label: 'EVEN', nums: Array.from({ length: 36 }, (_, i) => i + 1).filter(n => n % 2 === 0), betType: { Even: null } },
@@ -160,7 +203,7 @@ export const BettingBoard: React.FC<BettingBoardProps> = ({
             ].map(({ label, nums, betType, className = 'bg-gray-800' }) => (
               <div
                 key={label}
-                className={`relative h-10 ${className} border border-gray-700 flex items-center justify-center cursor-pointer hover:brightness-110 transition text-white font-bold text-xs`}
+                className={`relative w-[calc(2*2.5rem)] sm:w-[calc(2*3rem)] h-8 ${className} border border-gray-700 flex items-center justify-center cursor-pointer hover:brightness-110 transition text-white font-bold text-[10px]`}
                 onClick={(e) => handleBetClick(nums, betType, label, e)}
                 onContextMenu={(e) => handleBetClick(nums, betType, label, e)}
               >

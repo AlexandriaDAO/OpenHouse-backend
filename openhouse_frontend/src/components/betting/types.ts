@@ -35,6 +35,11 @@ export interface BettingRailProps {
   // Balance loading state - prevents false deposit prompts during initialization
   isBalanceLoading?: boolean;
   isBalanceInitialized?: boolean;
+  // Roulette mode - chips select a denomination instead of adding to bet
+  rouletteMode?: boolean;
+  onChipSelect?: (value: number) => void;
+  selectedChipValue?: number;
+  onClearBets?: () => void; // For roulette: clears all bets on the board
 }
 
 // Betting state returned from useBettingState hook

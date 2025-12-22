@@ -413,6 +413,9 @@ export const GameBalanceProvider: React.FC<GameBalanceProviderProps> = ({ childr
     if (crashActor) refreshBalances('crash').catch(console.error);
   }, [crashActor]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (rouletteActor) refreshBalances('roulette').catch(console.error);
+  }, [rouletteActor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cleanup timers on unmount
   useEffect(() => {

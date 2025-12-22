@@ -18,6 +18,9 @@ export function BettingRail(props: any) {
   const betting = useBettingState(props);
   const deposit = useDepositFlow(props);
 
+  // Roulette mode props
+  const { rouletteMode, onChipSelect, selectedChipValue, onClearBets } = props;
+
   // Cash out confirmation modal
   const [showCashOutModal, setShowCashOutModal] = useState(false);
 
@@ -109,7 +112,7 @@ export function BettingRail(props: any) {
   const BetDisplay = () => (
     <div className="bet-display-pill">
       <button
-        onClick={clearBet}
+        onClick={rouletteMode && onClearBets ? onClearBets : clearBet}
         disabled={disabled || betAmount === 0}
         className="clear-text-btn"
       >
@@ -173,6 +176,9 @@ export function BettingRail(props: any) {
                     canAddChip={canAddChip}
                     disabled={disabled}
                     size="md"
+                    selectionMode={rouletteMode}
+                    selectedValue={selectedChipValue}
+                    onSelect={onChipSelect}
                   />
                 </div>
               </div>
@@ -208,7 +214,7 @@ export function BettingRail(props: any) {
                     </svg>
                   </button>
                   <button
-                    onClick={clearBet}
+                    onClick={rouletteMode && onClearBets ? onClearBets : clearBet}
                     disabled={disabled || betAmount === 0}
                     className="mobile-bet-ctrl mobile-bet-ctrl--clr"
                   >
@@ -243,7 +249,7 @@ export function BettingRail(props: any) {
                 </button>
               </div>
 
-              {/* CENTER: Chip pile only */}
+              {/* CENTER: Chip pile */}
               <div className="mobile-col-pot">
                 <ChipStack
                   amount={betAmount}
@@ -264,6 +270,9 @@ export function BettingRail(props: any) {
                   size="sm"
                   variant="compact"
                   layout="vertical"
+                  selectionMode={rouletteMode}
+                  selectedValue={selectedChipValue}
+                  onSelect={onChipSelect}
                 />
               </div>
             </div>

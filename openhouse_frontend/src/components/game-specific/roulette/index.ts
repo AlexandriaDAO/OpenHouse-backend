@@ -7,4 +7,3 @@ export * from './RouletteTable';
 export * from './RouletteWheel';
 export * from './BettingBoard';
 export * from './ChipSelector';
-export * from './PreviousNumbers';
