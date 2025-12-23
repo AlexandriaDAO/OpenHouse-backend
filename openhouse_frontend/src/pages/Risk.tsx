@@ -17,6 +17,8 @@ import {
   GRID_HEIGHT,
   LOCAL_TICK_MS,
   BACKEND_SYNC_MS,
+  FORCE_SYNC_MS,
+  SYNC_TOLERANCE_GENS,
   ENABLE_LOCAL_SIM,
   DEBUG_SYNC,
   GRID_COLOR,
@@ -46,6 +48,9 @@ import {
   parseRLE,
   rotatePattern,
 } from './riskUtils';
+
+// Import tutorial component
+import { RiskTutorial } from './risk/tutorial';
 
 // Local cell type for dense grid simulation (v2: no coins on cells)
 interface Cell {
@@ -197,6 +202,23 @@ export const Risk: React.FC = () => {
   const [isRequestingFaucet, setIsRequestingFaucet] = useState(false);
   const [previewPulse, setPreviewPulse] = useState(0); // For animation
 
+  // Elimination modal state
+  const [isEliminated, setIsEliminated] = useState(false);
+  const [eliminationStats, setEliminationStats] = useState<{
+    generationsSurvived: bigint;
+    peakTerritory: number;
+    coinsEarned: number;
+  } | null>(null);
+
+  // Tutorial modal state
+  const [showTutorial, setShowTutorial] = useState(false);
+
+  // Elimination tracking refs
+  const joinedAtGeneration = useRef<bigint | null>(null);
+  const peakTerritoryRef = useRef<number>(0);
+  const initialWalletRef = useRef<number>(0);
+  const hadBaseRef = useRef<boolean>(false); // Track if player ever had a base (avoid false positive on join)
+
   // Simulation control - always running
   const [isRunning, setIsRunning] = useState(true);
   const [, forceRender] = useState(0);
@@ -224,6 +246,7 @@ export const Risk: React.FC = () => {
   const localCellsRef = useRef<Cell[]>([]);
   const localGenerationRef = useRef<bigint>(0n);
   const lastSyncedGenerationRef = useRef<bigint>(0n);
+  const lastSyncTimeRef = useRef<number>(0);
 
   // Query latency tracking
   const queryLatencyStats = useRef<{ samples: number[] }>({ samples: [] });
@@ -233,6 +256,7 @@ export const Risk: React.FC = () => {
   useEffect(() => { localCellsRef.current = localCells; }, [localCells]);
   useEffect(() => { localGenerationRef.current = localGeneration; }, [localGeneration]);
   useEffect(() => { lastSyncedGenerationRef.current = lastSyncedGeneration; }, [lastSyncedGeneration]);
+  useEffect(() => { lastSyncTimeRef.current = lastSyncTime; }, [lastSyncTime]);
 
   // Sidebar collapsed state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -463,8 +487,17 @@ export const Risk: React.FC = () => {
 
         if (hasBase) {
           setShowSlotSelection(false);
+          // Mark that we have a base for elimination detection
+          hadBaseRef.current = true;
+          // Initialize tracking refs (will be refined on first sync)
+          joinedAtGeneration.current = null; // Unknown - joined in previous session
+          initialWalletRef.current = Number(balance);
         } else {
           setShowSlotSelection(true);
+          // Reset elimination tracking refs
+          hadBaseRef.current = false;
+          joinedAtGeneration.current = null;
+          peakTerritoryRef.current = 0;
         }
       } catch (err) {
         console.error('Failed to setup actor:', err);
@@ -655,28 +688,49 @@ export const Risk: React.FC = () => {
               w >>= 1n;
             }
           }
-          // ========== OUT-OF-ORDER DETECTION ==========
+          // ========== SYNC DECISION LOGIC ==========
           // Use refs to get current values (avoids stale closure issue)
-          const currentLocalCells = localCellsRef.current;
           const currentLocalGen = localGenerationRef.current;
           const currentLastSyncedGen = lastSyncedGenerationRef.current;
+          const currentLastSyncTime = lastSyncTimeRef.current;
 
           const incomingGen = state.generation;
-          // CRITICAL: Compare against LOCAL generation, not last synced!
-          // Local sim may have advanced past lastSynced, so check current local state
-          const isStale = incomingGen <= currentLocalGen;
+          const now = Date.now();
+          const timeSinceLastSync = now - currentLastSyncTime;
+          const genDiff = Number(currentLocalGen - incomingGen);
+          // genDiff > 0 means local is AHEAD of backend
+          // genDiff < 0 means backend is AHEAD of local (we're behind!)
 
-          // IGNORE stale responses - only apply if generation is NEWER than local sim
-          if (isStale) {
-            console.warn('[OUT-OF-ORDER]', {
-              queryId,
-              incoming: incomingGen.toString(),
-              localGen: currentLocalGen.toString(),
-              behind: Number(currentLocalGen - incomingGen),
-              latency: `${latencyMs.toFixed(0)}ms`,
-            });
-            return; // Skip applying this state
+          // REJECT: True out-of-order (older than what we've already synced to)
+          if (incomingGen < currentLastSyncedGen) {
+            // Don't log these - they're expected with parallel queries
+            return;
           }
+
+          // SYNC STRATEGY:
+          // - If backend is AHEAD (genDiff < 0): Always sync (we're behind, need to catch up)
+          // - If local is ahead by small amount: Skip (we're just running slightly fast)
+          // - If local is ahead by too much OR force sync: Sync to prevent drift
+          const backendAhead = genDiff < 0;
+          const localTooFarAhead = genDiff > SYNC_TOLERANCE_GENS;
+          const needsForceSync = timeSinceLastSync >= FORCE_SYNC_MS;
+
+          // Only sync if: backend ahead OR local way too far ahead OR force sync
+          if (!backendAhead && !localTooFarAhead && !needsForceSync) {
+            // Local is slightly ahead - skip, let backend catch up
+            return;
+          }
+
+          // Log the sync event
+          const reason = backendAhead ? 'catchup' : (needsForceSync ? 'force' : 'drift');
+          console.log('[SYNC]', {
+            queryId,
+            incoming: incomingGen.toString(),
+            localGen: currentLocalGen.toString(),
+            correction: genDiff,
+            reason,
+            latency: `${latencyMs.toFixed(0)}ms`,
+          });
 
           // Update UI indicator
           setSyncStatus({
@@ -712,10 +766,45 @@ export const Risk: React.FC = () => {
           }
           setBases(newBases);
 
+          // Elimination detection: Check if player had a base but now doesn't
+          // We use a callback to access current myPlayerNum state safely
+          setMyPlayerNum(currentPlayerNum => {
+            if (currentPlayerNum && hadBaseRef.current && !isEliminated) {
+              const myBase = newBases.get(currentPlayerNum);
+
+              // Player was in game but base is now gone = eliminated
+              if (!myBase) {
+                // Calculate stats for elimination modal
+                const gensSurvived = joinedAtGeneration.current !== null
+                  ? state.generation - joinedAtGeneration.current
+                  : 0n;
+
+                setIsEliminated(true);
+                setEliminationStats({
+                  generationsSurvived: gensSurvived,
+                  peakTerritory: peakTerritoryRef.current,
+                  coinsEarned: 0, // Will be updated after balance fetch
+                });
+
+                // Clear tracking for potential rejoin
+                hadBaseRef.current = false;
+              }
+            }
+            return currentPlayerNum; // Don't change the value
+          });
+
           // Fetch balance
           try {
             const balance = await actor.get_balance();
             setMyBalance(Number(balance));
+
+            // If just eliminated, update coins earned in stats
+            if (isEliminated && eliminationStats) {
+              setEliminationStats(prev => prev ? {
+                ...prev,
+                coinsEarned: Number(balance) - initialWalletRef.current
+              } : null);
+            }
           } catch (err) {
             console.error('Balance fetch error:', err);
           }
@@ -1509,6 +1598,26 @@ export const Risk: React.FC = () => {
     }
   }, [actor, isRequestingFaucet]);
 
+  // Handle spectate action from elimination modal
+  const handleSpectate = useCallback(() => {
+    setIsEliminated(false);
+    setMyPlayerNum(null);  // Clear player association
+    hadBaseRef.current = false;
+    // Keep watching the game without controls
+  }, []);
+
+  // Handle rejoin action from elimination modal
+  const handleRejoin = useCallback(() => {
+    setIsEliminated(false);
+    setMyPlayerNum(null);
+    setShowSlotSelection(true);  // Go back to slot selection
+    // Reset tracking refs for new session
+    joinedAtGeneration.current = null;
+    peakTerritoryRef.current = 0;
+    initialWalletRef.current = myBalance;
+    hadBaseRef.current = false;
+  }, [myBalance]);
+
   // Rotate pattern 90° clockwise - affects future placements AND selected existing placements
   const rotateCurrentPattern = useCallback(() => {
     // Rotate for new placements
@@ -1668,6 +1777,14 @@ export const Risk: React.FC = () => {
     return acc;
   }, {} as Record<number, number>);
 
+  // Track peak territory for elimination stats
+  if (myPlayerNum && hadBaseRef.current) {
+    const myTerritory = territoryCounts[myPlayerNum] || 0;
+    if (myTerritory > peakTerritoryRef.current) {
+      peakTerritoryRef.current = myTerritory;
+    }
+  }
+
   // Base coins per player (v2: coins are stored in bases, not on cells)
   const baseCoins: Record<number, number> = {};
   for (const [playerNum, baseInfo] of bases) {
@@ -1676,6 +1793,9 @@ export const Risk: React.FC = () => {
 
   // Total base coins in game
   const totalBaseCoins = Object.values(baseCoins).reduce((a, b) => a + b, 0);
+
+  // Check if user is spectating (authenticated but not in game)
+  const isSpectating = isAuthenticated && !showSlotSelection && myPlayerNum === null;
 
   // Filter patterns: first by essential/advanced, then by category
   const basePatterns = showAdvanced ? PATTERNS : PATTERNS.filter(p => p.essential);
@@ -1813,6 +1933,12 @@ export const Risk: React.FC = () => {
                       // Backend returns slot index (0-7), but myPlayerNum is 1-indexed (1-8)
                       setMyPlayerNum(result.Ok + 1);
 
+                      // Initialize elimination tracking for this session
+                      setIsEliminated(false);
+                      setEliminationStats(null);
+                      peakTerritoryRef.current = 0;
+                      hadBaseRef.current = true; // Mark that we now have a base
+
                       // Immediately fetch game state so grid renders correctly
                       try {
                         const state = await actor.get_state();
@@ -1820,6 +1946,9 @@ export const Risk: React.FC = () => {
                         setLocalCells(sparseToDense(state));
                         setLocalGeneration(state.generation);
                         setLastSyncedGeneration(state.generation);
+
+                        // Initialize join tracking with current generation and balance
+                        joinedAtGeneration.current = state.generation;
 
                         // Extract base info
                         const newBases = new Map<number, BaseInfo>();
@@ -1831,9 +1960,10 @@ export const Risk: React.FC = () => {
                         }
                         setBases(newBases);
 
-                        // Update balance
+                        // Update balance and track initial for elimination stats
                         const balance = await actor.get_balance();
                         setMyBalance(Number(balance));
+                        initialWalletRef.current = Number(balance);
 
                         // Update wipe timer
                         setWipeInfo({
@@ -1923,7 +2053,16 @@ export const Risk: React.FC = () => {
           <div className={`${sidebarCollapsed ? 'hidden' : 'flex flex-col'} flex-1 overflow-y-auto p-3`} style={{ overscrollBehavior: 'contain' }}>
             {/* Info Section */}
             <div className="mb-4">
-              <h1 className="text-lg font-bold text-white">Risk</h1>
+              <div className="flex items-center justify-between">
+                <h1 className="text-lg font-bold text-white">Risk</h1>
+                <button
+                  onClick={() => setShowTutorial(true)}
+                  className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
+                  title="How to play"
+                >
+                  ?
+                </button>
+              </div>
               {/* Server selector */}
               <div className="flex gap-1 mt-1 mb-2">
                 {RISK_SERVERS.map((server) => (
@@ -1943,10 +2082,20 @@ export const Risk: React.FC = () => {
               <p className="text-gray-500 text-xs">
                 {myPlayerNum ? (
                   <>You are Player {myPlayerNum} <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }}></span></>
+                ) : isSpectating ? (
+                  <span className="text-purple-400">👁 Spectating</span>
                 ) : (
                   'Place cells to join'
                 )}
               </p>
+              {isSpectating && (
+                <button
+                  onClick={() => setShowSlotSelection(true)}
+                  className="mt-2 w-full px-3 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded transition-colors"
+                >
+                  Join Game
+                </button>
+              )}
               <div className="mt-2 text-sm font-mono space-y-1">
                 <div className="text-gray-400">
                   Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span>
@@ -2115,7 +2264,8 @@ export const Risk: React.FC = () => {
               )}
             </div>
 
-            {/* Pattern Section */}
+            {/* Pattern Section - hidden when spectating */}
+            {!isSpectating && (
             <div className="flex-1">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-gray-400">Patterns</span>
@@ -2188,6 +2338,7 @@ export const Risk: React.FC = () => {
                 <div className="text-gray-500 mt-1">{selectedPattern.description}</div>
               </div>
             </div>
+            )}
           </div>
 
           {/* Collapsed indicators */}
@@ -2497,6 +2648,9 @@ export const Risk: React.FC = () => {
                 ))}
               </div>
             </div>
+            {/* Pattern controls - hidden when spectating */}
+            {!isSpectating && (
+            <>
             {/* Essential/Advanced toggle + Category filters */}
             <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
               <button
@@ -2559,9 +2713,83 @@ export const Risk: React.FC = () => {
             <div className="text-xs text-gray-400 mt-2">
               <span className={CATEGORY_INFO[selectedPattern.category].color.split(' ')[0]}>{selectedPattern.name}</span> ({parsedPattern.length} cells)
             </div>
+            </>
+            )}
+            {/* Spectator mode indicator in mobile */}
+            {isSpectating && (
+              <div className="py-2">
+                <p className="text-purple-400 text-sm mb-2">👁 Spectating</p>
+                <button
+                  onClick={() => setShowSlotSelection(true)}
+                  className="w-full px-3 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded transition-colors"
+                >
+                  Join Game
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      {/* Elimination Modal */}
+      {isEliminated && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-red-500/50 rounded-lg p-6 max-w-sm mx-4 text-center">
+            <div className="text-4xl mb-2">💀</div>
+            <h2 className="text-2xl font-bold text-red-400 mb-2">ELIMINATED</h2>
+            <p className="text-gray-400 mb-4">Your base was destroyed!</p>
+
+            {eliminationStats && (
+              <div className="bg-black/50 rounded p-3 mb-4 text-sm text-left">
+                <div className="flex justify-between text-gray-500">
+                  <span>Survived:</span>
+                  <span className="text-white">
+                    {eliminationStats.generationsSurvived.toLocaleString()} gen
+                  </span>
+                </div>
+                <div className="flex justify-between text-gray-500">
+                  <span>Peak territory:</span>
+                  <span className="text-white">
+                    {eliminationStats.peakTerritory.toLocaleString()} cells
+                  </span>
+                </div>
+                <div className="flex justify-between text-gray-500">
+                  <span>Coins earned:</span>
+                  <span className={eliminationStats.coinsEarned >= 0 ? 'text-green-400' : 'text-red-400'}>
+                    {eliminationStats.coinsEarned >= 0 ? '+' : ''}{eliminationStats.coinsEarned}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="text-gray-500 text-sm mb-4">
+              Wallet: <span className="text-green-400">🪙 {myBalance}</span>
+            </div>
+
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={handleSpectate}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+              >
+                Spectate
+              </button>
+              <button
+                onClick={handleRejoin}
+                className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded transition-colors"
+              >
+                Rejoin
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tutorial Modal */}
+      <RiskTutorial
+        isOpen={showTutorial}
+        onClose={() => setShowTutorial(false)}
+        playerColor={myPlayerNum ? PLAYER_COLORS[myPlayerNum] : PLAYER_COLORS[1]}
+      />
     </div>
   );
 };

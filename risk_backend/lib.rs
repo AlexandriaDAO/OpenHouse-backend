@@ -46,7 +46,7 @@ const PLACEMENT_COST: u64 = 1;
 const MAX_PLACE_CELLS: usize = 1000;
 
 /// Timing
-const GENERATIONS_PER_TICK: u32 = 10;
+const GENERATIONS_PER_TICK: u32 = 8;   // 8 gen/sec - matches frontend LOCAL_TICK_MS=125
 const TICK_INTERVAL_MS: u64 = 1000;
 const WIPE_INTERVAL_NS: u64 = 300_000_000_000; // 5 minutes
 const GRACE_PERIOD_NS: u64 = 600_000_000_000; // 10 minutes

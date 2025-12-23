@@ -46,9 +46,18 @@ export function isInBaseZone(cellX: number, cellY: number, baseX: number, baseY:
 export const GRID_WIDTH = GRID_SIZE;
 export const GRID_HEIGHT = GRID_SIZE;
 
-// Simulation timing
-export const LOCAL_TICK_MS = 50;       // Local simulation: 20 generations/second (when enabled)
-export const BACKEND_SYNC_MS = 500;    // Sync every 500ms - balance between freshness and spam
+// Simulation timing - RATES MUST MATCH for proper sync
+export const LOCAL_TICK_MS = 125;      // Local simulation: 8 gen/sec (1000ms / 125ms = 8)
+export const BACKEND_SYNC_MS = 500;    // Sync every 500ms = 4 backend generations
+// Backend runs at 8 gen/sec (GENERATIONS_PER_TICK=8, TICK_INTERVAL_MS=1000)
+
+// Force sync with backend every N ms regardless of staleness
+// This prevents drifting forever when latency > sync interval
+export const FORCE_SYNC_MS = 5000;     // Force re-sync every 5 seconds
+
+// Accept responses within this many generations of local (even if "behind")
+// At 8 gen/sec, 16 gens = 2 seconds of acceptable drift
+export const SYNC_TOLERANCE_GENS = 16;
 
 // Local simulation toggle - when false, display backend state directly (more accurate, slightly choppier)
 // When true, run local Conway simulation between syncs (smoother but can drift)
