@@ -1,12 +1,12 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Actor, HttpAgent, ActorSubclass } from '@dfinity/agent';
 import { useAuth } from '../providers/AuthProvider';
-import { idlFactory } from '../declarations/life2_backend';
-import type { _SERVICE, GameState, SparseCell, SlotInfo } from '../declarations/life2_backend/life2_backend.did.d';
+import { idlFactory } from '../declarations/risk_backend';
+import type { _SERVICE, GameState, SlotInfo, BaseInfo, TerritoryExport } from '../declarations/risk_backend/risk_backend.did.d';
 
 // Import constants and types from separate file
 import {
-  LIFE_SERVERS,
+  RISK_SERVERS,
   DEFAULT_SERVER_ID,
   GRID_SIZE,
   QUADRANT_SIZE,
@@ -17,37 +17,63 @@ import {
   GRID_HEIGHT,
   LOCAL_TICK_MS,
   BACKEND_SYNC_MS,
+  FORCE_SYNC_MS,
+  SYNC_TOLERANCE_GENS,
+  ENABLE_LOCAL_SIM,
+  DEBUG_SYNC,
   GRID_COLOR,
   SWIPE_THRESHOLD,
   DEAD_COLOR,
-  GOLD_BORDER_MIN_OPACITY,
-  GOLD_BORDER_MAX_OPACITY,
   PLAYER_COLORS,
   TERRITORY_COLORS,
   CATEGORY_INFO,
   PATTERNS,
+  getPatternByName,
   getQuadrant,
-  getCoinState,
-  COIN_COLORS,
+  BASE_SIZE,
+  BASE_WALL_COLOR,
+  BASE_COST,
+  isBaseWall,
+  isBaseInterior,
+  isInBaseZone,
   type ViewMode,
   type PatternCategory,
   type PatternInfo,
   type PendingPlacement,
-  type LifeServer,
-  type CoinState,
+  type RiskServer,
 } from './lifeConstants';
 
 // Import utility functions from separate file
-import { parseRLE, rotatePattern } from './lifeUtils';
+import {
+  parseRLE,
+  rotatePattern,
+} from './lifeUtils';
 
-// Local cell type for dense grid simulation
+// Import tutorial component
+import { RiskTutorial } from './life/tutorial';
+
+// Local cell type for dense grid simulation (v2: no coins on cells)
 interface Cell {
-  owner: number;
-  coins: number;
+  owner: number;  // 0 = neutral, 1-9 = player slots
   alive: boolean;
 }
 
-// Local Game of Life simulation - mirrors backend rules exactly
+// Coin particle for Mario-style animation when bases lose coins
+interface CoinParticle {
+  id: number;
+  baseX: number;  // Grid position of base
+  baseY: number;
+  offsetX: number;  // Pixel offset from base center
+  offsetY: number;
+  velocityX: number;
+  velocityY: number;
+  opacity: number;
+  scale: number;
+  rotation: number;
+  rotationSpeed: number;
+}
+
+// Local Risk simulation - mirrors backend rules exactly
 const stepLocalGeneration = (cells: Cell[]): Cell[] => {
   // Guard against empty cells array (can happen during server switch)
   if (cells.length === 0) return cells;
@@ -105,10 +131,9 @@ const stepLocalGeneration = (cells: Cell[]): Cell[] => {
         }
       }
 
-      // Preserve owner (territory) and coins - they persist even when cells die
+      // Preserve owner (territory) - persists even when cells die
       newCells[idx] = {
         owner: newOwner,
-        coins: current.coins,  // Coins stay in cell
         alive: newAlive,
       };
     }
@@ -117,7 +142,7 @@ const stepLocalGeneration = (cells: Cell[]): Cell[] => {
   return newCells;
 };
 
-export const Life: React.FC = () => {
+export const Risk: React.FC = () => {
   // Canvas refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -125,7 +150,7 @@ export const Life: React.FC = () => {
   const minimapRef = useRef<HTMLCanvasElement>(null);
 
   // Pattern state
-  const [selectedPattern, setSelectedPattern] = useState<PatternInfo>(PATTERNS[0]);
+  const [selectedPattern, setSelectedPattern] = useState<PatternInfo>(getPatternByName('Glider') || PATTERNS[0]);
   const [selectedCategory, setSelectedCategory] = useState<PatternCategory | 'all'>('spaceship');
   const [parsedPattern, setParsedPattern] = useState<[number, number][]>([]);
   const [patternRotation, setPatternRotation] = useState<0 | 1 | 2 | 3>(0); // 0=0°, 1=90°, 2=180°, 3=270°
@@ -145,8 +170,8 @@ export const Life: React.FC = () => {
   const { identity, isAuthenticated, login, principal } = useAuth();
 
   // Server selection
-  const [selectedServer, setSelectedServer] = useState<LifeServer>(
-    LIFE_SERVERS.find(s => s.id === DEFAULT_SERVER_ID) || LIFE_SERVERS[0]
+  const [selectedServer, setSelectedServer] = useState<RiskServer>(
+    RISK_SERVERS.find(s => s.id === DEFAULT_SERVER_ID) || RISK_SERVERS[0]
   );
 
   // Actor state (created when authenticated)
@@ -166,8 +191,8 @@ export const Life: React.FC = () => {
   const [myPlayerNum, setMyPlayerNum] = useState<number | null>(null);
   const [myBalance, setMyBalance] = useState(0);
   const [placementError, setPlacementError] = useState<string | null>(null);
-  // Quadrant control state - which player controls each quadrant (0=none, 1-9=player)
-  const [quadrantControllers, setQuadrantControllers] = useState<number[]>(new Array(TOTAL_QUADRANTS).fill(0));
+  // Base info for each slot (v2 base-centric system)
+  const [bases, setBases] = useState<Map<number, BaseInfo>>(new Map());
 
   // Pending placements - accumulate patterns before confirming
   const [pendingPlacements, setPendingPlacements] = useState<PendingPlacement[]>([]);
@@ -177,6 +202,23 @@ export const Life: React.FC = () => {
   const [isRequestingFaucet, setIsRequestingFaucet] = useState(false);
   const [previewPulse, setPreviewPulse] = useState(0); // For animation
 
+  // Elimination modal state
+  const [isEliminated, setIsEliminated] = useState(false);
+  const [eliminationStats, setEliminationStats] = useState<{
+    generationsSurvived: bigint;
+    peakTerritory: number;
+    coinsEarned: number;
+  } | null>(null);
+
+  // Tutorial modal state
+  const [showTutorial, setShowTutorial] = useState(false);
+
+  // Elimination tracking refs
+  const joinedAtGeneration = useRef<bigint | null>(null);
+  const peakTerritoryRef = useRef<number>(0);
+  const initialWalletRef = useRef<number>(0);
+  const hadBaseRef = useRef<boolean>(false); // Track if player ever had a base (avoid false positive on join)
+
   // Simulation control - always running
   const [isRunning, setIsRunning] = useState(true);
   const [, forceRender] = useState(0);
@@ -184,9 +226,41 @@ export const Life: React.FC = () => {
   // Quadrant wipe timer state
   const [wipeInfo, setWipeInfo] = useState<{ quadrant: number; secondsUntil: number } | null>(null);
 
+  // Coin animation state - Mario-style coin particles when bases lose coins
+  const [coinParticles, setCoinParticles] = useState<CoinParticle[]>([]);
+  const prevBaseCoinsRef = useRef<Map<number, number>>(new Map());
+  const nextParticleIdRef = useRef(0);
+
+  // Sync verification state (Part 1 of timer optimization)
+  const [localGeneration, setLocalGeneration] = useState<bigint>(0n);
+  const [lastSyncedGeneration, setLastSyncedGeneration] = useState<bigint>(0n);
+  const [lastSyncTime, setLastSyncTime] = useState<number>(0);
+  const [syncStatus, setSyncStatus] = useState<{
+    inSync: boolean;
+    driftGens: number;
+    lastLocalHash: string;
+    lastBackendHash: string;
+  }>({ inSync: true, driftGens: 0, lastLocalHash: '', lastBackendHash: '' });
+
+  // Refs to access current values inside async callbacks (avoids stale closure)
+  const localCellsRef = useRef<Cell[]>([]);
+  const localGenerationRef = useRef<bigint>(0n);
+  const lastSyncedGenerationRef = useRef<bigint>(0n);
+  const lastSyncTimeRef = useRef<number>(0);
+
+  // Query latency tracking
+  const queryLatencyStats = useRef<{ samples: number[] }>({ samples: [] });
+  const querySequence = useRef<number>(0);
+
+  // Keep refs in sync with state
+  useEffect(() => { localCellsRef.current = localCells; }, [localCells]);
+  useEffect(() => { localGenerationRef.current = localGeneration; }, [localGeneration]);
+  useEffect(() => { lastSyncedGenerationRef.current = lastSyncedGeneration; }, [lastSyncedGeneration]);
+  useEffect(() => { lastSyncTimeRef.current = lastSyncTime; }, [lastSyncTime]);
+
   // Sidebar collapsed state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('life-sidebar-collapsed');
+    const saved = localStorage.getItem('risk-sidebar-collapsed');
     return saved === 'true';
   });
 
@@ -198,7 +272,7 @@ export const Life: React.FC = () => {
 
   // Persist sidebar state
   useEffect(() => {
-    localStorage.setItem('life-sidebar-collapsed', String(sidebarCollapsed));
+    localStorage.setItem('risk-sidebar-collapsed', String(sidebarCollapsed));
   }, [sidebarCollapsed]);
 
   // Parse pattern on selection change (reset rotation when pattern changes)
@@ -221,21 +295,87 @@ export const Life: React.FC = () => {
   }, [pendingPlacements.length]);
 
   // Local countdown for wipe timer (smooth decrement between backend syncs)
+  // Note: We never auto-rotate quadrants here - only the backend determines the current wipe quadrant
+  // This prevents desync where frontend shows wrong quadrant before backend confirms the rotation
   useEffect(() => {
     if (!wipeInfo) return;
     const interval = setInterval(() => {
       setWipeInfo(prev => {
         if (!prev) return null;
         const newSeconds = prev.secondsUntil - 1;
-        if (newSeconds <= 0) {
-          // Move to next quadrant when timer hits 0 (5 minute rotation)
-          return { quadrant: (prev.quadrant + 1) % TOTAL_QUADRANTS, secondsUntil: 300 };
-        }
-        return { ...prev, secondsUntil: newSeconds };
+        // Clamp at 0, don't auto-rotate - wait for backend to confirm new quadrant
+        return { ...prev, secondsUntil: Math.max(0, newSeconds) };
       });
     }, 1000);
     return () => clearInterval(interval);
   }, [wipeInfo !== null]);
+
+  // Detect coin loss and spawn Mario-style coin particles
+  useEffect(() => {
+    if (bases.size === 0) return;
+
+    const newParticles: CoinParticle[] = [];
+
+    for (const [playerNum, baseInfo] of bases) {
+      const currentCoins = Number(baseInfo.coins);
+      const prevCoins = prevBaseCoinsRef.current.get(playerNum) ?? currentCoins;
+
+      if (prevCoins > currentCoins) {
+        // Coins were lost! Spawn particles
+        const coinsLost = Math.min(prevCoins - currentCoins, 20); // Cap at 20 particles
+        const particleCount = Math.max(3, Math.ceil(coinsLost / 2)); // 3-10 particles based on loss
+
+        for (let i = 0; i < particleCount; i++) {
+          const angle = (Math.PI * 0.3) + (Math.random() * Math.PI * 0.4); // Upward arc (50-130 degrees)
+          const speed = 2 + Math.random() * 3;
+
+          newParticles.push({
+            id: nextParticleIdRef.current++,
+            baseX: baseInfo.x,
+            baseY: baseInfo.y,
+            offsetX: (Math.random() - 0.5) * 20,
+            offsetY: -5 - Math.random() * 10,
+            velocityX: Math.cos(angle) * speed * (Math.random() > 0.5 ? 1 : -1),
+            velocityY: -Math.sin(angle) * speed,
+            opacity: 1,
+            scale: 0.8 + Math.random() * 0.4,
+            rotation: Math.random() * 360,
+            rotationSpeed: (Math.random() - 0.5) * 20,
+          });
+        }
+      }
+
+      prevBaseCoinsRef.current.set(playerNum, currentCoins);
+    }
+
+    if (newParticles.length > 0) {
+      setCoinParticles(prev => [...prev, ...newParticles]);
+    }
+  }, [bases]);
+
+  // Animate coin particles (physics update loop)
+  useEffect(() => {
+    if (coinParticles.length === 0) return;
+
+    const interval = setInterval(() => {
+      setCoinParticles(prev => {
+        const updated = prev
+          .map(p => ({
+            ...p,
+            offsetX: p.offsetX + p.velocityX,
+            offsetY: p.offsetY + p.velocityY,
+            velocityY: p.velocityY + 0.15, // Gravity
+            opacity: p.opacity - 0.02,
+            rotation: p.rotation + p.rotationSpeed,
+          }))
+          .filter(p => p.opacity > 0);
+
+        return updated;
+      });
+    }, 16); // ~60fps
+
+    return () => clearInterval(interval);
+  }, [coinParticles.length > 0]);
 
   // Navigate to adjacent quadrant with toroidal wrapping
   const navigateQuadrant = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
@@ -313,6 +453,7 @@ export const Life: React.FC = () => {
     setMyBalance(0);
     setPendingPlacements([]);
     setSelectedPlacementIds(new Set());
+    setBases(new Map());
 
     const setupActor = async () => {
       setIsLoading(true);
@@ -321,22 +462,45 @@ export const Life: React.FC = () => {
         const newActor = Actor.createActor<_SERVICE>(idlFactory, { agent, canisterId: selectedServer.canisterId });
         setActor(newActor);
 
-        // Check if player already has a slot
-        const state = await newActor.get_state();
-        if (state.player_num && state.player_num.length > 0) {
-          // Player already has a slot, go straight to game
-          setMyPlayerNum(state.player_num[0]);
+        // Fetch balance first
+        const balance = await newActor.get_balance();
+        setMyBalance(Number(balance));
+
+        // Check slots to see if player already has a base (v2)
+        const slots = await newActor.get_slots_info();
+        setSlotsInfo(slots);
+
+        // Find if current principal has a base
+        let hasBase = false;
+        for (let i = 0; i < slots.length; i++) {
+          const slotOpt = slots[i];
+          if (slotOpt.length > 0) {
+            const slotInfo = slotOpt[0];
+            if (slotInfo.principal.length > 0 && slotInfo.principal[0].toText() === principal) {
+              setMyPlayerNum(i + 1);
+              hasBase = true;
+              break;
+            }
+          }
+        }
+
+        if (hasBase) {
           setShowSlotSelection(false);
+          // Mark that we have a base for elimination detection
+          hadBaseRef.current = true;
+          // Initialize tracking refs (will be refined on first sync)
+          joinedAtGeneration.current = null; // Unknown - joined in previous session
+          initialWalletRef.current = Number(balance);
         } else {
-          // New player, show slot selection
-          const slots = await newActor.get_slots_info();
-          setSlotsInfo(slots);
           setShowSlotSelection(true);
+          // Reset elimination tracking refs
+          hadBaseRef.current = false;
+          joinedAtGeneration.current = null;
+          peakTerritoryRef.current = 0;
         }
       } catch (err) {
         console.error('Failed to setup actor:', err);
         setError(`Failed to connect: ${err}`);
-        // Show slot selection on error
         setShowSlotSelection(true);
       } finally {
         setIsLoading(false);
@@ -344,117 +508,155 @@ export const Life: React.FC = () => {
     };
 
     setupActor();
-  }, [isAuthenticated, identity, selectedServer]);
-
-  // Handle joining a specific slot
-  const handleJoinSlot = async (slot: number) => {
-    if (!actor || isJoiningSlot) return;
-
-    setIsJoiningSlot(true);
-    setError(null);
-
-    try {
-      const result = await actor.join_slot(slot);
-      if ('Ok' in result) {
-        setMyPlayerNum(result.Ok);
-        setShowSlotSelection(false);
-
-        // Immediately fetch state to update balance and game view
-        try {
-          const state = await actor.get_state();
-          setGameState(state);
-          // Find our balance in the state
-          const myIdx = state.players.findIndex(
-            p => p.toText() === principal
-          );
-          if (myIdx >= 0) {
-            setMyBalance(Number(state.balances[myIdx]));
-          }
-        } catch (syncErr) {
-          console.error('Failed to sync after join:', syncErr);
-        }
-      } else {
-        setError(result.Err);
-        // Refresh slots info in case state changed
-        const slots = await actor.get_slots_info();
-        setSlotsInfo(slots);
-      }
-    } catch (err) {
-      setError(`Failed to join slot: ${err}`);
-    } finally {
-      setIsJoiningSlot(false);
-    }
-  };
+  }, [isAuthenticated, identity, selectedServer, principal]);
 
   // Refresh slot info
   const refreshSlotsInfo = async () => {
     if (!actor) return;
     try {
+      const t0 = performance.now();
       const slots = await actor.get_slots_info();
+      console.log(`[QUERY LATENCY] get_slots_info: ${(performance.now() - t0).toFixed(1)}ms`);
       setSlotsInfo(slots);
     } catch (err) {
       console.error('Failed to refresh slots:', err);
     }
   };
 
-  // Convert sparse cells from backend to dense grid
-  const sparseToDense = useCallback((sparse: GameState): Cell[] => {
-    const dense: Cell[] = new Array(TOTAL_CELLS).fill(null).map(() => ({ owner: 0, coins: 0, alive: false }));
+  // Convert bitmap-based state from backend to dense grid (v2 format)
+  const sparseToDense = useCallback((state: GameState): Cell[] => {
+    const dense: Cell[] = new Array(TOTAL_CELLS).fill(null).map(() => ({ owner: 0, alive: false }));
 
-    // Apply alive cells
-    for (const cell of sparse.alive_cells) {
-      const idx = cell.y * GRID_SIZE + cell.x;
-      if (idx >= 0 && idx < TOTAL_CELLS) {
-        dense[idx] = { owner: cell.owner, coins: cell.coins, alive: true };
+    // Decode alive_bitmap - each u64 represents 64 consecutive cells
+    const bitmap = Array.from(state.alive_bitmap);
+    for (let wordIdx = 0; wordIdx < bitmap.length; wordIdx++) {
+      const word = BigInt(bitmap[wordIdx]);
+      for (let bit = 0; bit < 64; bit++) {
+        if ((word >> BigInt(bit)) & BigInt(1)) {
+          const cellIdx = wordIdx * 64 + bit;
+          if (cellIdx < TOTAL_CELLS) {
+            dense[cellIdx].alive = true;
+          }
+        }
       }
     }
 
-    // Apply territory (dead cells with owner/coins)
-    for (const cell of sparse.territory) {
-      const idx = cell.y * GRID_SIZE + cell.x;
-      if (idx >= 0 && idx < TOTAL_CELLS && !dense[idx].alive) {
-        dense[idx] = { owner: cell.owner, coins: cell.coins, alive: false };
+    // Decode territories for each player slot (index 0 = slot 1, etc.)
+    for (let slotIdx = 0; slotIdx < state.territories.length; slotIdx++) {
+      const territory = state.territories[slotIdx];
+      const playerNum = slotIdx + 1;  // Slots are 1-indexed
+
+      // chunk_mask indicates which 4096-cell chunks have data
+      const chunkMask = BigInt(territory.chunk_mask);
+      let chunkDataIdx = 0;
+
+      for (let chunkIdx = 0; chunkIdx < 64; chunkIdx++) {  // 64 chunks (8x8 grid of 64x64 chunks)
+        if (!((chunkMask >> BigInt(chunkIdx)) & BigInt(1))) continue;
+
+        // This chunk has data
+        const chunkData = territory.chunks[chunkDataIdx];
+        chunkDataIdx++;
+
+        if (!chunkData) continue;
+
+        // Chunk grid position (8x8 grid of chunks)
+        const chunkRow = Math.floor(chunkIdx / 8);  // 0-7
+        const chunkCol = chunkIdx % 8;              // 0-7
+
+        // Each chunk has 64 words (one per row of 64 cells)
+        const words = Array.from(chunkData);
+        for (let wordIdx = 0; wordIdx < words.length; wordIdx++) {
+          const word = BigInt(words[wordIdx]);
+          for (let bit = 0; bit < 64; bit++) {
+            if ((word >> BigInt(bit)) & BigInt(1)) {
+              // wordIdx is the local row (0-63), bit is the local column (0-63)
+              const localY = wordIdx;
+              const localX = bit;
+
+              // Global coordinates
+              const globalY = chunkRow * 64 + localY;
+              const globalX = chunkCol * 64 + localX;
+
+              // Linear cell index (row-major: y * width + x)
+              const cellIdx = globalY * GRID_SIZE + globalX;
+              if (cellIdx < TOTAL_CELLS) {
+                dense[cellIdx].owner = playerNum;
+              }
+            }
+          }
+        }
       }
     }
 
     return dense;
   }, []);
 
-  // Canvas sizing
+  // Canvas sizing - re-run when slot selection closes (canvas mounts)
+  // Uses polling to handle race condition where refs aren't attached yet
   useEffect(() => {
-    if (!isAuthenticated) return;
-    const container = containerRef.current;
-    const canvas = canvasRef.current;
-    if (!container || !canvas) return;
+    if (!isAuthenticated || showSlotSelection) return;
 
-    const updateSize = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const rect = container.getBoundingClientRect();
-      const width = Math.floor(rect.width);
-      const height = Math.floor(rect.height);
-      if (width === 0 || height === 0) return;
-      if (canvasSizeRef.current.width === width && canvasSizeRef.current.height === height) return;
+    // CRITICAL: Reset canvasSizeRef to force fresh calculation
+    // This prevents stale dimensions from causing "zoomed in" rendering
+    canvasSizeRef.current = { width: 0, height: 0 };
 
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      canvasSizeRef.current = { width, height };
-      forceRender(n => n + 1);
+    let observer: ResizeObserver | null = null;
+    let retryTimeout: NodeJS.Timeout | null = null;
+    let cancelled = false;
+
+    const setupCanvas = () => {
+      if (cancelled) return;
+      const container = containerRef.current;
+      const canvas = canvasRef.current;
+
+      // If refs not ready yet, retry shortly
+      if (!container || !canvas) {
+        retryTimeout = setTimeout(setupCanvas, 16);
+        return;
+      }
+
+      const updateSize = () => {
+        if (cancelled) return;
+        const dpr = window.devicePixelRatio || 1;
+        const rect = container.getBoundingClientRect();
+        const width = Math.floor(rect.width);
+        const height = Math.floor(rect.height);
+
+        // Skip if dimensions are invalid (layout not ready)
+        if (width < 100 || height < 100) {
+          // Retry after a frame
+          requestAnimationFrame(updateSize);
+          return;
+        }
+
+        // Skip if dimensions unchanged
+        if (canvasSizeRef.current.width === width && canvasSizeRef.current.height === height) return;
+
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        canvasSizeRef.current = { width, height };
+        forceRender(n => n + 1);
+      };
+
+      observer = new ResizeObserver(updateSize);
+      observer.observe(container);
+
+      // Use requestAnimationFrame to ensure layout is complete before first size check
+      requestAnimationFrame(() => {
+        if (!cancelled) updateSize();
+      });
     };
 
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(container);
-    updateSize();
-    const t1 = setTimeout(updateSize, 50);
-    const t2 = setTimeout(updateSize, 200);
+    setupCanvas();
 
     return () => {
-      observer.disconnect();
-      clearTimeout(t1);
-      clearTimeout(t2);
+      cancelled = true;
+      observer?.disconnect();
+      if (retryTimeout) clearTimeout(retryTimeout);
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, showSlotSelection]);
 
   // Backend sync - fetch authoritative state every 5 seconds
   useEffect(() => {
@@ -465,36 +667,152 @@ export const Life: React.FC = () => {
     const syncFromBackend = async () => {
       if (cancelled) return;
       try {
+        const queryId = ++querySequence.current;
+        const t0 = performance.now();
         const state = await actor.get_state();
+        const latencyMs = performance.now() - t0;
+
+        // Track latency stats (silent - only for debug overlay)
+        queryLatencyStats.current.samples.push(latencyMs);
+        if (queryLatencyStats.current.samples.length > 20) {
+          queryLatencyStats.current.samples.shift();
+        }
         if (!cancelled) {
+          // Count alive cells in the state
+          let aliveCount = 0;
+          for (const word of state.alive_bitmap) {
+            let w = BigInt(word);
+            while (w > 0n) {
+              aliveCount += Number(w & 1n);
+              w >>= 1n;
+            }
+          }
+          // ========== SYNC DECISION LOGIC ==========
+          // Use refs to get current values (avoids stale closure issue)
+          const currentLocalGen = localGenerationRef.current;
+          const currentLastSyncedGen = lastSyncedGenerationRef.current;
+          const currentLastSyncTime = lastSyncTimeRef.current;
+
+          const incomingGen = state.generation;
+          const now = Date.now();
+          const timeSinceLastSync = now - currentLastSyncTime;
+          const genDiff = Number(currentLocalGen - incomingGen);
+          // genDiff > 0 means local is AHEAD of backend
+          // genDiff < 0 means backend is AHEAD of local (we're behind!)
+
+          // REJECT: True out-of-order (older than what we've already synced to)
+          if (incomingGen < currentLastSyncedGen) {
+            // Don't log these - they're expected with parallel queries
+            return;
+          }
+
+          // SYNC STRATEGY:
+          // - If backend is AHEAD (genDiff < 0): Always sync (we're behind, need to catch up)
+          // - If local is ahead by small amount: Skip (we're just running slightly fast)
+          // - If local is ahead by too much OR force sync: Sync to prevent drift
+          const backendAhead = genDiff < 0;
+          const localTooFarAhead = genDiff > SYNC_TOLERANCE_GENS;
+          const needsForceSync = timeSinceLastSync >= FORCE_SYNC_MS;
+
+          // Only sync if: backend ahead OR local way too far ahead OR force sync
+          if (!backendAhead && !localTooFarAhead && !needsForceSync) {
+            // Local is slightly ahead - skip, let backend catch up
+            return;
+          }
+
+          // Log the sync event
+          const reason = backendAhead ? 'catchup' : (needsForceSync ? 'force' : 'drift');
+          console.log('[SYNC]', {
+            queryId,
+            incoming: incomingGen.toString(),
+            localGen: currentLocalGen.toString(),
+            correction: genDiff,
+            reason,
+            latency: `${latencyMs.toFixed(0)}ms`,
+          });
+
+          // Update UI indicator
+          setSyncStatus({
+            inSync: true,
+            driftGens: 0,
+            lastLocalHash: '',
+            lastBackendHash: '',
+          });
+
+          // Update generation tracking - hard snap to backend state
+          setLastSyncedGeneration(state.generation);
+          setLocalGeneration(state.generation);
+          setLastSyncTime(Date.now());
+
           setGameState(state);
-          // Convert sparse to dense for local simulation
+          // Convert bitmap to dense for local simulation
           setLocalCells(sparseToDense(state));
 
-          // Update player number and balance
-          if (state.player_num && state.player_num.length > 0) {
-            setMyPlayerNum(state.player_num[0]);
+          // Extract base info from slots (v2 format)
+          const newBases = new Map<number, BaseInfo>();
+          for (let i = 0; i < state.slots.length; i++) {
+            const slotOpt = state.slots[i];
+            if (slotOpt.length > 0) {
+              const slotInfo = slotOpt[0];
+              if (slotInfo.base.length > 0) {
+                newBases.set(i + 1, slotInfo.base[0]);  // Slots are 1-indexed
+              }
+              // Check if this is our slot
+              if (slotInfo.principal.length > 0 && slotInfo.principal[0].toText() === principal) {
+                setMyPlayerNum(i + 1);
+              }
+            }
           }
+          setBases(newBases);
 
-          const myIdx = state.players.findIndex(
-            p => p.toText() === principal
-          );
-          if (myIdx >= 0) {
-            setMyBalance(Number(state.balances[myIdx]));
-          }
+          // Elimination detection: Check if player had a base but now doesn't
+          // We use a callback to access current myPlayerNum state safely
+          setMyPlayerNum(currentPlayerNum => {
+            if (currentPlayerNum && hadBaseRef.current && !isEliminated) {
+              const myBase = newBases.get(currentPlayerNum);
 
-          // Update quadrant controllers
-          if (state.quadrant_controllers) {
-            setQuadrantControllers(Array.from(state.quadrant_controllers));
-          }
+              // Player was in game but base is now gone = eliminated
+              if (!myBase) {
+                // Calculate stats for elimination modal
+                const gensSurvived = joinedAtGeneration.current !== null
+                  ? state.generation - joinedAtGeneration.current
+                  : 0n;
 
-          // Fetch wipe timer info
+                setIsEliminated(true);
+                setEliminationStats({
+                  generationsSurvived: gensSurvived,
+                  peakTerritory: peakTerritoryRef.current,
+                  coinsEarned: 0, // Will be updated after balance fetch
+                });
+
+                // Clear tracking for potential rejoin
+                hadBaseRef.current = false;
+              }
+            }
+            return currentPlayerNum; // Don't change the value
+          });
+
+          // Fetch balance
           try {
-            const [nextQuadrant, secondsUntil] = await actor.get_next_wipe();
-            setWipeInfo({ quadrant: nextQuadrant, secondsUntil: Number(secondsUntil) });
+            const balance = await actor.get_balance();
+            setMyBalance(Number(balance));
+
+            // If just eliminated, update coins earned in stats
+            if (isEliminated && eliminationStats) {
+              setEliminationStats(prev => prev ? {
+                ...prev,
+                coinsEarned: Number(balance) - initialWalletRef.current
+              } : null);
+            }
           } catch (err) {
-            console.error('Wipe info fetch error:', err);
+            console.error('Balance fetch error:', err);
           }
+
+          // Update wipe timer from state (v2 includes it directly)
+          setWipeInfo({
+            quadrant: state.next_wipe_quadrant,
+            secondsUntil: Number(state.seconds_until_wipe)
+          });
         }
       } catch (err) {
         console.error('Backend sync error:', err);
@@ -513,18 +831,20 @@ export const Life: React.FC = () => {
     };
   }, [actor, principal, isAuthenticated, sparseToDense]);
 
-  // Local simulation - runs every 100ms for smooth visuals
+  // Local simulation - runs every 100ms for smooth visuals (when enabled)
+  // When disabled, we display backend state directly via frequent syncs
   useEffect(() => {
-    if (!isRunning || localCells.length === 0) return;
+    if (!ENABLE_LOCAL_SIM || !isRunning || localCells.length === 0) return;
 
     const localTick = setInterval(() => {
       setLocalCells(cells => stepLocalGeneration(cells));
+      setLocalGeneration(g => g + 1n);  // Track generation for sync verification
     }, LOCAL_TICK_MS);
 
     return () => clearInterval(localTick);
   }, [isRunning, localCells.length > 0]);
 
-  // Helper to draw cells within a region
+  // Helper to draw cells within a region (v2: no coins on cells, draw bases)
   const drawCells = useCallback((
     ctx: CanvasRenderingContext2D,
     startX: number,
@@ -534,6 +854,7 @@ export const Life: React.FC = () => {
     cellSize: number
   ) => {
     const cells = localCells;
+    const gap = cellSize > 2 ? 1 : 0;
 
     // Draw territory (owner > 0, regardless of alive)
     for (let row = 0; row < height; row++) {
@@ -550,9 +871,51 @@ export const Life: React.FC = () => {
       }
     }
 
-    // Draw living cells (non-coin cells only - coin cells drawn separately on top)
-    const gap = cellSize > 2 ? 1 : 0;
+    // Draw base walls for all players (fortress perimeter)
+    for (const [playerNum, baseInfo] of bases) {
+      const playerColor = PLAYER_COLORS[playerNum] || '#FFFFFF';
 
+      // Draw 8x8 base walls
+      for (let dy = 0; dy < BASE_SIZE; dy++) {
+        for (let dx = 0; dx < BASE_SIZE; dx++) {
+          // Only wall positions (perimeter)
+          if (dx !== 0 && dx !== BASE_SIZE - 1 && dy !== 0 && dy !== BASE_SIZE - 1) continue;
+
+          const gridCol = baseInfo.x + dx;
+          const gridRow = baseInfo.y + dy;
+
+          // Check if in view
+          const localCol = gridCol - startX;
+          const localRow = gridRow - startY;
+          if (localCol < 0 || localCol >= width || localRow < 0 || localRow >= height) continue;
+
+          const x = localCol * cellSize;
+          const y = localRow * cellSize;
+
+          // Draw fortress wall with gradient for 3D effect
+          if (cellSize > 3) {
+            const gradient = ctx.createLinearGradient(x, y, x, y + cellSize);
+            gradient.addColorStop(0, '#6B6B6B');
+            gradient.addColorStop(0.3, '#5A5A5A');
+            gradient.addColorStop(0.7, '#4A4A4A');
+            gradient.addColorStop(1, '#3A3A3A');
+            ctx.fillStyle = gradient;
+          } else {
+            ctx.fillStyle = BASE_WALL_COLOR;
+          }
+          ctx.fillRect(x, y, cellSize - gap, cellSize - gap);
+
+          // Add player color border to walls
+          ctx.strokeStyle = playerColor;
+          ctx.globalAlpha = 0.6;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x + 0.5, y + 0.5, cellSize - gap - 1, cellSize - gap - 1);
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
+
+    // Draw living cells
     for (let row = 0; row < height; row++) {
       for (let col = 0; col < width; col++) {
         const gridRow = startY + row;
@@ -560,8 +923,7 @@ export const Life: React.FC = () => {
         const idx = gridRow * GRID_SIZE + gridCol;
         const cell = cells[idx];
 
-        // Only draw alive cells without coins here
-        if (cell && cell.alive && cell.owner > 0 && cell.coins === 0) {
+        if (cell && cell.alive && cell.owner > 0) {
           ctx.fillStyle = PLAYER_COLORS[cell.owner] || '#FFFFFF';
           ctx.fillRect(
             col * cellSize,
@@ -573,108 +935,111 @@ export const Life: React.FC = () => {
       }
     }
 
-    // Draw coin cells with color based on quadrant control state
-    for (let row = 0; row < height; row++) {
-      for (let col = 0; col < width; col++) {
-        const gridRow = startY + row;
-        const gridCol = startX + col;
-        const idx = gridRow * GRID_SIZE + gridCol;
-        const cell = cells[idx];
+    // Draw coin count on each base (centered in the 8x8 base)
+    for (const [playerNum, baseInfo] of bases) {
+      const coins = Number(baseInfo.coins);
+      const playerColor = PLAYER_COLORS[playerNum] || '#FFFFFF';
 
-        if (cell && cell.coins > 0) {
-          const x = col * cellSize;
-          const y = row * cellSize;
-          const size = cellSize - gap;
-          const coinIntensity = Math.min(1, cell.coins / 5); // Scale intensity by coin count
+      // Calculate center of base in local coordinates
+      const baseCenterCol = baseInfo.x + BASE_SIZE / 2;
+      const baseCenterRow = baseInfo.y + BASE_SIZE / 2;
+      const localCenterCol = baseCenterCol - startX;
+      const localCenterRow = baseCenterRow - startY;
 
-          // Determine coin state based on quadrant control
-          const quadrant = getQuadrant(gridCol, gridRow);
-          const coinState = getCoinState(cell.owner, myPlayerNum, quadrant, quadrantControllers);
-          const isUnlocked = coinState === 'unlocked';
+      // Skip if base center is outside view
+      if (localCenterCol < -2 || localCenterCol >= width + 2 ||
+          localCenterRow < -2 || localCenterRow >= height + 2) continue;
 
-          if (cellSize > 3) {
-            // Large cells: full texture filling the entire cell
+      const x = localCenterCol * cellSize;
+      const y = localCenterRow * cellSize;
 
-            // Base gradient (vertical for metallic look)
-            const gradient = ctx.createLinearGradient(x, y, x, y + size);
-            if (isUnlocked) {
-              // Rich metallic gold for collectible coins
-              if (cell.alive) {
-                gradient.addColorStop(0, '#FFE55C');    // Bright gold top
-                gradient.addColorStop(0.3, '#FFD700'); // Pure gold
-                gradient.addColorStop(0.5, '#FFC125'); // Golden
-                gradient.addColorStop(0.7, '#DAA520'); // Goldenrod
-                gradient.addColorStop(1, '#B8860B');   // Dark goldenrod bottom
-              } else {
-                gradient.addColorStop(0, 'rgba(255, 229, 92, 0.6)');
-                gradient.addColorStop(0.5, 'rgba(255, 215, 0, 0.5)');
-                gradient.addColorStop(1, 'rgba(184, 134, 11, 0.4)');
-              }
-            } else {
-              // Steel gray for locked/own coins (cannot collect)
-              if (cell.alive) {
-                gradient.addColorStop(0, '#A8A8A8');    // Light steel
-                gradient.addColorStop(0.3, '#8B8B8B'); // Steel gray
-                gradient.addColorStop(0.5, '#787878'); // Mid gray
-                gradient.addColorStop(0.7, '#656565'); // Darker gray
-                gradient.addColorStop(1, '#525252');   // Dark steel
-              } else {
-                gradient.addColorStop(0, 'rgba(168, 168, 168, 0.6)');
-                gradient.addColorStop(0.5, 'rgba(139, 139, 139, 0.5)');
-                gradient.addColorStop(1, 'rgba(82, 82, 82, 0.4)');
-              }
-            }
-            ctx.fillStyle = gradient;
-            ctx.fillRect(x, y, size, size);
+      // Only show coin count if cells are large enough to read text
+      if (cellSize >= 3) {
+        // Draw coin icon and count
+        const coinText = coins >= 1000 ? `${(coins / 1000).toFixed(1)}k` : String(coins);
+        const fontSize = Math.max(8, Math.min(14, cellSize * 1.5));
 
-            // Diagonal shimmer highlight for 3D metallic effect (only for alive cells)
-            if (cell.alive) {
-              const shimmer = ctx.createLinearGradient(x, y, x + size * 0.6, y + size * 0.6);
-              shimmer.addColorStop(0, 'rgba(255, 255, 255, 0.5)');
-              shimmer.addColorStop(0.4, 'rgba(255, 255, 220, 0.2)');
-              shimmer.addColorStop(1, 'rgba(255, 255, 255, 0)');
-              ctx.fillStyle = shimmer;
-              ctx.fillRect(x, y, size, size);
+        ctx.save();
 
-              // Subtle inner glow/highlight at top-left corner
-              ctx.fillStyle = 'rgba(255, 255, 240, 0.3)';
-              ctx.fillRect(x + 1, y + 1, Math.max(2, size * 0.2), Math.max(2, size * 0.2));
-            }
+        // Background pill for readability
+        ctx.font = `bold ${fontSize}px monospace`;
+        const textWidth = ctx.measureText(coinText).width;
+        const pillWidth = textWidth + fontSize * 1.2;
+        const pillHeight = fontSize * 1.4;
 
-            // Subtle territory border (same thickness as grid lines)
-            if (cell.owner > 0) {
-              const ownerColor = PLAYER_COLORS[cell.owner] || '#FFFFFF';
-              // Parse color and make it semi-transparent
-              ctx.strokeStyle = ownerColor;
-              ctx.globalAlpha = 0.5;
-              ctx.lineWidth = 1;
-              ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
-              ctx.globalAlpha = 1;
-            }
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.beginPath();
+        ctx.roundRect(x - pillWidth / 2, y - pillHeight / 2, pillWidth, pillHeight, 4);
+        ctx.fill();
 
-            // Coin count indicator for cells with multiple coins
-            if (cell.coins > 1 && cellSize > 6) {
-              // Dark outline for readability
-              ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
-              ctx.lineWidth = 2;
-              ctx.font = `bold ${Math.max(8, Math.floor(cellSize * 0.45))}px monospace`;
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.strokeText(cell.coins.toString(), x + size / 2, y + size / 2);
-              // White text on top
-              ctx.fillStyle = '#FFFFFF';
-              ctx.fillText(cell.coins.toString(), x + size / 2, y + size / 2);
-            }
-          } else {
-            // Small cells (overview): solid color based on control state
-            const baseColor = isUnlocked ? '#FFD700' : '#8B8B8B';
-            ctx.fillStyle = cell.alive ? baseColor : (isUnlocked ? 'rgba(255, 215, 0, 0.6)' : 'rgba(139, 139, 139, 0.6)');
-            ctx.fillRect(x, y, size, size);
-          }
-        }
+        // Coin emoji/symbol
+        ctx.fillStyle = '#FFD700';
+        ctx.font = `${fontSize * 0.9}px sans-serif`;
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('\u{1FA99}', x - textWidth / 2, y); // Unicode coin symbol
+
+        // Coin count text
+        ctx.fillStyle = playerColor;
+        ctx.font = `bold ${fontSize}px monospace`;
+        ctx.textAlign = 'left';
+        ctx.fillText(coinText, x - textWidth / 2 + 2, y);
+
+        ctx.restore();
       }
     }
-  }, [localCells, myPlayerNum, quadrantControllers]);
+
+    // Draw coin particles (Mario-style coin spill animation)
+    for (const particle of coinParticles) {
+      // Calculate particle position in local coordinates
+      const baseCenterCol = particle.baseX + BASE_SIZE / 2;
+      const baseCenterRow = particle.baseY + BASE_SIZE / 2;
+      const localCenterCol = baseCenterCol - startX;
+      const localCenterRow = baseCenterRow - startY;
+
+      // Skip if particle origin is way outside view
+      if (localCenterCol < -10 || localCenterCol >= width + 10 ||
+          localCenterRow < -10 || localCenterRow >= height + 10) continue;
+
+      const x = localCenterCol * cellSize + particle.offsetX;
+      const y = localCenterRow * cellSize + particle.offsetY;
+
+      ctx.save();
+      ctx.globalAlpha = particle.opacity;
+      ctx.translate(x, y);
+      ctx.rotate((particle.rotation * Math.PI) / 180);
+      ctx.scale(particle.scale, particle.scale);
+
+      // Draw golden coin
+      const coinRadius = Math.max(4, cellSize * 0.4);
+
+      // Coin body (golden gradient)
+      const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, coinRadius);
+      gradient.addColorStop(0, '#FFF8DC');
+      gradient.addColorStop(0.3, '#FFD700');
+      gradient.addColorStop(0.7, '#DAA520');
+      gradient.addColorStop(1, '#B8860B');
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, coinRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Coin shine highlight
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.beginPath();
+      ctx.arc(-coinRadius * 0.3, -coinRadius * 0.3, coinRadius * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Dollar sign or star in center
+      ctx.fillStyle = '#B8860B';
+      ctx.font = `bold ${coinRadius}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('$', 0, 1);
+
+      ctx.restore();
+    }
+  }, [localCells, bases, coinParticles]);
 
   // Draw 4x4 quadrant grid lines (overview mode)
   const drawQuadrantGrid = useCallback((ctx: CanvasRenderingContext2D, cellSize: number) => {
@@ -738,26 +1103,7 @@ export const Life: React.FC = () => {
     return livingCells / (QUADRANT_SIZE * QUADRANT_SIZE);
   }, [localCells]);
 
-  // Calculate total coins in a quadrant
-  const calculateQuadrantCoins = useCallback((quadrant: number): number => {
-    if (localCells.length === 0) return 0;
-    const qRow = Math.floor(quadrant / QUADRANTS_PER_ROW);
-    const qCol = quadrant % QUADRANTS_PER_ROW;
-    const startY = qRow * QUADRANT_SIZE;
-    const startX = qCol * QUADRANT_SIZE;
-
-    let totalCoins = 0;
-    for (let row = startY; row < startY + QUADRANT_SIZE; row++) {
-      for (let col = startX; col < startX + QUADRANT_SIZE; col++) {
-        const cell = localCells[row * GRID_SIZE + col];
-        if (cell && cell.coins > 0) totalCoins += cell.coins;
-      }
-    }
-
-    return totalCoins;
-  }, [localCells]);
-
-  // Draw preview cells with pulsing animation (handles batched placements)
+  // Draw preview cells with pulsing animation (handles batched placements) - v2 rules
   const drawPreviewCells = useCallback((
     ctx: CanvasRenderingContext2D,
     startX: number,
@@ -770,13 +1116,8 @@ export const Life: React.FC = () => {
     // Use white when player number is not yet known from backend
     const playerColor = myPlayerNum !== null ? (PLAYER_COLORS[myPlayerNum] || '#FFFFFF') : '#FFFFFF';
 
-    // Collect all pending cell positions for overlap detection between placements
-    const allPendingCells: Set<string> = new Set();
-    for (const placement of pendingPlacements) {
-      for (const [gridCol, gridRow] of placement.cells) {
-        allPendingCells.add(`${gridCol},${gridRow}`);
-      }
-    }
+    // Get my base for wall checking
+    const myBase = myPlayerNum ? bases.get(myPlayerNum) : null;
 
     // Count occurrences of each cell position to detect internal overlaps
     const cellCounts: Map<string, number> = new Map();
@@ -800,10 +1141,13 @@ export const Life: React.FC = () => {
         const existingCell = cells[idx];
         const cellKey = `${gridCol},${gridRow}`;
 
-        // Check for conflicts: alive cells OR duplicate pending cells
+        // v2 conflict checking: own territory only, not on walls
         const hasAliveConflict = existingCell && existingCell.alive;
         const hasDuplicateConflict = (cellCounts.get(cellKey) || 0) > 1;
-        const hasConflict = hasAliveConflict || hasDuplicateConflict;
+        const hasWallConflict = myBase && isBaseWall(gridCol, gridRow, myBase.x, myBase.y);
+        const hasNeutralConflict = !existingCell || existingCell.owner === 0;
+        const hasEnemyConflict = existingCell && existingCell.owner !== 0 && existingCell.owner !== myPlayerNum;
+        const hasConflict = hasAliveConflict || hasDuplicateConflict || hasWallConflict || hasNeutralConflict || hasEnemyConflict;
 
         if (hasConflict) {
           ctx.fillStyle = `rgba(255, 60, 60, ${pulseAlpha})`;
@@ -822,13 +1166,14 @@ export const Life: React.FC = () => {
         ctx.setLineDash([]);
       }
     }
-  }, [localCells, myPlayerNum, pendingPlacements]);
+  }, [localCells, myPlayerNum, pendingPlacements, bases]);
 
   // Main draw function - simplified for quadrant-based navigation
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     const { width: displayWidth, height: displayHeight } = canvasSizeRef.current;
-    if (!canvas || displayWidth === 0 || displayHeight === 0 || localCells.length === 0) return;
+    // Skip drawing if canvas not ready or dimensions are invalid (prevents zoomed-in glitch)
+    if (!canvas || displayWidth < 100 || displayHeight < 100 || localCells.length === 0) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -856,37 +1201,63 @@ export const Life: React.FC = () => {
       drawCells(ctx, 0, 0, GRID_SIZE, GRID_SIZE, cellSize);
       drawQuadrantGrid(ctx, cellSize);
 
-      // Highlight upcoming wipe quadrants (yellow, orange, red)
+      // Highlight upcoming wipe quadrants (yellow, orange, red) with timer badges
       if (wipeInfo) {
-        // Third quadrant (+2m) - yellow
+        const quadrantPixelSize = QUADRANT_SIZE * cellSize;
+        const badgeFontSize = Math.max(10, Math.floor(quadrantPixelSize / 8));
+
+        // Third quadrant (+10m) - yellow
         const q3 = (wipeInfo.quadrant + 2) % TOTAL_QUADRANTS;
         const q3Row = Math.floor(q3 / QUADRANTS_PER_ROW);
         const q3Col = q3 % QUADRANTS_PER_ROW;
+        const q3X = q3Col * quadrantPixelSize;
+        const q3Y = q3Row * quadrantPixelSize;
         ctx.fillStyle = 'rgba(234, 179, 8, 0.08)';
-        ctx.fillRect(q3Col * QUADRANT_SIZE * cellSize, q3Row * QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize);
+        ctx.fillRect(q3X, q3Y, quadrantPixelSize, quadrantPixelSize);
         ctx.strokeStyle = '#EAB308';
         ctx.lineWidth = 1;
-        ctx.strokeRect(q3Col * QUADRANT_SIZE * cellSize, q3Row * QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize);
+        ctx.strokeRect(q3X, q3Y, quadrantPixelSize, quadrantPixelSize);
+        // Badge for +10m
+        ctx.font = `bold ${badgeFontSize}px monospace`;
+        ctx.fillStyle = 'rgba(234, 179, 8, 0.9)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('+10m', q3X + quadrantPixelSize / 2, q3Y + quadrantPixelSize / 2);
 
-        // Second quadrant (+1m) - orange
+        // Second quadrant (+5m) - orange
         const q2 = (wipeInfo.quadrant + 1) % TOTAL_QUADRANTS;
         const q2Row = Math.floor(q2 / QUADRANTS_PER_ROW);
         const q2Col = q2 % QUADRANTS_PER_ROW;
+        const q2X = q2Col * quadrantPixelSize;
+        const q2Y = q2Row * quadrantPixelSize;
         ctx.fillStyle = 'rgba(249, 115, 22, 0.08)';
-        ctx.fillRect(q2Col * QUADRANT_SIZE * cellSize, q2Row * QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize);
+        ctx.fillRect(q2X, q2Y, quadrantPixelSize, quadrantPixelSize);
         ctx.strokeStyle = '#F97316';
         ctx.lineWidth = 1.5;
-        ctx.strokeRect(q2Col * QUADRANT_SIZE * cellSize, q2Row * QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize);
+        ctx.strokeRect(q2X, q2Y, quadrantPixelSize, quadrantPixelSize);
+        // Badge for +5m
+        ctx.font = `bold ${badgeFontSize * 1.1}px monospace`;
+        ctx.fillStyle = 'rgba(249, 115, 22, 0.9)';
+        ctx.fillText('+5m', q2X + quadrantPixelSize / 2, q2Y + quadrantPixelSize / 2);
 
-        // Next quadrant (imminent) - red with pulse
+        // Next quadrant (imminent) - red with pulse and countdown
         const wipeRow = Math.floor(wipeInfo.quadrant / QUADRANTS_PER_ROW);
         const wipeCol = wipeInfo.quadrant % QUADRANTS_PER_ROW;
+        const wipeX = wipeCol * quadrantPixelSize;
+        const wipeY = wipeRow * quadrantPixelSize;
         const pulseAlpha = wipeInfo.secondsUntil <= 10 ? 0.15 + 0.1 * Math.sin(Date.now() / 200) : 0.1;
         ctx.fillStyle = `rgba(239, 68, 68, ${pulseAlpha})`;
-        ctx.fillRect(wipeCol * QUADRANT_SIZE * cellSize, wipeRow * QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize);
+        ctx.fillRect(wipeX, wipeY, quadrantPixelSize, quadrantPixelSize);
         ctx.strokeStyle = wipeInfo.secondsUntil <= 10 ? '#DC2626' : '#EF4444';
         ctx.lineWidth = 2;
-        ctx.strokeRect(wipeCol * QUADRANT_SIZE * cellSize, wipeRow * QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize, QUADRANT_SIZE * cellSize);
+        ctx.strokeRect(wipeX, wipeY, quadrantPixelSize, quadrantPixelSize);
+        // Badge with countdown timer
+        const timerText = wipeInfo.secondsUntil >= 60
+          ? `${Math.floor(wipeInfo.secondsUntil / 60)}:${String(wipeInfo.secondsUntil % 60).padStart(2, '0')}`
+          : `${wipeInfo.secondsUntil}s`;
+        ctx.font = `bold ${badgeFontSize * 1.3}px monospace`;
+        ctx.fillStyle = wipeInfo.secondsUntil <= 10 ? '#DC2626' : 'rgba(239, 68, 68, 0.95)';
+        ctx.fillText(timerText, wipeX + quadrantPixelSize / 2, wipeY + quadrantPixelSize / 2);
       }
 
       // Highlight current quadrant position
@@ -900,101 +1271,6 @@ export const Life: React.FC = () => {
         QUADRANT_SIZE * cellSize,
         QUADRANT_SIZE * cellSize
       );
-
-      // Draw controller badges in top-left corner of each quadrant
-      for (let q = 0; q < TOTAL_QUADRANTS; q++) {
-        const controller = quadrantControllers[q] || 0;
-        if (controller > 0) {
-          const qRow = Math.floor(q / QUADRANTS_PER_ROW);
-          const qCol = q % QUADRANTS_PER_ROW;
-          const quadrantPixelSize = QUADRANT_SIZE * cellSize;
-
-          // Position in top-left corner with padding
-          const padding = Math.max(3, quadrantPixelSize * 0.04);
-          const fontSize = Math.max(7, Math.min(11, quadrantPixelSize * 0.08));
-          const text = `P${controller}`;
-          ctx.font = `bold ${fontSize}px monospace`;
-          const textWidth = ctx.measureText(text).width;
-
-          // Badge dimensions - pill shape
-          const badgeHeight = fontSize + 4;
-          const badgeWidth = textWidth + 8;
-          const badgeX = qCol * quadrantPixelSize + padding;
-          const badgeY = qRow * quadrantPixelSize + padding;
-          const borderRadius = badgeHeight / 2;
-
-          // Get controller's color
-          const controllerColor = PLAYER_COLORS[controller] || '#FFFFFF';
-
-          // Draw rounded rectangle (pill shape)
-          ctx.beginPath();
-          ctx.moveTo(badgeX + borderRadius, badgeY);
-          ctx.lineTo(badgeX + badgeWidth - borderRadius, badgeY);
-          ctx.arc(badgeX + badgeWidth - borderRadius, badgeY + borderRadius, borderRadius, -Math.PI / 2, Math.PI / 2);
-          ctx.lineTo(badgeX + borderRadius, badgeY + badgeHeight);
-          ctx.arc(badgeX + borderRadius, badgeY + borderRadius, borderRadius, Math.PI / 2, -Math.PI / 2);
-          ctx.closePath();
-
-          // Semi-transparent dark background
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-          ctx.fill();
-          ctx.strokeStyle = controllerColor;
-          ctx.lineWidth = 1;
-          ctx.stroke();
-
-          // Controller player text in their color
-          ctx.fillStyle = controllerColor;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(text, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2);
-        }
-      }
-
-      // Draw subtle coin badges in top-right corner of each quadrant
-      for (let q = 0; q < TOTAL_QUADRANTS; q++) {
-        const coins = calculateQuadrantCoins(q);
-        if (coins > 0) {
-          const qRow = Math.floor(q / QUADRANTS_PER_ROW);
-          const qCol = q % QUADRANTS_PER_ROW;
-          const quadrantPixelSize = QUADRANT_SIZE * cellSize;
-
-          // Position in top-right corner with padding
-          const padding = Math.max(3, quadrantPixelSize * 0.04);
-          const fontSize = Math.max(7, Math.min(11, quadrantPixelSize * 0.08));
-          const text = coins.toString();
-          ctx.font = `bold ${fontSize}px monospace`;
-          const textWidth = ctx.measureText(text).width;
-
-          // Badge dimensions - pill shape
-          const badgeHeight = fontSize + 4;
-          const badgeWidth = textWidth + 8;
-          const badgeX = (qCol + 1) * quadrantPixelSize - badgeWidth - padding;
-          const badgeY = qRow * quadrantPixelSize + padding;
-          const borderRadius = badgeHeight / 2;
-
-          // Draw rounded rectangle (pill shape)
-          ctx.beginPath();
-          ctx.moveTo(badgeX + borderRadius, badgeY);
-          ctx.lineTo(badgeX + badgeWidth - borderRadius, badgeY);
-          ctx.arc(badgeX + badgeWidth - borderRadius, badgeY + borderRadius, borderRadius, -Math.PI / 2, Math.PI / 2);
-          ctx.lineTo(badgeX + borderRadius, badgeY + badgeHeight);
-          ctx.arc(badgeX + borderRadius, badgeY + borderRadius, borderRadius, Math.PI / 2, -Math.PI / 2);
-          ctx.closePath();
-
-          // Semi-transparent dark background
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-          ctx.fill();
-          ctx.strokeStyle = 'rgba(255, 215, 0, 0.6)';
-          ctx.lineWidth = 1;
-          ctx.stroke();
-
-          // Gold coin count text
-          ctx.fillStyle = '#FFD700';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(text, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2);
-        }
-      }
 
       // Boundary
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
@@ -1025,7 +1301,7 @@ export const Life: React.FC = () => {
 
       ctx.restore();
     }
-  }, [viewMode, viewX, viewY, localCells, drawCells, drawQuadrantGrid, drawGridLines, drawPreviewCells, previewPulse, wipeInfo, calculateQuadrantCoins, quadrantControllers]);
+  }, [viewMode, viewX, viewY, localCells, drawCells, drawQuadrantGrid, drawGridLines, drawPreviewCells, previewPulse, wipeInfo]);
 
   useEffect(() => { draw(); }, [draw]);
 
@@ -1043,71 +1319,16 @@ export const Life: React.FC = () => {
     ctx.fillStyle = '#1a1a2e';
     ctx.fillRect(0, 0, size, size);
 
-    // Draw cell density per quadrant (heatmap), controller badges, and coin badges
+    // Draw cell density per quadrant (heatmap)
     for (let q = 0; q < TOTAL_QUADRANTS; q++) {
       const qRow = Math.floor(q / QUADRANTS_PER_ROW);
       const qCol = q % QUADRANTS_PER_ROW;
       const density = calculateQuadrantDensity(q);
-      const coins = calculateQuadrantCoins(q);
-      const controller = quadrantControllers[q] || 0;
 
       // Color based on density
       const alpha = Math.min(0.8, density * 2);
       ctx.fillStyle = `rgba(57, 255, 20, ${alpha})`;
       ctx.fillRect(qCol * quadSize + 1, qRow * quadSize + 1, quadSize - 2, quadSize - 2);
-
-      // Draw controller badge in top-left corner if quadrant has a controller
-      if (controller > 0) {
-        const text = `P${controller}`;
-        ctx.font = 'bold 5px monospace';
-        const textWidth = ctx.measureText(text).width;
-        const controllerColor = PLAYER_COLORS[controller] || '#FFFFFF';
-
-        // Small pill badge in top-left corner
-        const badgeHeight = 7;
-        const badgeWidth = Math.max(textWidth + 3, 10);
-        const badgeX = qCol * quadSize + 2;
-        const badgeY = qRow * quadSize + 2;
-
-        // Dark background with controller color border
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        ctx.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
-        ctx.strokeStyle = controllerColor;
-        ctx.lineWidth = 0.5;
-        ctx.strokeRect(badgeX, badgeY, badgeWidth, badgeHeight);
-
-        // Controller text in their color
-        ctx.fillStyle = controllerColor;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(text, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2);
-      }
-
-      // Draw subtle coin badge in top-right corner if quadrant has coins
-      if (coins > 0) {
-        const text = coins > 99 ? '99+' : coins.toString();
-        ctx.font = 'bold 6px monospace';
-        const textWidth = ctx.measureText(text).width;
-
-        // Small pill badge in top-right corner
-        const badgeHeight = 8;
-        const badgeWidth = Math.max(textWidth + 4, 10);
-        const badgeX = (qCol + 1) * quadSize - badgeWidth - 2;
-        const badgeY = qRow * quadSize + 2;
-
-        // Dark background with gold border
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        ctx.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
-        ctx.strokeStyle = 'rgba(255, 215, 0, 0.7)';
-        ctx.lineWidth = 0.5;
-        ctx.strokeRect(badgeX, badgeY, badgeWidth, badgeHeight);
-
-        // Gold text
-        ctx.fillStyle = '#FFD700';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(text, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2);
-      }
     }
 
     // Highlight upcoming wipe quadrants (yellow, orange, red)
@@ -1164,7 +1385,7 @@ export const Life: React.FC = () => {
       ctx.lineTo(size, pos);
       ctx.stroke();
     }
-  }, [localCells, currentQuadrant, calculateQuadrantDensity, calculateQuadrantCoins, wipeInfo, quadrantControllers]);
+  }, [localCells, currentQuadrant, calculateQuadrantDensity, wipeInfo]);
 
   // Minimap click handler
   const handleMinimapClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1243,37 +1464,72 @@ export const Life: React.FC = () => {
     }
   };
 
-  // Confirm placement - send all pending placements to backend in one batch
+  // Confirm placement - send all pending placements to backend in one batch (v2 rules)
   const confirmPlacement = useCallback(async () => {
     const cellsToPlace: [number, number][] = pendingPlacements.flatMap(p => p.cells);
 
-    if (!actor || cellsToPlace.length === 0 || isConfirmingPlacement) return;
+    console.log('[PLACE] confirmPlacement called', {
+      cellCount: cellsToPlace.length,
+      cells: cellsToPlace.slice(0, 10), // First 10 cells
+      myPlayerNum,
+      myBalance,
+      localCellsLength: localCells.length,
+    });
+
+    if (!actor || cellsToPlace.length === 0 || isConfirmingPlacement) {
+      console.log('[PLACE] Early return:', { hasActor: !!actor, cellCount: cellsToPlace.length, isConfirmingPlacement });
+      return;
+    }
 
     const cost = cellsToPlace.length;
 
     // Check if player has enough coins
     if (myBalance < cost) {
+      console.log('[PLACE] Not enough coins:', { cost, myBalance });
       setPlacementError(`Not enough coins. Need ${cost}, have ${myBalance}`);
       return;
     }
 
-    // Check for conflicts with current local state
-    const conflicts = cellsToPlace.filter(([col, row]) => {
-      const idx = row * GRID_SIZE + col;
-      const cell = localCells[idx];
-      if (!cell) return false;
-      // Conflict if cell is alive
-      if (cell.alive) return true;
-      // Conflict if cell has coins belonging to another player's territory
-      // This prevents griefing by placing bombs on enemy coin pockets
-      if (cell.coins > 0 && cell.owner > 0 && cell.owner !== myPlayerNum) return true;
-      return false;
-    });
+    // Get my base info for wall checking
+    const myBase = myPlayerNum ? bases.get(myPlayerNum) : null;
 
-    if (conflicts.length > 0) {
-      setPlacementError(`${conflicts.length} cell(s) conflict with existing cells or enemy territory. Reposition your pattern.`);
-      return;
+    // Only do frontend validation if localCells is populated
+    // If localCells is empty (pre-sync), skip validation and let backend handle it
+    if (localCells.length > 0) {
+      // v2 placement validation: own territory only, not on walls, not on living cells
+      const conflicts = cellsToPlace.filter(([col, row]) => {
+        const idx = row * GRID_SIZE + col;
+        const cell = localCells[idx];
+
+        // Cannot place on living cells
+        if (cell && cell.alive) return true;
+
+        // Cannot place on base walls
+        if (myBase && isBaseWall(col, row, myBase.x, myBase.y)) return true;
+
+        // Cannot place on neutral territory (owner === 0)
+        if (!cell || cell.owner === 0) return true;
+
+        // Cannot place on enemy territory (owner !== myPlayerNum)
+        if (cell.owner !== myPlayerNum) return true;
+
+        return false;
+      });
+
+      if (conflicts.length > 0) {
+        // Log details about the first few conflicts
+        const conflictDetails = cellsToPlace.slice(0, 5).map(([col, row]) => {
+          const idx = row * GRID_SIZE + col;
+          const cell = localCells[idx];
+          return { col, row, idx, cell, myPlayerNum };
+        });
+        console.log('[PLACE] Validation conflicts:', { count: conflicts.length, details: conflictDetails });
+        setPlacementError(`${conflicts.length} cell(s) cannot be placed. You can only place on your own territory (not on walls, neutral, or enemy territory).`);
+        return;
+      }
     }
+
+    console.log('[PLACE] Validation passed, calling backend...');
 
     // Check for internal overlaps between placements
     if (pendingPlacements.length > 1) {
@@ -1293,24 +1549,53 @@ export const Life: React.FC = () => {
     setIsConfirmingPlacement(true);
     setPlacementError(null);
 
+    // 1. Optimistically apply to local state FIRST (before backend call)
+    // This provides immediate visual feedback; next backend sync will correct if rejected
+    if (myPlayerNum) {
+      setLocalCells(prev => {
+        const updated = [...prev];
+        for (const [col, row] of cellsToPlace) {
+          const idx = row * GRID_SIZE + col;
+          if (idx >= 0 && idx < updated.length) {
+            updated[idx] = { ...updated[idx], alive: true, owner: myPlayerNum };
+          }
+        }
+        return updated;
+      });
+    }
+
+    // Clear pending placements immediately for snappy UI
+    setPendingPlacements([]);
+    setSelectedPlacementIds(new Set());
+
+    // 2. Send to backend
     try {
+      console.log('[PLACE] Sending to backend:', { cellCount: cellsToPlace.length });
+      const t0 = performance.now();
       const result = await actor.place_cells(cellsToPlace);
+      console.log(`[UPDATE LATENCY] place_cells: ${(performance.now() - t0).toFixed(1)}ms`);
+      console.log('[PLACE] Backend response:', result);
+
       if ('Err' in result) {
+        // Backend rejected - next sync will correct the optimistic update
+        console.warn('[PLACE] Backend rejected:', result.Err);
         setPlacementError(result.Err);
       } else {
-        const placeResult = result.Ok;
-        setMyBalance(Number(placeResult.new_balance));
-        setPendingPlacements([]);
-        setSelectedPlacementIds(new Set());
+        // v2 returns the count of cells placed
+        const cellsPlaced = result.Ok;
+        console.log('[PLACE] SUCCESS! Cells placed:', cellsPlaced);
+        // Deduct cost from balance (placement cost goes to base treasury)
+        setMyBalance(prev => prev - cellsPlaced);
         setPlacementError(null);
       }
     } catch (err) {
-      console.error('Place error:', err);
-      setPlacementError(`Network error: ${err}. Please try again.`);
+      // Network error - next sync will correct the optimistic update
+      console.error('[PLACE] Network error:', err);
+      setPlacementError('Network error. Try again.');
     } finally {
       setIsConfirmingPlacement(false);
     }
-  }, [actor, pendingPlacements, isConfirmingPlacement, myBalance, localCells]);
+  }, [actor, pendingPlacements, isConfirmingPlacement, myBalance, localCells, myPlayerNum, bases]);
 
   // Clear all pending placements
   const cancelPreview = useCallback(() => {
@@ -1337,6 +1622,26 @@ export const Life: React.FC = () => {
       setIsRequestingFaucet(false);
     }
   }, [actor, isRequestingFaucet]);
+
+  // Handle spectate action from elimination modal
+  const handleSpectate = useCallback(() => {
+    setIsEliminated(false);
+    setMyPlayerNum(null);  // Clear player association
+    hadBaseRef.current = false;
+    // Keep watching the game without controls
+  }, []);
+
+  // Handle rejoin action from elimination modal
+  const handleRejoin = useCallback(() => {
+    setIsEliminated(false);
+    setMyPlayerNum(null);
+    setShowSlotSelection(true);  // Go back to slot selection
+    // Reset tracking refs for new session
+    joinedAtGeneration.current = null;
+    peakTerritoryRef.current = 0;
+    initialWalletRef.current = myBalance;
+    hadBaseRef.current = false;
+  }, [myBalance]);
 
   // Rotate pattern 90° clockwise - affects future placements AND selected existing placements
   const rotateCurrentPattern = useCallback(() => {
@@ -1483,7 +1788,7 @@ export const Life: React.FC = () => {
   const handleClear = () => {
     // Clear local cells only (backend state persists)
     setIsRunning(false);
-    setLocalCells(cells => cells.map(() => ({ owner: 0, coins: 0, alive: false })));
+    setLocalCells(cells => cells.map(() => ({ owner: 0, alive: false })));
   };
 
   // Cell counts - uses localCells for live updates
@@ -1497,17 +1802,25 @@ export const Life: React.FC = () => {
     return acc;
   }, {} as Record<number, number>);
 
-  // Coins stored in territory (sum of cell.coins per player)
-  const coinsInTerritory = localCells.reduce((acc, cell) => {
-    if (cell.owner > 0 && cell.coins > 0) acc[cell.owner] = (acc[cell.owner] || 0) + cell.coins;
-    return acc;
-  }, {} as Record<number, number>);
+  // Track peak territory for elimination stats
+  if (myPlayerNum && hadBaseRef.current) {
+    const myTerritory = territoryCounts[myPlayerNum] || 0;
+    if (myTerritory > peakTerritoryRef.current) {
+      peakTerritoryRef.current = myTerritory;
+    }
+  }
 
-  // Total coins in game (for conservation check)
-  const totalCoinsInCells = Object.values(coinsInTerritory).reduce((a, b) => a + b, 0);
-  const balancesArray = gameState?.balances ? Array.from(gameState.balances).map(b => Number(b)) : [];
-  const totalCoinsInWallets = balancesArray.reduce((a, b) => a + b, 0);
-  const totalCoins = totalCoinsInCells + totalCoinsInWallets;
+  // Base coins per player (v2: coins are stored in bases, not on cells)
+  const baseCoins: Record<number, number> = {};
+  for (const [playerNum, baseInfo] of bases) {
+    baseCoins[playerNum] = Number(baseInfo.coins);
+  }
+
+  // Total base coins in game
+  const totalBaseCoins = Object.values(baseCoins).reduce((a, b) => a + b, 0);
+
+  // Check if user is spectating (authenticated but not in game)
+  const isSpectating = isAuthenticated && !showSlotSelection && myPlayerNum === null;
 
   // Filter patterns: first by essential/advanced, then by category
   const basePatterns = showAdvanced ? PATTERNS : PATTERNS.filter(p => p.essential);
@@ -1522,14 +1835,14 @@ export const Life: React.FC = () => {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-80px)] gap-6">
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-white mb-2">Game of Life</h1>
+          <h1 className="text-3xl font-bold text-white mb-2">Risk</h1>
           <p className="text-gray-400">{GRID_WIDTH}x{GRID_HEIGHT} Persistent World</p>
           <p className="text-gray-500 text-sm mt-2">Up to 9 players - your cells, your territory</p>
         </div>
 
         {/* Server selector */}
         <div className="flex gap-2">
-          {LIFE_SERVERS.map((server) => (
+          {RISK_SERVERS.map((server) => (
             <button
               key={server.id}
               onClick={() => setSelectedServer(server)}
@@ -1556,18 +1869,32 @@ export const Life: React.FC = () => {
     );
   }
 
-  // Slot selection screen
+  // Base placement screen (v2: player must place a base to join)
   if (showSlotSelection) {
+    // Determine which quadrants already have bases
+    const occupiedQuadrants = new Set<number>();
+    for (const slotOpt of slotsInfo) {
+      if (slotOpt.length > 0) {
+        const slot = slotOpt[0];
+        if (slot.base.length > 0) {
+          const base = slot.base[0];
+          occupiedQuadrants.add(getQuadrant(base.x, base.y));
+        }
+      }
+    }
+
+    const canAffordBase = myBalance >= BASE_COST;
+
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-80px)] gap-6 p-4">
         <div className="text-center mb-4">
-          <h1 className="text-3xl font-bold text-white mb-2">Choose Your Server & Color</h1>
-          <p className="text-gray-400">Select a server, then pick a slot to join</p>
+          <h1 className="text-3xl font-bold text-white mb-2">Build Your Base</h1>
+          <p className="text-gray-400">Choose a quadrant to place your fortress</p>
         </div>
 
         {/* Server selector */}
         <div className="flex gap-2 mb-2">
-          {LIFE_SERVERS.map((server) => (
+          {RISK_SERVERS.map((server) => (
             <button
               key={server.id}
               onClick={() => setSelectedServer(server)}
@@ -1581,7 +1908,26 @@ export const Life: React.FC = () => {
             </button>
           ))}
         </div>
-        <p className="text-gray-500 text-sm">Unoccupied slots with territory contain coins you can inherit!</p>
+
+        {/* Wallet balance and faucet */}
+        <div className="flex items-center gap-4 bg-white/5 px-4 py-3 rounded-lg">
+          <div className="text-gray-400">
+            Wallet: <span className={canAffordBase ? 'text-green-400' : 'text-red-400'}>{myBalance}</span> coins
+          </div>
+          <button
+            onClick={handleFaucet}
+            disabled={isRequestingFaucet}
+            className="px-3 py-1 text-sm bg-green-600 hover:bg-green-500 disabled:bg-gray-600 disabled:cursor-wait text-white rounded transition-colors"
+          >
+            {isRequestingFaucet ? '...' : '+1000 coins'}
+          </button>
+        </div>
+
+        {!canAffordBase && (
+          <div className="text-yellow-400 text-sm">
+            You need {BASE_COST} coins to build a base. Use the faucet to get coins!
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-500/20 border border-red-500/50 text-red-400 px-4 py-2 rounded-lg text-sm">
@@ -1589,80 +1935,112 @@ export const Life: React.FC = () => {
           </div>
         )}
 
-        <div className="grid grid-cols-3 gap-4 max-w-xl">
-          {slotsInfo.map((slot) => {
-            const color = PLAYER_COLORS[slot.slot] || '#FFFFFF';
-            const hasInheritance = !slot.occupied && (slot.territory_cells > 0 || slot.territory_coins > 0);
+        {/* Quadrant grid for base placement */}
+        <div className="grid grid-cols-4 gap-2 max-w-md">
+          {Array.from({ length: TOTAL_QUADRANTS }, (_, q) => {
+            const isOccupied = occupiedQuadrants.has(q);
+            const qRow = Math.floor(q / QUADRANTS_PER_ROW);
+            const qCol = q % QUADRANTS_PER_ROW;
+            // Place base in center of quadrant
+            const baseX = qCol * QUADRANT_SIZE + Math.floor(QUADRANT_SIZE / 2) - Math.floor(BASE_SIZE / 2);
+            const baseY = qRow * QUADRANT_SIZE + Math.floor(QUADRANT_SIZE / 2) - Math.floor(BASE_SIZE / 2);
 
             return (
               <button
-                key={slot.slot}
-                onClick={() => handleJoinSlot(slot.slot)}
-                disabled={slot.occupied || isJoiningSlot}
+                key={q}
+                onClick={async () => {
+                  if (!actor || isOccupied || !canAffordBase || isJoiningSlot) return;
+                  setIsJoiningSlot(true);
+                  setError(null);
+                  try {
+                    const result = await actor.join_game(baseX, baseY);
+                    if ('Ok' in result) {
+                      // Backend returns slot index (0-7), but myPlayerNum is 1-indexed (1-8)
+                      setMyPlayerNum(result.Ok + 1);
+
+                      // Initialize elimination tracking for this session
+                      setIsEliminated(false);
+                      setEliminationStats(null);
+                      peakTerritoryRef.current = 0;
+                      hadBaseRef.current = true; // Mark that we now have a base
+
+                      // Immediately fetch game state so grid renders correctly
+                      try {
+                        const state = await actor.get_state();
+                        setGameState(state);
+                        setLocalCells(sparseToDense(state));
+                        setLocalGeneration(state.generation);
+                        setLastSyncedGeneration(state.generation);
+
+                        // Initialize join tracking with current generation and balance
+                        joinedAtGeneration.current = state.generation;
+
+                        // Extract base info
+                        const newBases = new Map<number, BaseInfo>();
+                        for (let i = 0; i < state.slots.length; i++) {
+                          const slotOpt = state.slots[i];
+                          if (slotOpt.length > 0 && slotOpt[0].base.length > 0) {
+                            newBases.set(i + 1, slotOpt[0].base[0]);
+                          }
+                        }
+                        setBases(newBases);
+
+                        // Update balance and track initial for elimination stats
+                        const balance = await actor.get_balance();
+                        setMyBalance(Number(balance));
+                        initialWalletRef.current = Number(balance);
+
+                        // Update wipe timer
+                        setWipeInfo({
+                          quadrant: state.next_wipe_quadrant,
+                          secondsUntil: Number(state.seconds_until_wipe)
+                        });
+                      } catch (syncErr) {
+                        console.error('Post-join sync error:', syncErr);
+                      }
+
+                      // Set view coordinates to the player's quadrant (for highlight in overview)
+                      // but stay in overview mode initially to avoid canvas sizing race condition
+                      const qRow = Math.floor(q / QUADRANTS_PER_ROW);
+                      const qCol = q % QUADRANTS_PER_ROW;
+                      setViewX(qCol * QUADRANT_SIZE);
+                      setViewY(qRow * QUADRANT_SIZE);
+                      // Stay in 'overview' mode - user can click to enter quadrant after canvas is ready
+                      setShowSlotSelection(false);
+                    } else {
+                      setError(result.Err);
+                    }
+                  } catch (err) {
+                    setError(`Failed to place base: ${err}`);
+                  } finally {
+                    setIsJoiningSlot(false);
+                  }
+                }}
+                disabled={isOccupied || !canAffordBase || isJoiningSlot}
                 className={`
-                  relative p-4 rounded-lg border-2 transition-all
-                  ${slot.occupied
-                    ? 'bg-gray-800 border-gray-700 opacity-50 cursor-not-allowed'
-                    : hasInheritance
-                      ? 'bg-yellow-500/10 border-yellow-500/50 hover:border-yellow-400 hover:bg-yellow-500/20 cursor-pointer'
-                      : 'bg-white/5 border-white/20 hover:border-white/50 hover:bg-white/10 cursor-pointer'
+                  relative p-4 rounded-lg border-2 transition-all aspect-square flex flex-col items-center justify-center
+                  ${isOccupied
+                    ? 'bg-red-900/30 border-red-700/50 opacity-50 cursor-not-allowed'
+                    : canAffordBase
+                      ? 'bg-white/5 border-white/20 hover:border-green-400 hover:bg-green-500/10 cursor-pointer'
+                      : 'bg-gray-800 border-gray-700 opacity-50 cursor-not-allowed'
                   }
                 `}
               >
-                {/* Color indicator */}
-                <div
-                  className="w-12 h-12 rounded-lg mx-auto mb-2"
-                  style={{ backgroundColor: color }}
-                />
-
-                {/* Slot number */}
-                <div className="text-white font-mono text-lg mb-1">
-                  Player {slot.slot}
-                </div>
-
-                {/* Status */}
-                {slot.occupied ? (
-                  <div className="text-gray-500 text-sm">
-                    Occupied
-                    {slot.cell_count > 0 && (
-                      <span className="text-gray-600 ml-1">({slot.cell_count} cells)</span>
-                    )}
-                  </div>
-                ) : hasInheritance ? (
-                  <div className="text-yellow-400 text-sm">
-                    <div>Inherit:</div>
-                    {slot.territory_cells > 0 && (
-                      <div className="text-yellow-500/70">{slot.territory_cells.toLocaleString()} territory</div>
-                    )}
-                    {slot.territory_coins > 0 && (
-                      <div className="text-yellow-300 font-bold">{slot.territory_coins} coins!</div>
-                    )}
-                  </div>
+                <div className="text-white font-mono text-lg">Q{q}</div>
+                {isOccupied ? (
+                  <div className="text-red-400 text-xs mt-1">Occupied</div>
                 ) : (
-                  <div className="text-green-400 text-sm">Available</div>
-                )}
-
-                {/* Inheritance badge */}
-                {hasInheritance && (
-                  <div className="absolute -top-2 -right-2 bg-yellow-500 text-black text-xs font-bold px-2 py-1 rounded-full">
-                    LOOT
-                  </div>
+                  <div className="text-green-400 text-xs mt-1">Available</div>
                 )}
               </button>
             );
           })}
         </div>
 
-        <button
-          onClick={refreshSlotsInfo}
-          className="mt-4 text-gray-400 hover:text-white text-sm underline"
-        >
-          Refresh slots
-        </button>
-
         <div className="text-gray-600 text-xs mt-4 max-w-md text-center">
-          When a player loses all their cells, their slot opens up.
-          New players can inherit their territory and any coins left behind!
+          Cost: {BASE_COST} coins. Your base is an 8x8 fortress with a 6x6 interior territory.
+          Defend it from siege attacks or lose when your base reaches 0 coins!
         </div>
       </div>
     );
@@ -1700,10 +2078,19 @@ export const Life: React.FC = () => {
           <div className={`${sidebarCollapsed ? 'hidden' : 'flex flex-col'} flex-1 overflow-y-auto p-3`} style={{ overscrollBehavior: 'contain' }}>
             {/* Info Section */}
             <div className="mb-4">
-              <h1 className="text-lg font-bold text-white">Game of Life</h1>
+              <div className="flex items-center justify-between">
+                <h1 className="text-lg font-bold text-white">Risk</h1>
+                <button
+                  onClick={() => setShowTutorial(true)}
+                  className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
+                  title="How to play"
+                >
+                  ?
+                </button>
+              </div>
               {/* Server selector */}
               <div className="flex gap-1 mt-1 mb-2">
-                {LIFE_SERVERS.map((server) => (
+                {RISK_SERVERS.map((server) => (
                   <button
                     key={server.id}
                     onClick={() => setSelectedServer(server)}
@@ -1720,15 +2107,25 @@ export const Life: React.FC = () => {
               <p className="text-gray-500 text-xs">
                 {myPlayerNum ? (
                   <>You are Player {myPlayerNum} <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[myPlayerNum] }}></span></>
+                ) : isSpectating ? (
+                  <span className="text-purple-400">👁 Spectating</span>
                 ) : (
                   'Place cells to join'
                 )}
               </p>
+              {isSpectating && (
+                <button
+                  onClick={() => setShowSlotSelection(true)}
+                  className="mt-2 w-full px-3 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded transition-colors"
+                >
+                  Join Game
+                </button>
+              )}
               <div className="mt-2 text-sm font-mono space-y-1">
                 <div className="text-gray-400">
                   Gen: <span className="text-dfinity-turquoise">{gameState?.generation.toString() || 0}</span>
                 </div>
-                <div className="text-gray-400">Players: {gameState?.players.length || 0}/9</div>
+                <div className="text-gray-400">Players: {gameState?.slots.filter(s => s.length > 0).length || 0}/8</div>
                 <div className="text-gray-400 flex items-center gap-2">
                   Wallet: <span className="text-yellow-400">{myBalance}</span>
                   <button
@@ -1772,30 +2169,30 @@ export const Life: React.FC = () => {
                   </div>
                 )}
               </div>
-              {/* Player stats table */}
+              {/* Player stats table (v2: shows base coins instead of cell coins) */}
               <div className="mt-3">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="text-gray-500">
                       <th className="text-left font-normal pb-1"></th>
-                      <th className="text-right font-normal pb-1 px-1">Terr</th>
-                      <th className="text-right font-normal pb-1 px-1">Cells</th>
-                      <th className="text-right font-normal pb-1 px-1">Coins</th>
-                      <th className="text-right font-normal pb-1 px-1">Wallet</th>
+                      <th className="text-right font-normal pb-1 px-1 cursor-help" title="Territory: Total cells you own (faded color). Expands when your living cells touch neutral ground.">Terr</th>
+                      <th className="text-right font-normal pb-1 px-1 cursor-help" title="Living Cells: Active cells following Game of Life rules. Need 2-3 neighbors to survive.">Cells</th>
+                      <th className="text-right font-normal pb-1 px-1 cursor-help" title="Base Treasury: Coins stored in your fortress. Drained by 1 each time enemies touch your territory. Reach 0 = eliminated!">Base</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {balancesArray.map((wallet, idx) => {
-                      const playerNum = idx + 1;
+                    {Array.from(bases.keys()).sort((a, b) => a - b).map((playerNum) => {
                       const territory = territoryCounts[playerNum] || 0;
                       const cells = cellCounts[playerNum] || 0;
-                      const coins = coinsInTerritory[playerNum] || 0;
+                      const coins = baseCoins[playerNum] || 0;
+                      const isMe = playerNum === myPlayerNum;
                       return (
-                        <tr key={playerNum} className="border-t border-gray-800">
+                        <tr key={playerNum} className={`border-t border-gray-800 ${isMe ? 'bg-white/5' : ''}`}>
                           <td className="py-0.5">
                             <div className="flex items-center gap-1">
+                              {isMe && <span className="text-white text-[10px]">▶</span>}
                               <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[playerNum] }} />
-                              <span className="text-gray-400">P{playerNum}</span>
+                              <span className={isMe ? 'text-white font-medium' : 'text-gray-400'}>P{playerNum}</span>
                             </div>
                           </td>
                           <td className="text-right px-1" style={{ color: PLAYER_COLORS[playerNum], opacity: 0.6 }}>
@@ -1805,19 +2202,30 @@ export const Life: React.FC = () => {
                             {cells.toLocaleString()}
                           </td>
                           <td className="text-right px-1 text-yellow-500">
-                            {coins}
-                          </td>
-                          <td className="text-right px-1 text-green-400">
-                            {wallet.toLocaleString()}
+                            <span className="opacity-70">🪙</span> {coins}
                           </td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
-                <div className="text-xs text-gray-600 mt-2 border-t border-gray-700 pt-2">
-                  Total: <span className="text-yellow-500">{totalCoins.toLocaleString()}</span> coins
-                  <span className="text-gray-600 ml-1">({totalCoinsInCells} + {totalCoinsInWallets})</span>
+                <div className="text-xs mt-2 border-t border-gray-700 pt-2 space-y-1">
+                  <div className="flex justify-between text-gray-600">
+                    <span>Total base coins:</span>
+                    <span className="text-yellow-500">🪙 {totalBaseCoins.toLocaleString()}</span>
+                  </div>
+                  {myPlayerNum && (
+                    <div className="flex justify-between text-gray-500">
+                      <span className="cursor-help" title="Your spendable coins. Use these to place patterns. Coins flow: Wallet → Base (when placing) and Enemy Base → Your Wallet (when attacking).">Your wallet:</span>
+                      <span className="text-green-400">🪙 {myBalance.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {myPlayerNum && (
+                    <div className="flex justify-between text-gray-600 text-[10px] pt-1 border-t border-gray-800">
+                      <span>Total (base + wallet):</span>
+                      <span className="text-yellow-400">🪙 {((baseCoins[myPlayerNum] || 0) + myBalance).toLocaleString()}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1835,53 +2243,10 @@ export const Life: React.FC = () => {
               <div className="text-xs text-gray-500 mt-1">
                 Q{currentQuadrant} ({viewX}, {viewY})
               </div>
-
-              {/* Wipe Timer Display */}
-              {wipeInfo && (
-                <div className="mt-3 pt-3 border-t border-white/10">
-                  <div className="text-xs text-gray-500 mb-2">Quadrant Wipes</div>
-                  <div className="flex items-end justify-between gap-1">
-                    {/* Next quadrant to wipe (largest) */}
-                    <button
-                      onClick={() => jumpToQuadrant(wipeInfo.quadrant)}
-                      className={`flex-1 flex flex-col items-center justify-center rounded py-2 transition-colors ${
-                        wipeInfo.secondsUntil <= 10
-                          ? 'bg-red-500/20 border border-red-500/50'
-                          : 'bg-red-500/10 border border-red-500/30 hover:bg-red-500/20'
-                      }`}
-                      title={`Click to view Q${wipeInfo.quadrant}`}
-                    >
-                      <span className="text-red-400 text-sm font-bold font-mono">Q{wipeInfo.quadrant}</span>
-                      <span className={`text-lg font-mono font-bold ${wipeInfo.secondsUntil <= 10 ? 'text-red-500 animate-pulse' : 'text-red-400'}`}>
-                        {wipeInfo.secondsUntil}s
-                      </span>
-                    </button>
-
-                    {/* Second quadrant (medium) - orange */}
-                    <button
-                      onClick={() => jumpToQuadrant((wipeInfo.quadrant + 1) % TOTAL_QUADRANTS)}
-                      className="flex-1 flex flex-col items-center justify-center bg-orange-500/10 border border-orange-500/20 rounded py-1.5 hover:bg-orange-500/20 transition-colors"
-                      title={`Click to view Q${(wipeInfo.quadrant + 1) % TOTAL_QUADRANTS}`}
-                    >
-                      <span className="text-orange-500/70 text-xs font-mono">Q{(wipeInfo.quadrant + 1) % TOTAL_QUADRANTS}</span>
-                      <span className="text-orange-600/70 text-sm font-mono">+5m</span>
-                    </button>
-
-                    {/* Third quadrant (smallest) - yellow */}
-                    <button
-                      onClick={() => jumpToQuadrant((wipeInfo.quadrant + 2) % TOTAL_QUADRANTS)}
-                      className="flex-1 flex flex-col items-center justify-center bg-yellow-500/10 border border-yellow-500/20 rounded py-1 hover:bg-yellow-500/20 transition-colors"
-                      title={`Click to view Q${(wipeInfo.quadrant + 2) % TOTAL_QUADRANTS}`}
-                    >
-                      <span className="text-yellow-500/70 text-xs font-mono">Q{(wipeInfo.quadrant + 2) % TOTAL_QUADRANTS}</span>
-                      <span className="text-yellow-600/70 text-xs">+10m</span>
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
 
-            {/* Pattern Section */}
+            {/* Pattern Section - hidden when spectating */}
+            {!isSpectating && (
             <div className="flex-1">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-gray-400">Patterns</span>
@@ -1954,6 +2319,7 @@ export const Life: React.FC = () => {
                 <div className="text-gray-500 mt-1">{selectedPattern.description}</div>
               </div>
             </div>
+            )}
           </div>
 
           {/* Collapsed indicators */}
@@ -1961,7 +2327,7 @@ export const Life: React.FC = () => {
             <div className="text-xs text-gray-400">G</div>
             <div className="text-dfinity-turquoise text-xs font-mono">{gameState?.generation.toString() || 0}</div>
             <div className="text-xs text-gray-400 mt-2">P</div>
-            <div className="text-white text-xs font-mono">{gameState?.players.length || 0}</div>
+            <div className="text-white text-xs font-mono">{gameState?.slots.filter(s => s.length > 0).length || 0}</div>
             {myPlayerNum && (
               <>
                 <div className="text-xs text-gray-400 mt-2">You</div>
@@ -2100,6 +2466,40 @@ export const Life: React.FC = () => {
               style={{ display: 'block' }}
             />
 
+            {/* Sync Debug Overlay - Optimistic Local Simulation */}
+            {DEBUG_SYNC && (
+              <div style={{
+                position: 'absolute',
+                top: 8,
+                right: 8,
+                padding: '8px 12px',
+                background: 'rgba(0, 0, 0, 0.8)',
+                borderRadius: 6,
+                fontSize: 11,
+                fontFamily: 'monospace',
+                color: '#fff',
+                zIndex: 1000,
+                minWidth: 160,
+              }}>
+                {ENABLE_LOCAL_SIM ? (
+                  <>
+                    <div style={{ color: '#4ade80', marginBottom: 4 }}>◉ Local Sim Active</div>
+                    <div>Backend: Gen {lastSyncedGeneration.toString()}</div>
+                    <div>Local: Gen {localGeneration.toString()}</div>
+                    <div style={{ opacity: 0.7, fontSize: 10 }}>
+                      +{Number(localGeneration - lastSyncedGeneration)} since snap
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontWeight: 'bold', marginBottom: 4 }}>◉ Backend Mode</div>
+                    <div style={{ fontSize: 10, opacity: 0.9 }}>Sync: {BACKEND_SYNC_MS}ms</div>
+                    <div style={{ fontSize: 9, opacity: 0.7, marginTop: 4 }}>Displaying backend state</div>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Navigation arrows - subtle, inside grid */}
             {viewMode === 'quadrant' && (
               <>
@@ -2229,6 +2629,9 @@ export const Life: React.FC = () => {
                 ))}
               </div>
             </div>
+            {/* Pattern controls - hidden when spectating */}
+            {!isSpectating && (
+            <>
             {/* Essential/Advanced toggle + Category filters */}
             <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
               <button
@@ -2291,9 +2694,85 @@ export const Life: React.FC = () => {
             <div className="text-xs text-gray-400 mt-2">
               <span className={CATEGORY_INFO[selectedPattern.category].color.split(' ')[0]}>{selectedPattern.name}</span> ({parsedPattern.length} cells)
             </div>
+            </>
+            )}
+            {/* Spectator mode indicator in mobile */}
+            {isSpectating && (
+              <div className="py-2">
+                <p className="text-purple-400 text-sm mb-2">👁 Spectating</p>
+                <button
+                  onClick={() => setShowSlotSelection(true)}
+                  className="w-full px-3 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded transition-colors"
+                >
+                  Join Game
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      {/* Elimination Modal */}
+      {isEliminated && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-red-500/50 rounded-lg p-6 max-w-sm mx-4 text-center">
+            <div className="text-4xl mb-2">💀</div>
+            <h2 className="text-2xl font-bold text-red-400 mb-2">ELIMINATED</h2>
+            <p className="text-gray-400 mb-4">Your base was destroyed!</p>
+
+            {eliminationStats && (
+              <div className="bg-black/50 rounded p-3 mb-4 text-sm text-left">
+                <div className="flex justify-between text-gray-500">
+                  <span>Survived:</span>
+                  <span className="text-white">
+                    {eliminationStats.generationsSurvived.toLocaleString()} gen
+                  </span>
+                </div>
+                <div className="flex justify-between text-gray-500">
+                  <span>Peak territory:</span>
+                  <span className="text-white">
+                    {eliminationStats.peakTerritory.toLocaleString()} cells
+                  </span>
+                </div>
+                <div className="flex justify-between text-gray-500">
+                  <span>Coins earned:</span>
+                  <span className={eliminationStats.coinsEarned >= 0 ? 'text-green-400' : 'text-red-400'}>
+                    {eliminationStats.coinsEarned >= 0 ? '+' : ''}{eliminationStats.coinsEarned}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="text-gray-500 text-sm mb-4">
+              Wallet: <span className="text-green-400">🪙 {myBalance}</span>
+            </div>
+
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={handleSpectate}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+              >
+                Spectate
+              </button>
+              <button
+                onClick={handleRejoin}
+                className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded transition-colors"
+              >
+                Rejoin
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tutorial Modal */}
+      <RiskTutorial
+        isOpen={showTutorial}
+        onClose={() => setShowTutorial(false)}
+      />
     </div>
   );
 };
+
+// Alias for backwards compatibility
+export const Life = Risk;

@@ -10,6 +10,7 @@ export const SPACESHIPS: PatternInfo[] = [
     cells: 5,
     speed: 'c/4',
     period: 4,
+    essential: true,
     rle: `x = 3, y = 3, rule = B3/S23
 bob$2bo$3o!`,
   },

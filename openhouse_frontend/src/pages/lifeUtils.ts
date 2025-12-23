@@ -1,4 +1,4 @@
-import { GRID_WIDTH, GRID_HEIGHT } from './lifeConstants';
+import { GRID_WIDTH, GRID_HEIGHT, TOTAL_CELLS } from './lifeConstants';
 
 /**
  * Parse RLE (Run Length Encoded) pattern format into coordinate array
@@ -65,4 +65,91 @@ export function rotatePattern(coords: [number, number][], rot: number): [number,
       default: return [x, y];
     }
   });
+}
+
+// =============================================================================
+// SYNC VERIFICATION UTILITIES (Part 1 of timer optimization)
+// =============================================================================
+
+// Minimal interface for hash functions
+interface CellLike {
+  alive: boolean;
+}
+
+/**
+ * Hash cell state for sync verification.
+ * Returns "aliveCount:xorOfPositions" as a simple fingerprint.
+ *
+ * The XOR of positions is order-independent and catches single-cell
+ * differences. Combined with alive count, it's a good quick check.
+ */
+export function hashCellState(cells: CellLike[]): string {
+  let alive = 0;
+  let xor = 0;
+  for (let i = 0; i < cells.length; i++) {
+    if (cells[i]?.alive) {
+      alive++;
+      xor ^= i;
+    }
+  }
+  return `${alive}:${xor}`;
+}
+
+/**
+ * Hash backend bitmap state for sync verification.
+ * Converts bitmap to same format as hashCellState for comparison.
+ *
+ * @param bitmap - Array of bigint, each representing 64 cells
+ */
+export function hashBitmapState(bitmap: bigint[]): string {
+  let alive = 0;
+  let xor = 0;
+  for (let wordIdx = 0; wordIdx < bitmap.length; wordIdx++) {
+    let word = bitmap[wordIdx];
+    for (let bit = 0; bit < 64; bit++) {
+      if ((word >> BigInt(bit)) & 1n) {
+        const idx = wordIdx * 64 + bit;
+        if (idx < TOTAL_CELLS) {
+          alive++;
+          xor ^= idx;
+        }
+      }
+    }
+  }
+  return `${alive}:${xor}`;
+}
+
+/**
+ * Find specific differences between local cell state and backend bitmap.
+ * Use this to debug when hashes don't match.
+ *
+ * @returns Array of cell indices where local and backend states differ
+ */
+export function findCellDifferences(
+  localCells: CellLike[],
+  bitmap: bigint[]
+): Array<{ idx: number; local: boolean; backend: boolean; coords: { x: number; y: number } }> {
+  const diffs: Array<{ idx: number; local: boolean; backend: boolean; coords: { x: number; y: number } }> = [];
+
+  for (let wordIdx = 0; wordIdx < bitmap.length; wordIdx++) {
+    const word = bitmap[wordIdx];
+    for (let bit = 0; bit < 64; bit++) {
+      const idx = wordIdx * 64 + bit;
+      if (idx >= localCells.length) break;
+
+      const backendAlive = Boolean((word >> BigInt(bit)) & 1n);
+      const localAlive = localCells[idx]?.alive ?? false;
+
+      if (backendAlive !== localAlive) {
+        diffs.push({
+          idx,
+          local: localAlive,
+          backend: backendAlive,
+          coords: { x: idx % 512, y: Math.floor(idx / 512) }
+        });
+      }
+    }
+  }
+
+  return diffs;
 }

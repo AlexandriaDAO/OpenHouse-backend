@@ -4,6 +4,15 @@ import type { PatternInfo } from './types';
 
 export const SPECIAL: PatternInfo[] = [
   {
+    name: 'Cell',
+    category: 'special',
+    description: 'Single cell for custom builds',
+    cells: 1,
+    essential: true,
+    rle: `x = 1, y = 1, rule = B3/S23
+o!`,
+  },
+  {
     name: 'Eater 1',
     category: 'special',
     description: 'Consumes gliders without dying',

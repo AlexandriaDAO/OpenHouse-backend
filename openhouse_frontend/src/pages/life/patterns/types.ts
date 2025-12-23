@@ -18,6 +18,7 @@ export interface PatternInfo {
   period?: number;     // For oscillators/guns
   speed?: string;      // For spaceships (e.g., "c/4", "c/2")
   lifespan?: number;   // For methuselahs
+  essential?: boolean; // Show in basic mode (non-advanced)
 }
 
 // Category display info for UI

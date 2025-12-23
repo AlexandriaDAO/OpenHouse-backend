@@ -6,7 +6,7 @@ members = [
     "roulette_backend",
     "life1_backend",
     "life2_backend",
-    "risk_backend",
+    "life3_backend",
 ]
 resolver = "2"
 

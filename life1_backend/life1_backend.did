@@ -1,67 +1,127 @@
-// Life2 Backend - Sparse On-Chain Implementation
-// 10 generations/second using sparse iteration
+// Life2 v2 Backend - Candid Interface
+// Conway's Game of Life with Territory Control
 
-type SparseCell = record {
-    x: nat16;
-    y: nat16;
-    owner: nat8;
-    coins: nat8;
-};
-
-type GameState = record {
-    generation: nat64;
-    alive_cells: vec SparseCell;
-    territory: vec SparseCell;
-    players: vec principal;
-    balances: vec nat64;
-    player_num: opt nat8;
-    quadrant_controllers: vec nat8;
-};
-
-type PlaceResult = record {
-    placed: nat32;
-    generation: nat64;
-    new_balance: nat64;
+type BaseInfo = record {
+    x : nat16;
+    y : nat16;
+    coins : nat64;
+    slot : nat8;
 };
 
 type SlotInfo = record {
-    slot: nat8;
-    occupied: bool;
-    cell_count: nat32;
-    territory_cells: nat32;
-    territory_coins: nat32;
+    "principal" : opt principal;
+    base : opt BaseInfo;
+    alive_cells : nat32;
+    territory_cells : nat32;
+    in_grace_period : bool;
+    grace_seconds_remaining : opt nat64;
 };
 
-type QuadrantInfo = record {
-    quadrant: nat8;
-    territory_by_player: vec nat32;
-    total_territory: nat32;
-    coins_by_player: vec nat32;
-    total_coins: nat32;
-    controller: nat8;
+type TerritoryExport = record {
+    chunk_mask : nat64;
+    chunks : vec vec nat64;
+};
+
+type GameState = record {
+    generation : nat64;
+    is_running : bool;
+    alive_bitmap : vec nat64;
+    territories : vec TerritoryExport;
+    slots : vec opt SlotInfo;
+    next_wipe_quadrant : nat8;
+    seconds_until_wipe : nat64;
+};
+
+type WipeInfo = record {
+    next_quadrant : nat8;
+    seconds_until : nat64;
+};
+
+type PlayerInfo = record {
+    "principal" : principal;
+    slot : nat8;
+    alive_cells : nat32;
+    territory_cells : nat32;
+    in_grace_period : bool;
+    grace_seconds_remaining : opt nat64;
+};
+
+// Benchmark Types
+type OperationStats = record {
+    call_count : nat64;
+    total_cycles : nat64;
+    min_cycles : nat64;
+    max_cycles : nat64;
+    recent_samples : vec nat64;
+};
+
+type BenchmarkData = record {
+    tick : OperationStats;
+    step_generation : OperationStats;
+    compute_fates : OperationStats;
+    apply_changes : OperationStats;
+    disconnection_check : OperationStats;
+    wipe_quadrant : OperationStats;
+    timer_callback : OperationStats;
+    place_cells : OperationStats;
+    join_game : OperationStats;
+    get_state : OperationStats;
+    last_reset_ns : nat64;
+    tracking_duration_ns : nat64;
+};
+
+type CycleBreakdown = record {
+    tick_total : nat64;
+    compute_fates : nat64;
+    apply_changes : nat64;
+    disconnection : nat64;
+    wipe : nat64;
+    timer_overhead : nat64;
+};
+
+type IdleBurnInfo = record {
+    estimated_daily_cycles : nat64;
+    timer_cycles_per_day : nat64;
+    potential_savings : nat64;
+    is_idle : bool;
+    alive_cell_count : nat32;
+};
+
+type BenchmarkReport = record {
+    tracking_hours : float64;
+    total_ticks : nat64;
+    total_generations : nat64;
+    cycles_per_tick_avg : nat64;
+    cycles_per_generation_avg : nat64;
+    cycles_per_day_estimated : nat64;
+    cycles_per_day_breakdown : CycleBreakdown;
+    idle_burn_rate : IdleBurnInfo;
 };
 
 service : {
-    // Player actions
-    join_game: () -> (variant { Ok: nat8; Err: text });
-    join_slot: (nat8) -> (variant { Ok: nat8; Err: text });
-    place_cells: (vec record { int32; int32 }) -> (variant { Ok: PlaceResult; Err: text });
-    faucet: () -> (variant { Ok: nat64; Err: text });
+    // Player Actions
+    faucet : () -> (variant { Ok : nat64; Err : text });
+    join_game : (int32, int32) -> (variant { Ok : nat8; Err : text });
+    place_cells : (vec record { int32; int32 }) -> (variant { Ok : nat32; Err : text });
 
-    // Queries (FREE - no cycles cost to caller)
-    get_state: () -> (GameState) query;
-    get_slots_info: () -> (vec SlotInfo) query;
-    get_quadrant_info: () -> (vec QuadrantInfo) query;
-    get_generation: () -> (nat64) query;
-    get_alive_count: () -> (nat32) query;
-    get_potential_count: () -> (nat32) query;
-    get_balance: () -> (variant { Ok: nat64; Err: text }) query;
-    get_next_wipe: () -> (nat8, nat64) query;
-    is_running: () -> (bool) query;
-    greet: (text) -> (text) query;
+    // Game Control
+    pause_game : () -> (variant { Ok; Err : text });
+    resume_game : () -> (variant { Ok; Err : text });
 
-    // Admin (requires admin principal)
-    pause_game: () -> (variant { Ok; Err: text });
-    resume_game: () -> (variant { Ok; Err: text });
-    reset_game: () -> (variant { Ok; Err: text });
+    // Query Functions
+    get_state : () -> (GameState) query;
+    get_slots_info : () -> (vec opt SlotInfo) query;
+    get_base_info : (nat8) -> (opt BaseInfo) query;
+    get_territory_info : (nat8) -> (opt TerritoryExport) query;
+    get_next_wipe : () -> (WipeInfo) query;
+    get_balance : () -> (nat64) query;
+    get_generation : () -> (nat64) query;
+    get_alive_cells : () -> (vec record { nat16; nat16 }) query;
+    get_alive_bitmap : () -> (vec nat64) query;
+    greet : (text) -> (text) query;
+
+    // Benchmark Functions
+    get_benchmarks : () -> (BenchmarkData) query;
+    get_benchmark_report : () -> (BenchmarkReport) query;
+    reset_benchmarks : () -> ();
 }

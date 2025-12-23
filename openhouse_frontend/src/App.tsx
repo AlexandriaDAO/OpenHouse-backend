@@ -16,7 +16,6 @@ import { Wallet } from './pages/Wallet';
 import { Liquidity } from './pages/Liquidity';
 import { Predict } from './pages/Predict';
 import { Life } from './pages/Life';
-import { Risk } from './pages/Risk';
 
 function App() {
   return (
@@ -37,7 +36,6 @@ function App() {
                   <Route path="/liquidity" element={<Liquidity />} />
                   <Route path="/predict" element={<Predict />} />
                   <Route path="/life" element={<Life />} />
-                  <Route path="/risk" element={<Risk />} />
                   <Route path="/admin" element={<Admin />} />
                 </Routes>
               </Layout>
