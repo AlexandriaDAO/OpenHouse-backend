@@ -34,7 +34,7 @@ export function RouletteGame() {
 
   // Game State
   const [bets, setBets] = useState<PlacedBet[]>([]);
-  const [selectedChipValue, setSelectedChipValue] = useState(1); // Selected chip denomination
+  const [chipBetAmount, setChipBetAmount] = useState(0); // Amount to place per click (built up in rail like other games)
   const [isSpinning, setIsSpinning] = useState(false);
   const [winningNumber, setWinningNumber] = useState<number | null>(null);
   const [lastResult, setLastResult] = useState<SpinResult | null>(null);
@@ -105,22 +105,23 @@ export function RouletteGame() {
       if (existingIndex >= 0) {
         const updated = [...prevBets];
         const currentAmount = updated[existingIndex].amount;
+        const removeAmount = chipBetAmount > 0 ? chipBetAmount : betToRemove.amount;
 
-        if (currentAmount <= selectedChipValue) {
+        if (currentAmount <= removeAmount) {
           // Remove bet entirely
           updated.splice(existingIndex, 1);
         } else {
           // Reduce bet amount
           updated[existingIndex] = {
             ...updated[existingIndex],
-            amount: currentAmount - selectedChipValue
+            amount: currentAmount - removeAmount
           };
         }
         return updated;
       }
       return prevBets;
     });
-  }, [selectedChipValue, isSpinning]);
+  }, [chipBetAmount, isSpinning]);
 
   const handleClearBets = useCallback(() => {
     if (!isSpinning) {
@@ -256,23 +257,23 @@ export function RouletteGame() {
           </div>
         </div>
 
-        {/* Betting board - uses chip value from betting rail */}
+        {/* Betting board - clicking places chipBetAmount on that position */}
         <div className="mb-4">
           <BettingBoard
             bets={bets}
-            chipValue={selectedChipValue}
+            chipValue={chipBetAmount}
             onPlaceBet={handlePlaceBet}
             onRemoveBet={handleRemoveBet}
-            disabled={isSpinning}
+            disabled={isSpinning || chipBetAmount === 0}
           />
         </div>
       </div>
 
-      {/* Betting Rail - roulette mode: chips select denomination, not accumulate */}
+      {/* Betting Rail - works like other games: chips accumulate, then place on board */}
       <div className="flex-shrink-0">
         <BettingRail
-          betAmount={totalBetAmount}
-          onBetChange={() => {}} // Bets managed via chip placement on board
+          betAmount={chipBetAmount}
+          onBetChange={setChipBetAmount}
           maxBet={maxBet}
           gameBalance={balance.game}
           walletBalance={walletBalance}
@@ -285,10 +286,6 @@ export function RouletteGame() {
           canisterId={ROULETTE_BACKEND_CANISTER_ID}
           isBalanceLoading={gameBalanceContext.isLoading}
           isBalanceInitialized={gameBalanceContext.isInitialized}
-          rouletteMode={true}
-          selectedChipValue={selectedChipValue}
-          onChipSelect={setSelectedChipValue}
-          onClearBets={handleClearBets}
         />
       </div>
     </GameLayout>

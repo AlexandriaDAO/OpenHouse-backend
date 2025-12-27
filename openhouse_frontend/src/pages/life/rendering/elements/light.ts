@@ -1,71 +1,82 @@
 import type { ElementRenderer } from '../types';
 import { seededRandom } from '../seededRandom';
-import { add3DEdges } from '../colorUtils';
+import { add3DEdges, hexToRgb, lighten, darken, rgbToCss } from '../colorUtils';
 
 /**
  * LIGHT ELEMENT
  *
- * Visual style: Radiant, glowing
- * Territory: Soft radial glows, star points
+ * Visual style: Radiant, glowing - Minecraft glowstone inspired
+ * Territory: Grid of glowing blocks with rays and sparkles
  * Cells: Pure crystal with sparkles
  */
 export const lightRenderer: ElementRenderer = {
   name: 'Light',
 
   renderTerritoryTile(ctx, size, colors) {
-    const rng = seededRandom(5);
+    const base = hexToRgb(colors.primary);
 
-    // Base fill
-    ctx.fillStyle = colors.primary;
-    ctx.globalAlpha = 0.10;
-    ctx.fillRect(0, 0, size, size);
+    // Render as grid of Minecraft-style glowing blocks
+    const blockSize = 16;
+    const gridCount = Math.floor(size / blockSize);
 
-    // Radial glows
-    const numGlows = Math.floor(size / 20);
-    for (let i = 0; i < numGlows; i++) {
-      const x = rng() * size;
-      const y = rng() * size;
-      const r = 6 + rng() * (size * 0.15);
+    for (let row = 0; row < gridCount; row++) {
+      for (let col = 0; col < gridCount; col++) {
+        const x = col * blockSize;
+        const y = row * blockSize;
+        const seed = row * gridCount + col + 500;
+        const rng = seededRandom(seed);
 
-      const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
-      gradient.addColorStop(0, colors.secondary);
-      gradient.addColorStop(1, 'transparent');
+        // Radial gradient - glowing from center
+        const gradient = ctx.createRadialGradient(
+          x + blockSize / 2, y + blockSize / 2, 0,
+          x + blockSize / 2, y + blockSize / 2, blockSize * 0.7
+        );
+        gradient.addColorStop(0, '#FFFFFF');
+        gradient.addColorStop(0.4, rgbToCss(lighten(base, 0.3)));
+        gradient.addColorStop(1, rgbToCss(base));
+        ctx.fillStyle = gradient;
+        ctx.fillRect(x, y, blockSize, blockSize);
 
-      ctx.fillStyle = gradient;
-      ctx.globalAlpha = 0.08 + rng() * 0.06;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
+        // Light rays from center
+        ctx.strokeStyle = `rgba(255, 255, 255, 0.4)`;
+        ctx.lineWidth = 1;
+        const rayCount = 4;
+        for (let i = 0; i < rayCount; i++) {
+          const angle = (i / rayCount) * Math.PI * 2 + rng() * 0.3;
+          ctx.beginPath();
+          ctx.moveTo(x + blockSize / 2, y + blockSize / 2);
+          ctx.lineTo(
+            x + blockSize / 2 + Math.cos(angle) * blockSize * 0.45,
+            y + blockSize / 2 + Math.sin(angle) * blockSize * 0.45
+          );
+          ctx.stroke();
+        }
+
+        // Sparkle points
+        const sparkleCount = 2 + Math.floor(rng() * 2);
+        for (let i = 0; i < sparkleCount; i++) {
+          const sx = x + rng() * blockSize;
+          const sy = y + rng() * blockSize;
+          const ss = 1 + rng() * 1.5;
+          ctx.fillStyle = `rgba(255, 255, 255, 0.8)`;
+          ctx.beginPath();
+          ctx.arc(sx, sy, ss, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Soft 3D shading (light element is ethereal)
+        const lightColor = `rgba(255, 255, 255, 0.5)`;
+        const darkColor = rgbToCss(darken(base, 0.2));
+        const edgeWidth = 2;
+
+        ctx.fillStyle = lightColor;
+        ctx.fillRect(x, y, blockSize, edgeWidth);
+        ctx.fillRect(x, y, edgeWidth, blockSize);
+        ctx.fillStyle = darkColor;
+        ctx.fillRect(x, y + blockSize - edgeWidth, blockSize, edgeWidth);
+        ctx.fillRect(x + blockSize - edgeWidth, y, edgeWidth, blockSize);
+      }
     }
-
-    // Star points
-    const numStars = Math.floor(size / 30);
-    ctx.fillStyle = colors.secondary;
-    for (let i = 0; i < numStars; i++) {
-      const x = rng() * size;
-      const y = rng() * size;
-      const r = 1 + rng() * 2;
-
-      ctx.globalAlpha = 0.1 + rng() * 0.1;
-      ctx.beginPath();
-      // Four-point star
-      ctx.moveTo(x, y - r);
-      ctx.lineTo(x + r * 0.3, y);
-      ctx.lineTo(x, y + r);
-      ctx.lineTo(x - r * 0.3, y);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.moveTo(x - r, y);
-      ctx.lineTo(x, y + r * 0.3);
-      ctx.lineTo(x + r, y);
-      ctx.lineTo(x, y - r * 0.3);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    ctx.globalAlpha = 1;
   },
 
   renderCellSprite(ctx, size, colors) {

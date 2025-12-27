@@ -58,17 +58,22 @@ export const DEAD_COLOR = '#000000';
 
 
 // Server definitions
-export interface RiskServer {
+export interface LifeServer {
   id: string;
   name: string;
   canisterId: string;
+  locked?: boolean;  // When true, server is unavailable for play
 }
 
-export const RISK_SERVERS: RiskServer[] = [
+export const LIFE_SERVERS: LifeServer[] = [
   { id: 'life1', name: 'Server 1', canisterId: 'pijnb-7yaaa-aaaae-qgcuq-cai' },
-  { id: 'life2', name: 'Server 2', canisterId: 'qoski-4yaaa-aaaai-q4g4a-cai' },
-  { id: 'life3', name: 'Server 3', canisterId: '66p3s-uaaaa-aaaad-ac47a-cai' },
+  { id: 'life2', name: 'Server 2', canisterId: 'qoski-4yaaa-aaaai-q4g4a-cai', locked: true },
+  { id: 'life3', name: 'Server 3', canisterId: '66p3s-uaaaa-aaaad-ac47a-cai', locked: true },
 ];
+
+// Legacy alias for backwards compatibility
+export const RISK_SERVERS = LIFE_SERVERS;
+export type RiskServer = LifeServer;
 
 export const DEFAULT_SERVER_ID = 'life1';
 

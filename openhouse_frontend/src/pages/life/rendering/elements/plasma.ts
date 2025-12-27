@@ -1,72 +1,98 @@
 import type { ElementRenderer } from '../types';
 import { seededRandom } from '../seededRandom';
-import { add3DEdges } from '../colorUtils';
+import { add3DEdges, hexToRgb, lighten, darken, rgbToCss } from '../colorUtils';
 
 /**
  * PLASMA ELEMENT
  *
- * Visual style: Electric, chaotic
- * Territory: Lightning arcs, bright nodes
+ * Visual style: Electric, chaotic - energy/lightning block inspired
+ * Territory: Grid of plasma blocks with electric arcs
  * Cells: Energy core with electric streaks
  */
 export const plasmaRenderer: ElementRenderer = {
   name: 'Plasma',
 
   renderTerritoryTile(ctx, size, colors) {
-    const rng = seededRandom(7);
+    const base = hexToRgb(colors.primary);
+    const yellow = hexToRgb(colors.secondary);
 
-    // Base fill
-    ctx.fillStyle = colors.primary;
-    ctx.globalAlpha = 0.12;
-    ctx.fillRect(0, 0, size, size);
+    // Render as grid of Minecraft-style plasma blocks
+    const blockSize = 16;
+    const gridCount = Math.floor(size / blockSize);
 
-    // Electric arcs
-    ctx.strokeStyle = colors.secondary;
-    ctx.lineWidth = 1.5;
-    ctx.globalAlpha = 0.08;
+    for (let row = 0; row < gridCount; row++) {
+      for (let col = 0; col < gridCount; col++) {
+        const x = col * blockSize;
+        const y = row * blockSize;
+        const seed = row * gridCount + col + 700;
+        const rng = seededRandom(seed);
 
-    const numArcs = Math.floor(size / 20);
-    for (let i = 0; i < numArcs; i++) {
-      const startX = rng() * size;
-      const startY = rng() * size;
-      const endX = startX + (rng() - 0.5) * 40;
-      const endY = startY + (rng() - 0.5) * 40;
+        // Purple nebula gradient
+        const gradient = ctx.createRadialGradient(
+          x + blockSize * 0.4, y + blockSize * 0.4, 0,
+          x + blockSize / 2, y + blockSize / 2, blockSize * 0.7
+        );
+        gradient.addColorStop(0, rgbToCss(lighten(base, 0.2)));
+        gradient.addColorStop(0.6, rgbToCss(base));
+        gradient.addColorStop(1, rgbToCss(darken(base, 0.25)));
+        ctx.fillStyle = gradient;
+        ctx.fillRect(x, y, blockSize, blockSize);
 
-      ctx.beginPath();
-      ctx.moveTo(startX, startY);
+        // Energy cloud
+        ctx.fillStyle = `rgba(218, 112, 214, 0.4)`;
+        ctx.beginPath();
+        ctx.arc(x + blockSize / 2, y + blockSize / 2, blockSize * 0.3, 0, Math.PI * 2);
+        ctx.fill();
 
-      // Jagged lightning path
-      let x = startX;
-      let y = startY;
-      const steps = 4 + Math.floor(rng() * 4);
-      for (let j = 0; j < steps; j++) {
-        const t = (j + 1) / steps;
-        x = startX + (endX - startX) * t + (rng() - 0.5) * 10;
-        y = startY + (endY - startY) * t + (rng() - 0.5) * 10;
-        ctx.lineTo(x, y);
+        // Electric arc across block
+        const arcStartX = x + rng() * blockSize * 0.3;
+        const arcStartY = y + rng() * blockSize;
+        const arcEndX = x + blockSize * 0.7 + rng() * blockSize * 0.3;
+        const arcEndY = y + rng() * blockSize;
+
+        // Arc glow
+        ctx.strokeStyle = rgbToCss(yellow, 0.4);
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(arcStartX, arcStartY);
+        let ax = arcStartX, ay = arcStartY;
+        for (let j = 0; j < 3; j++) {
+          ax += (arcEndX - arcStartX) / 3 + (rng() - 0.5) * 4;
+          ay += (arcEndY - arcStartY) / 3 + (rng() - 0.5) * 6;
+          ctx.lineTo(ax, ay);
+        }
+        ctx.stroke();
+
+        // Arc core
+        ctx.strokeStyle = rgbToCss(yellow, 0.9);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Energy node in center
+        const nodeGradient = ctx.createRadialGradient(
+          x + blockSize / 2, y + blockSize / 2, 0,
+          x + blockSize / 2, y + blockSize / 2, blockSize * 0.2
+        );
+        nodeGradient.addColorStop(0, `rgba(255, 255, 150, 0.9)`);
+        nodeGradient.addColorStop(1, 'transparent');
+        ctx.fillStyle = nodeGradient;
+        ctx.beginPath();
+        ctx.arc(x + blockSize / 2, y + blockSize / 2, blockSize * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 3D shading with electric glow
+        const lightColor = rgbToCss(yellow, 0.4);
+        const darkColor = rgbToCss(darken(base, 0.4));
+        const edgeWidth = 2;
+
+        ctx.fillStyle = lightColor;
+        ctx.fillRect(x, y, blockSize, edgeWidth);
+        ctx.fillRect(x, y, edgeWidth, blockSize);
+        ctx.fillStyle = darkColor;
+        ctx.fillRect(x, y + blockSize - edgeWidth, blockSize, edgeWidth);
+        ctx.fillRect(x + blockSize - edgeWidth, y, edgeWidth, blockSize);
       }
-      ctx.stroke();
     }
-
-    // Bright nodes
-    const numNodes = Math.floor(size / 30);
-    for (let i = 0; i < numNodes; i++) {
-      const x = rng() * size;
-      const y = rng() * size;
-      const r = 2 + rng() * 4;
-
-      const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
-      gradient.addColorStop(0, colors.secondary);
-      gradient.addColorStop(1, 'transparent');
-
-      ctx.fillStyle = gradient;
-      ctx.globalAlpha = 0.1 + rng() * 0.08;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.globalAlpha = 1;
   },
 
   renderCellSprite(ctx, size, colors) {

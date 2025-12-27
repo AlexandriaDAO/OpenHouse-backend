@@ -62,11 +62,12 @@ import {
 // Import tutorial component
 import { RiskTutorial } from './life/tutorial';
 
-// Local cell type for dense grid simulation (v2: no coins on cells)
-interface Cell {
-  owner: number;  // 0 = neutral, 1-9 = player slots
-  alive: boolean;
-}
+// Import auth method selector for proper auth flow
+import { AuthMethodSelector } from '../components/AuthMethodSelector';
+import { type IdentityProviderConfig } from '../lib/ic-use-identity/config/identityProviders';
+
+// Import optimistic simulation engine
+import { stepGeneration, type Cell } from './life/engine';
 
 // Coin particle for Mario-style animation when bases lose coins
 interface CoinParticle {
@@ -82,93 +83,6 @@ interface CoinParticle {
   rotation: number;
   rotationSpeed: number;
 }
-
-// Check if position is in a base's 8x8 protection zone
-const findProtectionZoneOwner = (x: number, y: number, bases: Map<number, BaseInfo>): number | null => {
-  for (const [playerNum, base] of bases) {
-    if (isInBaseZone(x, y, base.x, base.y)) {
-      return playerNum;
-    }
-  }
-  return null;
-};
-
-// Local Risk simulation - mirrors backend rules exactly (including siege mechanic)
-const stepLocalGeneration = (cells: Cell[], bases: Map<number, BaseInfo>): Cell[] => {
-  // Guard against empty cells array (can happen during server switch)
-  if (cells.length === 0) return cells;
-
-  const newCells: Cell[] = new Array(GRID_WIDTH * GRID_HEIGHT);
-
-  for (let row = 0; row < GRID_HEIGHT; row++) {
-    for (let col = 0; col < GRID_WIDTH; col++) {
-      const idx = row * GRID_WIDTH + col;
-      const current = cells[idx];
-
-      // Count neighbors and track owner counts
-      let neighborCount = 0;
-      const ownerCounts: number[] = new Array(11).fill(0); // 0-10 players
-
-      for (let di = -1; di <= 1; di++) {
-        for (let dj = -1; dj <= 1; dj++) {
-          if (di === 0 && dj === 0) continue;
-
-          // Toroidal wrap
-          const nRow = (row + di + GRID_HEIGHT) % GRID_HEIGHT;
-          const nCol = (col + dj + GRID_WIDTH) % GRID_WIDTH;
-          const neighbor = cells[nRow * GRID_WIDTH + nCol];
-
-          if (neighbor.alive) {
-            neighborCount++;
-            if (neighbor.owner > 0 && neighbor.owner <= 10) {
-              ownerCounts[neighbor.owner]++;
-            }
-          }
-        }
-      }
-
-      // Apply Conway's rules
-      let newAlive = false;
-      let newOwner = current.owner;
-
-      if (current.alive) {
-        // Living cell survives with 2-3 neighbors
-        newAlive = neighborCount === 2 || neighborCount === 3;
-      } else {
-        // Dead cell born with exactly 3 neighbors
-        if (neighborCount === 3) {
-          newAlive = true;
-          // New owner = majority owner among parents
-          let maxCount = 0;
-          let majorityOwner = 1;
-          for (let o = 1; o <= 10; o++) {
-            if (ownerCounts[o] > maxCount) {
-              maxCount = ownerCounts[o];
-              majorityOwner = o;
-            }
-          }
-          newOwner = majorityOwner;
-
-          // SIEGE MECHANIC: Check if birth is blocked by enemy base protection zone
-          const protectionOwner = findProtectionZoneOwner(col, row, bases);
-          if (protectionOwner !== null && protectionOwner !== newOwner) {
-            // Birth blocked - enemy base's protection zone prevents birth
-            newAlive = false;
-            newOwner = current.owner; // Preserve existing owner/territory
-          }
-        }
-      }
-
-      // Preserve owner (territory) - persists even when cells die
-      newCells[idx] = {
-        owner: newOwner,
-        alive: newAlive,
-      };
-    }
-  }
-
-  return newCells;
-};
 
 // Textured cell preview component for region selection
 const TexturedCellPreview: React.FC<{ regionId: number; size?: number; className?: string }> = ({
@@ -203,6 +117,63 @@ const TexturedCellPreview: React.FC<{ regionId: number; size?: number; className
       style={{ width: size, height: size }}
     />
   );
+};
+
+// Helper to parse IC errors into human-readable messages
+const parseError = (err: unknown): string => {
+  if (err === null || err === undefined) {
+    return 'Unknown error';
+  }
+
+  // If it's already a simple string, return it (truncated if too long)
+  if (typeof err === 'string') {
+    return err.length > 200 ? err.substring(0, 200) + '...' : err;
+  }
+
+  // Handle Error objects
+  if (err instanceof Error) {
+    const msg = err.message;
+    // Check for IC-specific error patterns
+    if (msg.includes('Reject code')) {
+      // Extract the meaningful part of IC reject messages
+      const match = msg.match(/Reject text: (.+?)(?:\n|$)/);
+      if (match) return match[1];
+    }
+    return msg.length > 200 ? msg.substring(0, 200) + '...' : msg;
+  }
+
+  // Handle objects (could be Candid error responses)
+  if (typeof err === 'object') {
+    // Check for common error object patterns
+    const errObj = err as Record<string, unknown>;
+
+    // IC AgentError pattern
+    if ('message' in errObj && typeof errObj.message === 'string') {
+      return parseError(errObj.message);
+    }
+
+    // Candid variant error pattern { Err: "message" }
+    if ('Err' in errObj) {
+      return parseError(errObj.Err);
+    }
+
+    // If it looks like serialized bytes (numbered keys), don't stringify it
+    const keys = Object.keys(errObj);
+    if (keys.length > 10 && keys.every(k => /^\d+$/.test(k))) {
+      return 'Canister returned an error (check console for details)';
+    }
+
+    // Try to stringify but truncate
+    try {
+      const str = JSON.stringify(err);
+      return str.length > 200 ? str.substring(0, 200) + '...' : str;
+    } catch {
+      return 'Error occurred (check console for details)';
+    }
+  }
+
+  // Fallback
+  return String(err).substring(0, 200);
 };
 
 export const Risk: React.FC = () => {
@@ -282,6 +253,12 @@ export const Risk: React.FC = () => {
 
   // Tutorial modal state
   const [showTutorial, setShowTutorial] = useState(false);
+
+  // Auth provider selector state (for proper II 1.0/2.0 selection)
+  const [showProviderSelector, setShowProviderSelector] = useState(false);
+
+  // Frozen state (game paused due to 30min inactivity)
+  const [isFrozen, setIsFrozen] = useState(false);
 
   // Elimination tracking refs
   const joinedAtGeneration = useRef<bigint | null>(null);
@@ -511,6 +488,12 @@ export const Risk: React.FC = () => {
     touchStartRef.current = null;
   }, [viewMode, navigateQuadrant]);
 
+  // Handle auth provider selection (II 1.0 vs 2.0)
+  const handleProviderSelect = useCallback((provider: IdentityProviderConfig) => {
+    setShowProviderSelector(false);
+    login(undefined, provider);
+  }, [login]);
+
   // Create actor when authenticated with shared identity or server changes
   useEffect(() => {
     if (!isAuthenticated || !identity) {
@@ -572,7 +555,7 @@ export const Risk: React.FC = () => {
         }
       } catch (err) {
         console.error('Failed to setup actor:', err);
-        setError(`Failed to connect: ${err}`);
+        setError(`Failed to connect: ${parseError(err)}`);
         setShowRegionSelection(true);  // Show region selection on error
       } finally {
         setIsLoading(false);
@@ -771,6 +754,17 @@ export const Risk: React.FC = () => {
         const state = await actor.get_state();
         const latencyMs = performance.now() - t0;
 
+        // Check frozen state (may not exist on older backends)
+        try {
+          if (typeof actor.is_frozen === 'function') {
+            const frozen = await actor.is_frozen();
+            setIsFrozen(frozen);
+          }
+        } catch {
+          // is_frozen not available on this backend version
+          setIsFrozen(false);
+        }
+
         // Track latency stats (silent - only for debug overlay)
         queryLatencyStats.current.samples.push(latencyMs);
         if (queryLatencyStats.current.samples.length > 20) {
@@ -786,7 +780,7 @@ export const Risk: React.FC = () => {
               w >>= 1n;
             }
           }
-          // ========== SYNC DECISION LOGIC ==========
+          // ========== SYNC DECISION LOGIC WITH RTT COMPENSATION ==========
           // Use refs to get current values (avoids stale closure issue)
           const currentLocalGen = localGenerationRef.current;
           const currentLastSyncedGen = lastSyncedGenerationRef.current;
@@ -795,9 +789,16 @@ export const Risk: React.FC = () => {
           const incomingGen = state.generation;
           const now = Date.now();
           const timeSinceLastSync = now - currentLastSyncTime;
-          const genDiff = Number(currentLocalGen - incomingGen);
-          // genDiff > 0 means local is AHEAD of backend
-          // genDiff < 0 means backend is AHEAD of local (we're behind!)
+
+          // RTT COMPENSATION: Estimate where backend IS NOW (not where it was when response was generated)
+          // Backend advances at 8 gen/sec = 1 gen per 125ms
+          const rttGens = Math.floor(latencyMs / LOCAL_TICK_MS);
+          const estimatedBackendNow = incomingGen + BigInt(rttGens);
+
+          // Compare to estimated current backend position
+          const genDiff = Number(currentLocalGen - estimatedBackendNow);
+          // genDiff > 0 means local is AHEAD of estimated backend
+          // genDiff < 0 means local is BEHIND estimated backend
 
           // REJECT: True out-of-order (older than what we've already synced to)
           if (incomingGen < currentLastSyncedGen) {
@@ -805,27 +806,37 @@ export const Risk: React.FC = () => {
             return;
           }
 
-          // SYNC STRATEGY:
-          // - If backend is AHEAD (genDiff < 0): Always sync (we're behind, need to catch up)
-          // - If local is ahead by small amount: Skip (we're just running slightly fast)
-          // - If local is ahead by too much OR force sync: Sync to prevent drift
-          const backendAhead = genDiff < 0;
-          const localTooFarAhead = genDiff > SYNC_TOLERANCE_GENS;
+          // SYNC STRATEGY with RTT awareness:
+          // - If local is behind estimated backend (genDiff < -2): Sync to catch up
+          // - If local is roughly in sync (-2 to +tolerance): Skip
+          // - If local is way ahead (> tolerance) OR force sync: Sync to prevent drift
           const needsForceSync = timeSinceLastSync >= FORCE_SYNC_MS;
+          const localBehind = genDiff < -2;  // Allow 2 gen slack for timing jitter
+          const localTooFarAhead = genDiff > SYNC_TOLERANCE_GENS;
 
-          // Only sync if: backend ahead OR local way too far ahead OR force sync
-          if (!backendAhead && !localTooFarAhead && !needsForceSync) {
-            // Local is slightly ahead - skip, let backend catch up
+          // Skip if roughly in sync (unless force sync needed)
+          if (!localBehind && !localTooFarAhead && !needsForceSync) {
+            console.log('[SYNC:skip]', {
+              queryId,
+              incoming: incomingGen.toString(),
+              estimated: estimatedBackendNow.toString(),
+              localGen: currentLocalGen.toString(),
+              drift: genDiff,
+              rttComp: `+${rttGens}`,
+            });
             return;
           }
 
           // Log the sync event
-          const reason = backendAhead ? 'catchup' : (needsForceSync ? 'force' : 'drift');
-          console.log('[SYNC]', {
+          const reason = localBehind ? 'catchup' : (needsForceSync ? 'force' : 'drift');
+          console.log('[SYNC:apply]', {
             queryId,
-            incoming: incomingGen.toString(),
-            localGen: currentLocalGen.toString(),
-            correction: genDiff,
+            backendReported: incomingGen.toString(),
+            rttCompensation: `+${rttGens}`,
+            estimatedBackend: estimatedBackendNow.toString(),
+            wasAt: currentLocalGen.toString(),
+            newLocalGen: estimatedBackendNow.toString(),
+            netJump: Number(estimatedBackendNow - currentLocalGen),
             reason,
             latency: `${latencyMs.toFixed(0)}ms`,
           });
@@ -838,9 +849,9 @@ export const Risk: React.FC = () => {
             lastBackendHash: '',
           });
 
-          // Update generation tracking - hard snap to backend state
+          // Update generation tracking - snap to ESTIMATED current backend position
           setLastSyncedGeneration(state.generation);
-          setLocalGeneration(state.generation);
+          setLocalGeneration(estimatedBackendNow);  // RTT compensated
           setLastSyncTime(Date.now());
 
           setGameState(state);
@@ -930,18 +941,20 @@ export const Risk: React.FC = () => {
     };
   }, [actor, principal, isAuthenticated, sparseToDense]);
 
-  // Local simulation - runs every 100ms for smooth visuals (when enabled)
+  // Local simulation - runs every 125ms for smooth visuals (8 gen/sec)
+  // Uses extracted stepGeneration from engine module
   // When disabled, we display backend state directly via frequent syncs
+  // When frozen, stop local sim to prevent constant drift/correction churn
   useEffect(() => {
-    if (!ENABLE_LOCAL_SIM || !isRunning || localCells.length === 0) return;
+    if (!ENABLE_LOCAL_SIM || !isRunning || isFrozen || localCells.length === 0) return;
 
     const localTick = setInterval(() => {
-      setLocalCells(cells => stepLocalGeneration(cells, basesRef.current));
+      setLocalCells(cells => stepGeneration(cells, basesRef.current, GRID_SIZE));
       setLocalGeneration(g => g + 1n);  // Track generation for sync verification
     }, LOCAL_TICK_MS);
 
     return () => clearInterval(localTick);
-  }, [isRunning, localCells.length > 0]);
+  }, [isRunning, isFrozen, localCells.length > 0]);
 
   // Helper to draw cells within a region (v2: no coins on cells, draw bases)
   const drawCells = useCallback((
@@ -1927,13 +1940,20 @@ export const Risk: React.FC = () => {
         </div>
 
         <button
-          onClick={login}
+          onClick={() => setShowProviderSelector(true)}
           disabled={isLoading}
           className="px-6 py-3 rounded-lg font-mono text-lg bg-dfinity-turquoise/20 text-dfinity-turquoise border border-dfinity-turquoise/50 hover:bg-dfinity-turquoise/30 transition-all disabled:opacity-50"
         >
-          {isLoading ? 'Connecting...' : 'Login with Internet Identity'}
+          {isLoading ? 'Connecting...' : 'Sign In'}
         </button>
         {error && <p className="text-red-400 text-sm">{error}</p>}
+
+        {showProviderSelector && (
+          <AuthMethodSelector
+            onSelect={handleProviderSelect}
+            onCancel={() => setShowProviderSelector(false)}
+          />
+        )}
       </div>
     );
   }
@@ -2216,10 +2236,10 @@ export const Risk: React.FC = () => {
                       // Stay in 'overview' mode - user can click to enter quadrant after canvas is ready
                       setShowSlotSelection(false);
                     } else {
-                      setError(result.Err);
+                      setError(parseError(result.Err));
                     }
                   } catch (err) {
-                    setError(`Failed to place base: ${err}`);
+                    setError(`Failed to place base: ${parseError(err)}`);
                   } finally {
                     setIsJoiningSlot(false);
                   }
@@ -2680,6 +2700,100 @@ export const Risk: React.FC = () => {
               className={`w-full h-full ${viewMode === 'quadrant' ? 'cursor-crosshair' : 'cursor-pointer'}`}
               style={{ display: 'block' }}
             />
+
+            {/* Frozen Overlay - Game paused due to inactivity */}
+            {isFrozen && (
+              <div className="absolute inset-0 z-50 pointer-events-none">
+                {/* Blue ice overlay */}
+                <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/30 via-blue-400/20 to-cyan-500/30" />
+
+                {/* Icicles - Top edge */}
+                <div className="absolute top-0 left-0 right-0 h-16 flex justify-around overflow-hidden">
+                  {[12, 8, 15, 10, 14, 9, 13, 11, 8, 15, 12, 9, 14, 10, 13, 8, 11, 15, 9, 12, 14, 10, 8, 13].map((size, i) => (
+                    <div
+                      key={`icicle-top-${i}`}
+                      className="relative"
+                      style={{
+                        width: size,
+                        height: 20 + size * 2.5,
+                        background: 'linear-gradient(180deg, rgba(147, 197, 253, 0.9) 0%, rgba(59, 130, 246, 0.7) 50%, rgba(147, 197, 253, 0.4) 100%)',
+                        clipPath: 'polygon(30% 0%, 70% 0%, 100% 100%, 0% 100%)',
+                        marginTop: -2,
+                        boxShadow: '0 4px 8px rgba(59, 130, 246, 0.3)',
+                      }}
+                    />
+                  ))}
+                </div>
+
+                {/* Icicles - Bottom edge (pointing up) */}
+                <div className="absolute bottom-0 left-0 right-0 h-12 flex justify-around overflow-hidden">
+                  {[8, 10, 6, 11, 7, 9, 12, 6, 10, 8, 11, 7, 9, 6, 12, 8, 10, 7, 11, 9].map((size, i) => (
+                    <div
+                      key={`icicle-bottom-${i}`}
+                      className="relative"
+                      style={{
+                        width: size,
+                        height: 15 + size * 2,
+                        background: 'linear-gradient(0deg, rgba(147, 197, 253, 0.9) 0%, rgba(59, 130, 246, 0.7) 50%, rgba(147, 197, 253, 0.4) 100%)',
+                        clipPath: 'polygon(0% 0%, 100% 0%, 70% 100%, 30% 100%)',
+                        marginBottom: -2,
+                        alignSelf: 'flex-end',
+                      }}
+                    />
+                  ))}
+                </div>
+
+                {/* Icicles - Left edge */}
+                <div className="absolute top-16 bottom-12 left-0 w-12 flex flex-col justify-around overflow-hidden">
+                  {[25, 18, 30, 22, 15, 28, 20, 32, 17, 25, 21, 28, 15, 30, 18, 24].map((size, i) => (
+                    <div
+                      key={`icicle-left-${i}`}
+                      style={{
+                        width: size,
+                        height: 6 + (i % 3) * 2,
+                        background: 'linear-gradient(90deg, rgba(147, 197, 253, 0.9) 0%, rgba(59, 130, 246, 0.7) 50%, rgba(147, 197, 253, 0.4) 100%)',
+                        clipPath: 'polygon(0% 30%, 0% 70%, 100% 100%, 100% 0%)',
+                        marginLeft: -2,
+                      }}
+                    />
+                  ))}
+                </div>
+
+                {/* Icicles - Right edge */}
+                <div className="absolute top-16 bottom-12 right-0 w-12 flex flex-col justify-around items-end overflow-hidden">
+                  {[22, 30, 18, 26, 20, 32, 15, 28, 24, 18, 30, 22, 26, 15, 28, 20].map((size, i) => (
+                    <div
+                      key={`icicle-right-${i}`}
+                      style={{
+                        width: size,
+                        height: 6 + (i % 3) * 2,
+                        background: 'linear-gradient(270deg, rgba(147, 197, 253, 0.9) 0%, rgba(59, 130, 246, 0.7) 50%, rgba(147, 197, 253, 0.4) 100%)',
+                        clipPath: 'polygon(0% 0%, 0% 100%, 100% 70%, 100% 30%)',
+                        marginRight: -2,
+                      }}
+                    />
+                  ))}
+                </div>
+
+                {/* Frost corner accents */}
+                <div className="absolute top-0 left-0 w-20 h-20 bg-gradient-radial from-white/40 to-transparent rounded-br-full" />
+                <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-radial from-white/40 to-transparent rounded-bl-full" />
+                <div className="absolute bottom-0 left-0 w-16 h-16 bg-gradient-radial from-white/30 to-transparent rounded-tr-full" />
+                <div className="absolute bottom-0 right-0 w-16 h-16 bg-gradient-radial from-white/30 to-transparent rounded-tl-full" />
+
+                {/* Centered message - pointer-events-none so users can still click through to interact */}
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="bg-blue-900/90 backdrop-blur-sm border-2 border-cyan-400/50 rounded-xl px-8 py-6 text-center shadow-2xl shadow-cyan-500/20">
+                    <div className="text-5xl mb-3">❄️</div>
+                    <h2 className="text-2xl font-bold text-cyan-100 mb-2">Game Frozen</h2>
+                    <p className="text-cyan-200/80 mb-4">No activity for 30 minutes</p>
+                    <p className="text-white font-semibold">
+                      Click anywhere to unfreeze! 🔥
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Sync Debug Overlay - Optimistic Local Simulation */}
             {DEBUG_SYNC && (

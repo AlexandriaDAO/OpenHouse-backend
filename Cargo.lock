@@ -488,10 +488,8 @@ dependencies = [
 name = "life2_backend"
 version = "0.1.0"
 dependencies = [
- "arrayvec 0.7.6",
  "candid",
  "ic-cdk",
- "ic-cdk-timers",
  "serde",
 ]
 
@@ -499,10 +497,8 @@ dependencies = [
 name = "life3_backend"
 version = "0.1.0"
 dependencies = [
- "arrayvec 0.7.6",
  "candid",
  "ic-cdk",
- "ic-cdk-timers",
  "serde",
 ]
 

@@ -50,6 +50,7 @@ const GENERATIONS_PER_TICK: u32 = 8;   // 8 gen/sec - matches frontend LOCAL_TIC
 const TICK_INTERVAL_MS: u64 = 1000;
 const WIPE_INTERVAL_NS: u64 = 120_000_000_000; // 2 minutes
 const GRACE_PERIOD_NS: u64 = 600_000_000_000; // 10 minutes
+const IDLE_FREEZE_NS: u64 = 1_800_000_000_000; // 30 minutes - freeze if no player activity
 
 /// Base dimensions
 const BASE_SIZE: u16 = 8;
@@ -172,6 +173,8 @@ struct PersistedState {
     next_wipe_quadrant: u8,
     last_wipe_ns: u64,
     owner: Vec<u8>,
+    #[serde(default)]
+    last_activity_ns: Option<u64>,
 }
 
 // =============================================================================
@@ -257,6 +260,7 @@ thread_local! {
     static IS_RUNNING: RefCell<bool> = RefCell::new(true);
     static NEXT_WIPE_QUADRANT: RefCell<u8> = RefCell::new(0);
     static LAST_WIPE_NS: RefCell<u64> = RefCell::new(0);
+    static LAST_ACTIVITY_NS: RefCell<u64> = RefCell::new(0);
 
     // BFS workspace (pre-allocated)
     static BFS_WORKSPACE: RefCell<BFSWorkspace> = RefCell::new(BFSWorkspace::new());
@@ -1400,6 +1404,14 @@ fn tick() {
     let board_empty = ALIVE.with(|a| a.borrow().iter().all(|&w| w == 0));
     if board_empty {
         stop_timer();
+        return;
+    }
+
+    // Freeze if no player activity for 30 minutes (saves cycles on straggler gliders)
+    let last_activity = LAST_ACTIVITY_NS.with(|la| *la.borrow());
+    let idle_time = ic_cdk::api::time().saturating_sub(last_activity);
+    if idle_time >= IDLE_FREEZE_NS {
+        stop_timer();
     }
 }
 
@@ -1448,6 +1460,14 @@ fn faucet() -> Result<u64, String> {
 #[ic_cdk::update]
 fn join_game(base_x: i32, base_y: i32, desired_slot: u8) -> Result<u8, String> {
     let caller = ic_cdk::api::msg_caller();
+
+    // Record activity for freeze detection
+    LAST_ACTIVITY_NS.with(|la| *la.borrow_mut() = ic_cdk::api::time());
+
+    // Restart timer if it was stopped (board was empty or frozen)
+    if !is_timer_running() {
+        start_timer();
+    }
 
     // Validation 1: Auth
     if caller == Principal::anonymous() {
@@ -1571,7 +1591,10 @@ fn join_game(base_x: i32, base_y: i32, desired_slot: u8) -> Result<u8, String> {
 fn place_cells(cells: Vec<(i32, i32)>) -> Result<u32, String> {
     let caller = ic_cdk::api::msg_caller();
 
-    // Restart timer if it was stopped (board was empty)
+    // Record activity for freeze detection
+    LAST_ACTIVITY_NS.with(|la| *la.borrow_mut() = ic_cdk::api::time());
+
+    // Restart timer if it was stopped (board was empty or frozen)
     if !is_timer_running() {
         start_timer();
     }
@@ -1674,6 +1697,15 @@ fn resume_game() -> Result<(), String> {
     IS_RUNNING.with(|r| {
         *r.borrow_mut() = true;
     });
+
+    // Update activity timestamp to prevent immediate re-freeze
+    LAST_ACTIVITY_NS.with(|la| *la.borrow_mut() = ic_cdk::api::time());
+
+    // Restart timer if it was stopped
+    if !is_timer_running() {
+        start_timer();
+    }
+
     Ok(())
 }
 
@@ -1836,6 +1868,11 @@ fn get_generation() -> u64 {
 }
 
 #[ic_cdk::query]
+fn is_frozen() -> bool {
+    !is_timer_running()
+}
+
+#[ic_cdk::query]
 fn get_alive_cells() -> Vec<(u16, u16)> {
     let mut cells = Vec::new();
     ALIVE.with(|alive| {
@@ -1921,6 +1958,7 @@ fn pre_upgrade() {
         next_wipe_quadrant: NEXT_WIPE_QUADRANT.with(|q| *q.borrow()),
         last_wipe_ns: LAST_WIPE_NS.with(|lw| *lw.borrow()),
         owner: OWNER.with(|o| o.borrow().to_vec()),
+        last_activity_ns: Some(LAST_ACTIVITY_NS.with(|la| *la.borrow())),
     };
 
     ic_cdk::storage::stable_save((state,)).expect("Failed to save state");
@@ -1981,6 +2019,7 @@ fn post_upgrade() {
     IS_RUNNING.with(|r| *r.borrow_mut() = state.is_running);
     NEXT_WIPE_QUADRANT.with(|q| *q.borrow_mut() = state.next_wipe_quadrant);
     LAST_WIPE_NS.with(|lw| *lw.borrow_mut() = state.last_wipe_ns);
+    LAST_ACTIVITY_NS.with(|la| *la.borrow_mut() = state.last_activity_ns.unwrap_or_else(ic_cdk::api::time));
 
     // Restore OWNER cache
     OWNER.with(|o| {
@@ -2002,169 +2041,20 @@ fn post_upgrade() {
 
 #[ic_cdk::init]
 fn init() {
+    let now = ic_cdk::api::time();
     LAST_WIPE_NS.with(|lw| {
-        *lw.borrow_mut() = ic_cdk::api::time();
+        *lw.borrow_mut() = now;
+    });
+    LAST_ACTIVITY_NS.with(|la| {
+        *la.borrow_mut() = now;
     });
     // Rebuild POTENTIAL in case there are any alive cells (shouldn't be on fresh init, but be safe)
     rebuild_potential_from_alive();
     start_timer();
 }
 
-// =============================================================================
-// TESTS
-// =============================================================================
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Reference implementation using individual bit extraction (the old approach)
-    fn count_neighbors_reference(
-        bit_pos: usize,
-        above: u64, same: u64, below: u64,
-        left_above: u64, left_same: u64, left_below: u64,
-        right_above: u64, right_same: u64, right_below: u64,
-    ) -> u8 {
-        let (nw, n, ne, w, e, sw, s, se) = if bit_pos == 0 {
-            (
-                ((left_above >> 63) & 1) as u8,
-                ((above >> 0) & 1) as u8,
-                ((above >> 1) & 1) as u8,
-                ((left_same >> 63) & 1) as u8,
-                ((same >> 1) & 1) as u8,
-                ((left_below >> 63) & 1) as u8,
-                ((below >> 0) & 1) as u8,
-                ((below >> 1) & 1) as u8,
-            )
-        } else if bit_pos == 63 {
-            (
-                ((above >> 62) & 1) as u8,
-                ((above >> 63) & 1) as u8,
-                ((right_above >> 0) & 1) as u8,
-                ((same >> 62) & 1) as u8,
-                ((right_same >> 0) & 1) as u8,
-                ((below >> 62) & 1) as u8,
-                ((below >> 63) & 1) as u8,
-                ((right_below >> 0) & 1) as u8,
-            )
-        } else {
-            (
-                ((above >> (bit_pos - 1)) & 1) as u8,
-                ((above >> bit_pos) & 1) as u8,
-                ((above >> (bit_pos + 1)) & 1) as u8,
-                ((same >> (bit_pos - 1)) & 1) as u8,
-                ((same >> (bit_pos + 1)) & 1) as u8,
-                ((below >> (bit_pos - 1)) & 1) as u8,
-                ((below >> bit_pos) & 1) as u8,
-                ((below >> (bit_pos + 1)) & 1) as u8,
-            )
-        };
-        nw + n + ne + w + e + sw + s + se
-    }
-
-    #[test]
-    fn test_popcount_matches_reference_all_positions() {
-        let patterns: [u64; 8] = [
-            0u64, !0u64, 0xAAAAAAAAAAAAAAAA, 0x5555555555555555,
-            0xFF00FF00FF00FF00, 0x00FF00FF00FF00FF,
-            0x8000000000000001, 0x7FFFFFFFFFFFFFFE,
-        ];
-
-        for bit_pos in 0..64 {
-            for &above in &patterns {
-                for &same in &patterns {
-                    for &below in &patterns {
-                        let left_above = above.rotate_left(1);
-                        let left_same = same.rotate_left(1);
-                        let left_below = below.rotate_left(1);
-                        let right_above = above.rotate_right(1);
-                        let right_same = same.rotate_right(1);
-                        let right_below = below.rotate_right(1);
-
-                        let reference = count_neighbors_reference(
-                            bit_pos, above, same, below,
-                            left_above, left_same, left_below,
-                            right_above, right_same, right_below,
-                        );
-                        let popcount = count_neighbors_popcount(
-                            bit_pos, above, same, below,
-                            left_above, left_same, left_below,
-                            right_above, right_same, right_below,
-                        );
-
-                        assert_eq!(reference, popcount,
-                            "Mismatch at bit_pos={}, above={:#x}", bit_pos, above);
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_popcount_edge_bit0() {
-        let above = 0b111u64;   // N(bit0), NE(bit1) set
-        let same = 0b010u64;    // E(bit1) set
-        let below = 0b111u64;   // S(bit0), SE(bit1) set
-        let left_above = 1u64 << 63;  // NW neighbor
-        let left_same = 1u64 << 63;   // W neighbor
-        let left_below = 1u64 << 63;  // SW neighbor
-
-        let count = count_neighbors_popcount(0, above, same, below, left_above, left_same, left_below, 0, 0, 0);
-        // NW(1) + N(1) + NE(1) + W(1) + E(1) + SW(1) + S(1) + SE(1) = 8
-        assert_eq!(count, 8);
-    }
-
-    #[test]
-    fn test_popcount_edge_bit63() {
-        let above = 0b11u64 << 62;
-        let below = 0b11u64 << 62;
-        let right_above = 1u64;
-        let right_same = 1u64;
-        let right_below = 1u64;
-
-        let count = count_neighbors_popcount(63, above, 0, below, 0, 0, 0, right_above, right_same, right_below);
-        assert_eq!(count, 7);
-    }
-
-    #[test]
-    fn test_popcount_interior() {
-        let above = 0b111u64 << 31;
-        let same = 0b101u64 << 31;
-        let below = 0b111u64 << 31;
-
-        let count = count_neighbors_popcount(32, above, same, below, 0, 0, 0, 0, 0, 0);
-        assert_eq!(count, 8);
-    }
-
-    #[test]
-    fn test_extract_matches_popcount() {
-        for bit_pos in [0, 1, 31, 32, 62, 63] {
-            let above = 0xAAAAAAAAAAAAAAAAu64;
-            let same = 0x5555555555555555u64;
-            let below = 0xFFFFFFFFFFFFFFFFu64;
-            let left_above = above.rotate_left(1);
-            let left_same = same.rotate_left(1);
-            let left_below = below.rotate_left(1);
-            let right_above = above.rotate_right(1);
-            let right_same = same.rotate_right(1);
-            let right_below = below.rotate_right(1);
-
-            let (nw, n, ne, w, e, sw, s, se) = extract_neighbor_bits(
-                bit_pos, above, same, below,
-                left_above, left_same, left_below,
-                right_above, right_same, right_below,
-            );
-            let sum = nw + n + ne + w + e + sw + s + se;
-            let popcount = count_neighbors_popcount(
-                bit_pos, above, same, below,
-                left_above, left_same, left_below,
-                right_above, right_same, right_below,
-            );
-
-            assert_eq!(sum, popcount, "Mismatch at bit_pos={}", bit_pos);
-        }
-    }
-}
+mod tests;
 
 // =============================================================================
 // CANDID EXPORT

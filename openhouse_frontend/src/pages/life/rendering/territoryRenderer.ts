@@ -76,6 +76,15 @@ export function arePatternsInitialized(): boolean {
   return patternsInitialized;
 }
 
+// Timing stats for territory rendering
+let territoryStats = {
+  groupMs: 0,
+  fillMs: 0,
+  callCount: 0,
+  lastLog: Date.now(),
+  totalCells: 0,
+};
+
 /**
  * Render territory layer using pattern fills
  *
@@ -101,6 +110,8 @@ export function renderTerritoryLayer(
   height: number,
   time: number
 ): void {
+  const t0 = performance.now();
+
   // Group cells by owner
   const cellsByOwner: Map<number, Array<[number, number]>> = new Map();
 
@@ -118,6 +129,10 @@ export function renderTerritoryLayer(
       }
     }
   }
+
+  const tGroup = performance.now();
+  territoryStats.groupMs += tGroup - t0;
+  territoryStats.totalCells += width * height;
 
   // Render each owner's territory with ONE fill call
   for (const [owner, cells] of cellsByOwner) {
@@ -141,6 +156,22 @@ export function renderTerritoryLayer(
     ctx.fill(); // ONE GPU CALL
 
     ctx.restore();
+  }
+
+  const tFill = performance.now();
+  territoryStats.fillMs += tFill - tGroup;
+  territoryStats.callCount++;
+
+  // Log every 5 seconds
+  const now = Date.now();
+  if (now - territoryStats.lastLog > 5000) {
+    console.log('[PERF] Territory Render:', {
+      calls: territoryStats.callCount,
+      avgGroupMs: (territoryStats.groupMs / territoryStats.callCount).toFixed(1),
+      avgFillMs: (territoryStats.fillMs / territoryStats.callCount).toFixed(1),
+      avgCells: Math.round(territoryStats.totalCells / territoryStats.callCount),
+    });
+    territoryStats = { groupMs: 0, fillMs: 0, callCount: 0, lastLog: now, totalCells: 0 };
   }
 }
 

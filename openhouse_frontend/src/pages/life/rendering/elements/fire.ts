@@ -1,81 +1,84 @@
 import type { ElementRenderer } from '../types';
 import { seededRandom } from '../seededRandom';
-import { add3DEdges, hexToRgb, darken, rgbToCss } from '../colorUtils';
+import { add3DEdges, hexToRgb, lighten, darken, rgbToCss } from '../colorUtils';
 
 /**
  * FIRE ELEMENT
  *
- * Visual style: Aggressive, flickering - lava/flame inspired
- * Territory: Hot gradient with ember spots and flame wisps
+ * Visual style: Aggressive, flickering - Minecraft lava/fire block inspired
+ * Territory: Grid of fire blocks with flames and embers
  * Cells: Burning block with flame-like patterns
  */
 export const fireRenderer: ElementRenderer = {
   name: 'Fire',
 
   renderTerritoryTile(ctx, size, colors) {
-    const rng = seededRandom(3);
     const base = hexToRgb(colors.primary);
     const yellow = hexToRgb(colors.secondary);
 
-    // Radial gradient from bright center to darker edges
-    const gradient = ctx.createRadialGradient(
-      size * 0.5, size * 0.6, 0,
-      size * 0.5, size * 0.5, size * 0.7
-    );
-    gradient.addColorStop(0, rgbToCss(yellow, 0.35));
-    gradient.addColorStop(0.4, rgbToCss(base, 0.38));
-    gradient.addColorStop(1, rgbToCss(darken(base, 0.2), 0.32));
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, size, size);
+    // Render as grid of Minecraft-style fire blocks
+    const blockSize = 16;
+    const gridCount = Math.floor(size / blockSize);
 
-    // Ember spots (brighter at bottom, fading up) - more visible
-    const numEmbers = Math.floor(size / 5);
-    for (let i = 0; i < numEmbers; i++) {
-      const x = rng() * size;
-      const y = rng() * size;
-      const r = 3 + rng() * (size * 0.1);
-      const brightness = 1 - (y / size) * 0.4; // Brighter toward bottom
+    for (let row = 0; row < gridCount; row++) {
+      for (let col = 0; col < gridCount; col++) {
+        const x = col * blockSize;
+        const y = row * blockSize;
+        const seed = row * gridCount + col + 300;
+        const rng = seededRandom(seed);
 
-      ctx.fillStyle = rng() > 0.4 ? rgbToCss(base) : rgbToCss(yellow);
-      ctx.globalAlpha = (0.2 + rng() * 0.25) * brightness;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
+        // Gradient base - yellow core to orange edges
+        const gradient = ctx.createRadialGradient(
+          x + blockSize / 2, y + blockSize * 0.6, 0,
+          x + blockSize / 2, y + blockSize / 2, blockSize * 0.7
+        );
+        gradient.addColorStop(0, rgbToCss(yellow));
+        gradient.addColorStop(0.5, rgbToCss(base));
+        gradient.addColorStop(1, rgbToCss(darken(base, 0.2)));
+        ctx.fillStyle = gradient;
+        ctx.fillRect(x, y, blockSize, blockSize);
+
+        // Flame wisps rising up
+        const wispCount = 2 + Math.floor(rng() * 2);
+        for (let i = 0; i < wispCount; i++) {
+          const wx = x + blockSize * 0.2 + rng() * blockSize * 0.6;
+          const wy = y + blockSize;
+          const wh = blockSize * (0.3 + rng() * 0.4);
+          const ww = blockSize * 0.15;
+
+          ctx.fillStyle = rgbToCss(yellow, 0.7);
+          ctx.beginPath();
+          ctx.moveTo(wx - ww, wy);
+          ctx.lineTo(wx, wy - wh);
+          ctx.lineTo(wx + ww, wy);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        // Hot spots
+        const hotspotCount = 1 + Math.floor(rng() * 2);
+        for (let i = 0; i < hotspotCount; i++) {
+          const hx = x + rng() * blockSize;
+          const hy = y + blockSize * 0.4 + rng() * blockSize * 0.4;
+          ctx.fillStyle = `rgba(255, 255, 200, 0.6)`;
+          ctx.beginPath();
+          ctx.arc(hx, hy, blockSize * 0.1, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // 3D shading (darker edges for fire - charred look)
+        const lightColor = rgbToCss(yellow, 0.5);
+        const darkColor = rgbToCss(darken(base, 0.5));
+        const edgeWidth = 2;
+
+        ctx.fillStyle = lightColor;
+        ctx.fillRect(x, y, blockSize, edgeWidth);
+        ctx.fillRect(x, y, edgeWidth, blockSize);
+        ctx.fillStyle = darkColor;
+        ctx.fillRect(x, y + blockSize - edgeWidth, blockSize, edgeWidth);
+        ctx.fillRect(x + blockSize - edgeWidth, y, edgeWidth, blockSize);
+      }
     }
-
-    // Flame wisps rising upward
-    const numWisps = Math.floor(size / 12);
-    for (let i = 0; i < numWisps; i++) {
-      const startX = rng() * size;
-      const startY = size - rng() * (size * 0.3);
-      const endY = rng() * size * 0.4;
-      const width = size * 0.04 + rng() * size * 0.08;
-
-      const wispGradient = ctx.createLinearGradient(startX, startY, startX, endY);
-      wispGradient.addColorStop(0, rgbToCss(yellow, 0));
-      wispGradient.addColorStop(0.5, rgbToCss(yellow, 0.4));
-      wispGradient.addColorStop(1, `rgba(255, 255, 200, 0.5)`);
-
-      ctx.fillStyle = wispGradient;
-      ctx.beginPath();
-      ctx.moveTo(startX - width, startY);
-      ctx.quadraticCurveTo(startX, startY - size * 0.15, startX + width * 0.5, endY);
-      ctx.quadraticCurveTo(startX, startY - size * 0.1, startX - width, startY);
-      ctx.fill();
-    }
-
-    // Hot spots - bright white/yellow centers
-    const hotspotCount = Math.floor(size / 18);
-    for (let i = 0; i < hotspotCount; i++) {
-      const x = size * 0.2 + rng() * size * 0.6;
-      const y = size * 0.3 + rng() * size * 0.5;
-      ctx.fillStyle = `rgba(255, 255, 220, ${0.35 + rng() * 0.3})`;
-      ctx.beginPath();
-      ctx.arc(x, y, size * 0.025 + rng() * size * 0.035, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.globalAlpha = 1;
   },
 
   renderCellSprite(ctx, size, colors) {

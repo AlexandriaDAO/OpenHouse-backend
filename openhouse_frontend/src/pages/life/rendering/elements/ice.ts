@@ -1,72 +1,94 @@
 import type { ElementRenderer } from '../types';
 import { seededRandom } from '../seededRandom';
-import { add3DEdges } from '../colorUtils';
+import { add3DEdges, hexToRgb, lighten, darken, rgbToCss } from '../colorUtils';
 
 /**
  * ICE ELEMENT
  *
- * Visual style: Cold, crystalline
- * Territory: Hexagonal crystals, frost lines
+ * Visual style: Cold, crystalline - Minecraft ice block inspired
+ * Territory: Grid of ice blocks with crystal facets and frost
  * Cells: Frost cube with crystal facets
  */
 export const iceRenderer: ElementRenderer = {
   name: 'Ice',
 
   renderTerritoryTile(ctx, size, colors) {
-    const rng = seededRandom(6);
+    const base = hexToRgb(colors.primary);
+    const secondary = hexToRgb(colors.secondary);
 
-    // Base fill
-    ctx.fillStyle = colors.primary;
-    ctx.globalAlpha = 0.10;
-    ctx.fillRect(0, 0, size, size);
+    // Render as grid of Minecraft-style ice blocks
+    const blockSize = 16;
+    const gridCount = Math.floor(size / blockSize);
 
-    // Hexagonal crystals
-    const numHexes = Math.floor(size / 25);
-    ctx.strokeStyle = colors.secondary;
-    ctx.lineWidth = 1;
+    for (let row = 0; row < gridCount; row++) {
+      for (let col = 0; col < gridCount; col++) {
+        const x = col * blockSize;
+        const y = row * blockSize;
+        const seed = row * gridCount + col + 600;
+        const rng = seededRandom(seed);
 
-    for (let i = 0; i < numHexes; i++) {
-      const cx = rng() * size;
-      const cy = rng() * size;
-      const r = 4 + rng() * 8;
+        // Gradient base - frost effect
+        const gradient = ctx.createLinearGradient(x, y, x + blockSize, y + blockSize);
+        gradient.addColorStop(0, rgbToCss(lighten(base, 0.2)));
+        gradient.addColorStop(0.5, rgbToCss(base));
+        gradient.addColorStop(1, rgbToCss(secondary));
+        ctx.fillStyle = gradient;
+        ctx.fillRect(x, y, blockSize, blockSize);
 
-      ctx.globalAlpha = 0.06 + rng() * 0.06;
-      ctx.beginPath();
-      for (let j = 0; j < 6; j++) {
-        const angle = (Math.PI / 3) * j;
-        const x = cx + r * Math.cos(angle);
-        const y = cy + r * Math.sin(angle);
-        if (j === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
+        // Crystal facets
+        const facetCount = 2 + Math.floor(rng() * 2);
+        for (let i = 0; i < facetCount; i++) {
+          const fx = x + rng() * blockSize;
+          const fy = y + rng() * blockSize;
+          const fs = blockSize * (0.2 + rng() * 0.15);
+
+          ctx.fillStyle = rgbToCss(lighten(base, 0.25 + rng() * 0.15), 0.5);
+          ctx.beginPath();
+          ctx.moveTo(fx, fy - fs);
+          ctx.lineTo(fx + fs * 0.6, fy);
+          ctx.lineTo(fx, fy + fs * 0.7);
+          ctx.lineTo(fx - fs * 0.6, fy);
+          ctx.closePath();
+          ctx.fill();
         }
+
+        // Frost streaks
+        ctx.strokeStyle = `rgba(255, 255, 255, 0.5)`;
+        ctx.lineWidth = 1;
+        const streakCount = 2 + Math.floor(rng() * 2);
+        for (let i = 0; i < streakCount; i++) {
+          const sx = x + rng() * blockSize;
+          const sy = y + rng() * blockSize;
+          const len = blockSize * 0.3;
+          const angle = rng() * Math.PI;
+          ctx.beginPath();
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(sx + Math.cos(angle) * len, sy + Math.sin(angle) * len);
+          ctx.stroke();
+        }
+
+        // Glossy corner highlight
+        ctx.fillStyle = `rgba(255, 255, 255, 0.35)`;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + blockSize * 0.3, y);
+        ctx.lineTo(x, y + blockSize * 0.3);
+        ctx.closePath();
+        ctx.fill();
+
+        // 3D shading
+        const lightColor = `rgba(255, 255, 255, 0.4)`;
+        const darkColor = rgbToCss(darken(base, 0.3));
+        const edgeWidth = 2;
+
+        ctx.fillStyle = lightColor;
+        ctx.fillRect(x, y, blockSize, edgeWidth);
+        ctx.fillRect(x, y, edgeWidth, blockSize);
+        ctx.fillStyle = darkColor;
+        ctx.fillRect(x, y + blockSize - edgeWidth, blockSize, edgeWidth);
+        ctx.fillRect(x + blockSize - edgeWidth, y, edgeWidth, blockSize);
       }
-      ctx.closePath();
-      ctx.stroke();
     }
-
-    // Frost lines (jagged)
-    const numLines = Math.floor(size / 30);
-    ctx.globalAlpha = 0.06;
-    for (let i = 0; i < numLines; i++) {
-      const startX = rng() * size;
-      const startY = rng() * size;
-      const angle = rng() * Math.PI * 2;
-
-      ctx.beginPath();
-      ctx.moveTo(startX, startY);
-      let x = startX;
-      let y = startY;
-      for (let j = 0; j < 5; j++) {
-        x += Math.cos(angle) * (3 + rng() * 5);
-        y += Math.sin(angle) * (3 + rng() * 5);
-        ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    }
-
-    ctx.globalAlpha = 1;
   },
 
   renderCellSprite(ctx, size, colors) {
