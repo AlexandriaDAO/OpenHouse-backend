@@ -91,6 +91,7 @@ import { OSCILLATORS } from './oscillators';
 import { SPACESHIPS } from './spaceships';
 import { GUNS } from './guns';
 import { METHUSELAHS } from './methuselahs';
+import { BIG_BOMBS } from './bigBombs';
 import { PUFFERS } from './puffers';
 import { SPECIAL } from './special';
 
@@ -100,16 +101,18 @@ export { OSCILLATORS } from './oscillators';
 export { SPACESHIPS } from './spaceships';
 export { GUNS } from './guns';
 export { METHUSELAHS } from './methuselahs';
+export { BIG_BOMBS } from './bigBombs';
 export { PUFFERS } from './puffers';
 export { SPECIAL } from './special';
 
-// Combined pattern library - all 33 patterns
+// Combined pattern library - all 41 patterns
 export const PATTERNS = [
   ...STILL_LIFES,      // 5 patterns
   ...OSCILLATORS,      // 8 patterns
   ...SPACESHIPS,       // 7 patterns
   ...GUNS,             // 2 patterns
   ...METHUSELAHS,      // 4 patterns
+  ...BIG_BOMBS,        // 8 patterns - massive chaos generators
   ...PUFFERS,          // 3 patterns
   ...SPECIAL,          // 4 patterns
 ];
@@ -133,6 +136,7 @@ export const PATTERN_SUMMARY = {
     spaceship: SPACESHIPS.length,
     gun: GUNS.length,
     methuselah: METHUSELAHS.length,
+    bigBomb: BIG_BOMBS.length,
     puffer: PUFFERS.length,
     special: SPECIAL.length,
   },

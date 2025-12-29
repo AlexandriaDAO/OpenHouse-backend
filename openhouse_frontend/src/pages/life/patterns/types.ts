@@ -5,6 +5,7 @@ export type PatternCategory =
   | 'spaceship'    // Moving patterns - attack units
   | 'gun'          // Factories that produce spaceships
   | 'methuselah'   // Chaos generators - small patterns with long evolutions
+  | 'bigBomb'      // MASSIVE chaos generators - 10,000+ generation methuselahs
   | 'puffer'       // Trail makers - leave debris as they move
   | 'special';     // Unique interactions - reflectors, eaters, etc.
 
@@ -47,6 +48,12 @@ export const CATEGORY_INFO: Record<PatternCategory, { label: string; color: stri
     color: 'text-orange-400 border-orange-500/50 bg-orange-500/10',
     icon: '!',
     description: 'Chaos grenades',
+  },
+  bigBomb: {
+    label: 'Big Bombs',
+    color: 'text-rose-500 border-rose-500/50 bg-rose-500/10',
+    icon: '!!',
+    description: '10,000+ gen chaos',
   },
   stillLife: {
     label: 'Defense',

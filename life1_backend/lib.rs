@@ -1575,9 +1575,9 @@ fn join_game(base_x: i32, base_y: i32, desired_slot: u8) -> Result<u8, String> {
         }
     }
 
-    // Initialize 6x6 interior territory (walls excluded)
-    for dy in 1..7u16 {
-        for dx in 1..7u16 {
+    // Initialize 8x8 base territory (full base footprint)
+    for dy in 0..BASE_SIZE {
+        for dx in 0..BASE_SIZE {
             let x = base_x.wrapping_add(dx) & 511;
             let y = base_y.wrapping_add(dy) & 511;
             set_territory(slot, x, y);

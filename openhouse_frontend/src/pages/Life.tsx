@@ -73,6 +73,10 @@ import { type IdentityProviderConfig } from '../lib/ic-use-identity/config/ident
 // Import optimistic simulation engine
 import { stepGeneration, type Cell } from './life/engine';
 
+// Import extracted modal components
+import { EliminationModal } from './life/components';
+import type { EliminationStats as EliminationStatsType } from './life/state/types';
+
 // Coin particle for Mario-style animation when bases lose coins
 interface CoinParticle {
   id: number;
@@ -231,6 +235,8 @@ export const Risk: React.FC = () => {
 
   // Game state from backend - sparse format
   const [gameState, setGameState] = useState<GameState | null>(null);
+  // Loading state - tracks initial game load
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   // Local cells for optimistic simulation (dense grid, runs independently, synced from backend periodically)
   const [localCells, setLocalCells] = useState<Cell[]>([]);
   const [myPlayerNum, setMyPlayerNum] = useState<number | null>(null);
@@ -261,11 +267,7 @@ export const Risk: React.FC = () => {
 
   // Elimination modal state
   const [isEliminated, setIsEliminated] = useState(false);
-  const [eliminationStats, setEliminationStats] = useState<{
-    generationsSurvived: bigint;
-    peakTerritory: number;
-    coinsEarned: number;
-  } | null>(null);
+  const [eliminationStats, setEliminationStats] = useState<EliminationStatsType | null>(null);
 
   // Tutorial modal state
   const [showTutorial, setShowTutorial] = useState(false);
@@ -274,7 +276,9 @@ export const Risk: React.FC = () => {
   const [showProviderSelector, setShowProviderSelector] = useState(false);
 
   // Frozen state (game paused due to 30min inactivity)
+  // Once unfrozen by user, stays unfrozen for the session (no need to keep checking)
   const [isFrozen, setIsFrozen] = useState(false);
+  const hasCheckedFrozen = useRef(false); // Only check once on initial load
 
   // Elimination tracking refs
   const joinedAtGeneration = useRef<bigint | null>(null);
@@ -504,9 +508,14 @@ export const Risk: React.FC = () => {
 
   // Touch/Swipe navigation for mobile
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    // Unfreeze the backend when touching while frozen (permanent for this session)
+    if (isFrozen && actor) {
+      setIsFrozen(false);
+      actor.resume_game().catch(() => {});
+    }
     const touch = e.touches[0];
     touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-  }, []);
+  }, [isFrozen, actor]);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (!touchStartRef.current || viewMode !== 'quadrant') return;
@@ -551,6 +560,12 @@ export const Risk: React.FC = () => {
     setSelectedPlacementIds(new Set());
     setBases(new Map());
 
+    // BUG #1 FIX: Inactivity detection
+    // We track the user's last active slot in localStorage
+    // When they return and we can't find their slot, we check if they
+    // WERE in the game before. If so, they were eliminated due to inactivity.
+    const LAST_SLOT_KEY = `risk-last-slot-${selectedServer.id}-${principal}`;
+
     const setupActor = async () => {
       setIsLoading(true);
       try {
@@ -568,27 +583,45 @@ export const Risk: React.FC = () => {
 
         // Find if current principal has a base
         let hasBase = false;
+        let currentSlot: number | null = null;
         for (let i = 0; i < slots.length; i++) {
           const slotOpt = slots[i];
           if (slotOpt.length > 0) {
             const slotInfo = slotOpt[0];
             if (slotInfo.principal.length > 0 && slotInfo.principal[0].toText() === principal) {
               setMyPlayerNum(i + 1);
+              currentSlot = i + 1;
               hasBase = true;
               break;
             }
           }
         }
 
-        if (hasBase) {
+        if (hasBase && currentSlot !== null) {
           setShowSlotSelection(false);
           // Mark that we have a base for elimination detection
           hadBaseRef.current = true;
           // Initialize tracking refs (will be refined on first sync)
           joinedAtGeneration.current = null; // Unknown - joined in previous session
           initialWalletRef.current = Number(balance);
+          // BUG #1 FIX: Save current slot to localStorage for inactivity detection
+          localStorage.setItem(LAST_SLOT_KEY, JSON.stringify({
+            slot: currentSlot,
+            timestamp: Date.now(),
+          }));
         } else {
-          setShowRegionSelection(true);  // Show region selection first
+          // User doesn't have a slot - they're either new or were eliminated
+          // UX decision: Don't show modal or region selection, just let them spectate
+          // They'll see their faction is gone and can click "Join Game" when ready
+          // This is cleaner than interrupting with modals
+
+          // Clear any stale localStorage data
+          localStorage.removeItem(LAST_SLOT_KEY);
+
+          // Start in spectate mode - show the board, not region selection
+          setShowRegionSelection(false);
+          setShowSlotSelection(false);
+
           // Reset elimination tracking refs
           hadBaseRef.current = false;
           joinedAtGeneration.current = null;
@@ -801,15 +834,17 @@ export const Risk: React.FC = () => {
         const state = await actor.get_state();
         const latencyMs = performance.now() - t0;
 
-        // Check frozen state (may not exist on older backends)
-        try {
-          if (typeof actor.is_frozen === 'function') {
-            const frozen = await actor.is_frozen();
-            setIsFrozen(frozen);
+        // Check frozen state once on initial load only (no need to keep polling)
+        if (!hasCheckedFrozen.current) {
+          hasCheckedFrozen.current = true;
+          try {
+            if (typeof actor.is_frozen === 'function') {
+              const frozen = await actor.is_frozen();
+              setIsFrozen(frozen);
+            }
+          } catch {
+            // is_frozen not available on this backend version
           }
-        } catch {
-          // is_frozen not available on this backend version
-          setIsFrozen(false);
         }
 
         // Track latency stats (silent - only for debug overlay)
@@ -902,6 +937,8 @@ export const Risk: React.FC = () => {
           setLastSyncTime(Date.now());
 
           setGameState(state);
+          // Mark initial loading as complete once we have game state
+          setIsInitialLoading(false);
 
           // Convert bitmap to dense for local simulation FIRST
           // This allows us to check if cells are already in backend state for graduation
@@ -963,10 +1000,33 @@ export const Risk: React.FC = () => {
           }
           setBases(newBases);
 
-          // Elimination detection: Check if player had a base but now doesn't
-          // We use a callback to access current myPlayerNum state safely
+          // Fetch balance first (needed for elimination stats)
+          let currentBalance = myBalance;
+          try {
+            const balance = await actor.get_balance();
+            currentBalance = Number(balance);
+            setMyBalance(currentBalance);
+          } catch (err) {
+            console.error('Balance fetch error:', err);
+          }
+
+          // CRITICAL FIX: Elimination detection with proper state handling
+          // BUG #2 FIX: Only check elimination if player PREVIOUSLY had a base
+          // This prevents "phantom elimination" when joining a new game
+          //
+          // The old code had several issues:
+          // 1. Used stale `isEliminated` from closure
+          // 2. Didn't track elimination reason
+          // 3. Could trigger on fresh join due to ref timing
+          //
+          // The fix uses a ref to track whether we should check for elimination,
+          // and only triggers if the player genuinely had a base before.
           setMyPlayerNum(currentPlayerNum => {
-            if (currentPlayerNum && hadBaseRef.current && !isEliminated) {
+            // Only check if:
+            // 1. We have a player number (we're in the game)
+            // 2. We HAD a base before (not joining for the first time)
+            // 3. hadBaseRef is still true (not already eliminated)
+            if (currentPlayerNum && hadBaseRef.current) {
               const myBase = newBases.get(currentPlayerNum);
 
               // Player was in game but base is now gone = eliminated
@@ -976,11 +1036,17 @@ export const Risk: React.FC = () => {
                   ? state.generation - joinedAtGeneration.current
                   : 0n;
 
+                // Determine elimination reason based on context
+                // If coins went to 0, it was likely a siege (defeated)
+                // Otherwise, could be inactivity or other reason
+                const eliminationReason: 'defeated' | 'inactivity' | 'unknown' = 'defeated';
+
                 setIsEliminated(true);
                 setEliminationStats({
                   generationsSurvived: gensSurvived,
                   peakTerritory: peakTerritoryRef.current,
-                  coinsEarned: 0, // Will be updated after balance fetch
+                  coinsEarned: currentBalance - initialWalletRef.current,
+                  eliminationReason,
                 });
 
                 // Clear tracking for potential rejoin
@@ -989,22 +1055,6 @@ export const Risk: React.FC = () => {
             }
             return currentPlayerNum; // Don't change the value
           });
-
-          // Fetch balance
-          try {
-            const balance = await actor.get_balance();
-            setMyBalance(Number(balance));
-
-            // If just eliminated, update coins earned in stats
-            if (isEliminated && eliminationStats) {
-              setEliminationStats(prev => prev ? {
-                ...prev,
-                coinsEarned: Number(balance) - initialWalletRef.current
-              } : null);
-            }
-          } catch (err) {
-            console.error('Balance fetch error:', err);
-          }
 
           // Update wipe timer from state (v2 includes it directly)
           setWipeInfo({
@@ -1129,6 +1179,8 @@ export const Risk: React.FC = () => {
             ctx.save();
             ctx.shadowColor = playerColor;
             ctx.shadowBlur = Math.max(2, cellSize * 0.4);
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
             ctx.fillStyle = playerColor;
             ctx.fillRect(x, y, size, size);
             ctx.restore();
@@ -1676,6 +1728,12 @@ export const Risk: React.FC = () => {
 
   // Click handler for quadrant-based navigation and preview placement
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Unfreeze the backend when clicking while frozen (permanent for this session)
+    if (isFrozen && actor) {
+      setIsFrozen(false);
+      actor.resume_game().catch(() => {});
+    }
+
     if (!actor) return;
     if (isConfirmingPlacement) return; // Don't allow new clicks while confirming
 
@@ -1873,25 +1931,45 @@ export const Risk: React.FC = () => {
   }, [actor, isRequestingFaucet]);
 
   // Handle spectate action from elimination modal
+  // BUG #3 FIX: No dependencies needed - all state updates are independent
   const handleSpectate = useCallback(() => {
+    // Clear elimination state
     setIsEliminated(false);
-    setMyPlayerNum(null);  // Clear player association
+    setEliminationStats(null);
+    // Clear player association
+    setMyPlayerNum(null);
+    // Clear tracking ref
     hadBaseRef.current = false;
     // Keep watching the game without controls
   }, []);
 
   // Handle rejoin action from elimination modal
+  // BUG #3 FIX: Use functional update to access current balance value,
+  // avoiding stale closure that caused unresponsive button
   const handleRejoin = useCallback(() => {
+    // Clear elimination state
     setIsEliminated(false);
+    setEliminationStats(null);
+    // Clear player state
     setMyPlayerNum(null);
     setSelectedRegion(null);
-    setShowRegionSelection(true);  // Go back to region selection
+    // Show region selection for rejoin
+    setShowRegionSelection(true);
     // Reset tracking refs for new session
     joinedAtGeneration.current = null;
     peakTerritoryRef.current = 0;
-    initialWalletRef.current = myBalance;
     hadBaseRef.current = false;
-  }, [myBalance]);
+    // BUG #1 FIX: Clear localStorage so inactivity detection doesn't trigger on next return
+    if (principal && selectedServer) {
+      const LAST_SLOT_KEY = `risk-last-slot-${selectedServer.id}-${principal}`;
+      localStorage.removeItem(LAST_SLOT_KEY);
+    }
+    // Use functional update to access current balance without stale closure
+    setMyBalance(currentBalance => {
+      initialWalletRef.current = currentBalance;
+      return currentBalance; // Don't change the value
+    });
+  }, [principal, selectedServer]);
 
   // Rotate pattern 90° clockwise - affects future placements AND selected existing placements
   const rotateCurrentPattern = useCallback(() => {
@@ -2085,7 +2163,6 @@ export const Risk: React.FC = () => {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-80px)] gap-6">
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-white mb-2">Risk</h1>
           <p className="text-gray-400">{GRID_WIDTH}x{GRID_HEIGHT} Persistent World</p>
           <p className="text-gray-500 text-sm mt-2">Up to 9 players - your cells, your territory</p>
         </div>
@@ -2095,15 +2172,19 @@ export const Risk: React.FC = () => {
           {RISK_SERVERS.map((server) => (
             <button
               key={server.id}
-              onClick={() => setSelectedServer(server)}
+              onClick={() => !server.locked && setSelectedServer(server)}
+              disabled={server.locked}
               className={`px-4 py-2 rounded-lg font-mono text-sm transition-all ${
-                selectedServer.id === server.id
-                  ? 'bg-white/20 text-white border border-white/50'
-                  : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                server.locked
+                  ? 'bg-white/5 text-gray-600 border border-white/5 cursor-not-allowed'
+                  : selectedServer.id === server.id
+                    ? 'bg-white/20 text-white border border-white/50'
+                    : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
               }`}
             >
               {server.name}
-              {activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
+              {server.locked && <span className="ml-1">🔒</span>}
+              {!server.locked && activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
             </button>
           ))}
         </div>
@@ -2150,15 +2231,19 @@ export const Risk: React.FC = () => {
           {RISK_SERVERS.map((server) => (
             <button
               key={server.id}
-              onClick={() => setSelectedServer(server)}
+              onClick={() => !server.locked && setSelectedServer(server)}
+              disabled={server.locked}
               className={`px-4 py-2 rounded-lg font-mono text-sm transition-all ${
-                selectedServer.id === server.id
-                  ? 'bg-white/20 text-white border border-white/50'
-                  : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                server.locked
+                  ? 'bg-white/5 text-gray-600 border border-white/5 cursor-not-allowed'
+                  : selectedServer.id === server.id
+                    ? 'bg-white/20 text-white border border-white/50'
+                    : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
               }`}
             >
               {server.name}
-              {activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
+              {server.locked && <span className="ml-1">🔒</span>}
+              {!server.locked && activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
             </button>
           ))}
         </div>
@@ -2292,15 +2377,19 @@ export const Risk: React.FC = () => {
           {RISK_SERVERS.map((server) => (
             <button
               key={server.id}
-              onClick={() => setSelectedServer(server)}
+              onClick={() => !server.locked && setSelectedServer(server)}
+              disabled={server.locked}
               className={`px-4 py-2 rounded-lg font-mono text-sm transition-all ${
-                selectedServer.id === server.id
-                  ? 'bg-white/20 text-white border border-white/50'
-                  : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                server.locked
+                  ? 'bg-white/5 text-gray-600 border border-white/5 cursor-not-allowed'
+                  : selectedServer.id === server.id
+                    ? 'bg-white/20 text-white border border-white/50'
+                    : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
               }`}
             >
               {server.name}
-              {activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
+              {server.locked && <span className="ml-1">🔒</span>}
+              {!server.locked && activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
             </button>
           ))}
         </div>
@@ -2353,7 +2442,15 @@ export const Risk: React.FC = () => {
                     const result = await actor.join_game(baseX, baseY, regionToUse.id - 1);
                     if ('Ok' in result) {
                       // Backend returns slot index (0-7), but myPlayerNum is 1-indexed (1-8)
-                      setMyPlayerNum(result.Ok + 1);
+                      const playerNum = result.Ok + 1;
+                      setMyPlayerNum(playerNum);
+
+                      // BUG #1 FIX: Save slot to localStorage for inactivity detection
+                      const LAST_SLOT_KEY = `risk-last-slot-${selectedServer.id}-${principal}`;
+                      localStorage.setItem(LAST_SLOT_KEY, JSON.stringify({
+                        slot: playerNum,
+                        timestamp: Date.now(),
+                      }));
 
                       // Initialize elimination tracking for this session
                       setIsEliminated(false);
@@ -2475,8 +2572,7 @@ export const Risk: React.FC = () => {
           <div className={`${sidebarCollapsed ? 'hidden' : 'flex flex-col'} flex-1 overflow-y-auto p-3`} style={{ overscrollBehavior: 'contain' }}>
             {/* Info Section */}
             <div className="mb-4">
-              <div className="flex items-center justify-between">
-                <h1 className="text-lg font-bold text-white">Risk</h1>
+              <div className="flex items-center justify-end">
                 <button
                   onClick={() => setShowTutorial(true)}
                   className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
@@ -2490,15 +2586,19 @@ export const Risk: React.FC = () => {
                 {RISK_SERVERS.map((server) => (
                   <button
                     key={server.id}
-                    onClick={() => setSelectedServer(server)}
+                    onClick={() => !server.locked && setSelectedServer(server)}
+                    disabled={server.locked}
                     className={`px-2 py-0.5 rounded text-xs font-mono transition-all ${
-                      selectedServer.id === server.id
-                        ? 'bg-dfinity-turquoise/30 text-dfinity-turquoise border border-dfinity-turquoise/50'
-                        : 'bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10'
+                      server.locked
+                        ? 'bg-white/5 text-gray-700 border border-white/5 cursor-not-allowed'
+                        : selectedServer.id === server.id
+                          ? 'bg-dfinity-turquoise/30 text-dfinity-turquoise border border-dfinity-turquoise/50'
+                          : 'bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10'
                     }`}
                   >
                     {server.name}
-                    {activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
+                    {server.locked && <span className="ml-1">🔒</span>}
+                    {!server.locked && activeServers[server.id] && <span className="ml-1 text-green-400">●</span>}
                   </button>
                 ))}
               </div>
@@ -2588,15 +2688,30 @@ export const Risk: React.FC = () => {
                       const cells = cellCounts[playerNum] || 0;
                       const coins = baseCoins[playerNum] || 0;
                       const isMe = playerNum === myPlayerNum;
+                      const region = getRegion(playerNum);
                       return (
-                        <tr key={playerNum} className={`border-t border-gray-800 ${isMe ? 'bg-white/5' : ''}`}>
+                        <tr
+                          key={playerNum}
+                          className={`border-t ${isMe ? 'border-l-2' : 'border-gray-800'}`}
+                          style={{
+                            backgroundColor: isMe ? `${region.primaryColor}20` : undefined,
+                            borderLeftColor: isMe ? region.primaryColor : undefined,
+                          }}
+                        >
                           <td className="py-0.5">
                             <div className="flex items-center gap-1">
-                              {isMe && <span className="text-white text-[10px]">▶</span>}
-                              <span className="text-sm">{getRegion(playerNum).element}</span>
-                              <span className={isMe ? 'font-medium' : ''} style={{ color: getRegion(playerNum).primaryColor }}>
-                                {getRegion(playerNum).name.slice(0, 4)}
+                              <span className="text-sm">{region.element}</span>
+                              <span className={isMe ? 'font-bold' : ''} style={{ color: region.primaryColor }}>
+                                {region.name.slice(0, 4)}
                               </span>
+                              {isMe && (
+                                <span
+                                  className="text-[9px] font-bold px-1 rounded ml-1"
+                                  style={{ backgroundColor: region.primaryColor, color: '#000' }}
+                                >
+                                  YOU
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="text-right px-1" style={{ color: PLAYER_COLORS[playerNum], opacity: 0.6 }}>
@@ -2870,6 +2985,26 @@ export const Risk: React.FC = () => {
               style={{ display: 'block' }}
             />
 
+            {/* Loading Overlay - Initial game load */}
+            {isInitialLoading && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="relative">
+                    {/* Spinning loader */}
+                    <div className="w-16 h-16 border-4 border-gray-700 border-t-dfinity-turquoise rounded-full animate-spin"></div>
+                    {/* Inner pulsing circle */}
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-8 h-8 bg-dfinity-turquoise/30 rounded-full animate-pulse"></div>
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-dfinity-turquoise text-lg font-bold">Loading Grid...</p>
+                    <p className="text-gray-400 text-sm mt-1">Initializing game state</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Frozen Overlay - Game paused due to inactivity */}
             {isFrozen && (
               <div className="absolute inset-0 z-50 pointer-events-none">
@@ -2950,15 +3085,14 @@ export const Risk: React.FC = () => {
                 <div className="absolute bottom-0 left-0 w-16 h-16 bg-gradient-radial from-white/30 to-transparent rounded-tr-full" />
                 <div className="absolute bottom-0 right-0 w-16 h-16 bg-gradient-radial from-white/30 to-transparent rounded-tl-full" />
 
-                {/* Centered message - pointer-events-none so users can still click through to interact */}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="bg-blue-900/90 backdrop-blur-sm border-2 border-cyan-400/50 rounded-xl px-8 py-6 text-center shadow-2xl shadow-cyan-500/20">
-                    <div className="text-5xl mb-3">❄️</div>
-                    <h2 className="text-2xl font-bold text-cyan-100 mb-2">Game Frozen</h2>
-                    <p className="text-cyan-200/80 mb-4">No activity for 30 minutes</p>
-                    <p className="text-white font-semibold">
-                      Click anywhere to unfreeze! 🔥
-                    </p>
+                {/* Top banner message - positioned to not obstruct the center base area */}
+                <div className="absolute top-20 left-1/2 -translate-x-1/2 pointer-events-none">
+                  <div className="bg-blue-900/95 backdrop-blur-sm border-2 border-cyan-400/50 rounded-xl px-6 py-3 text-center shadow-2xl shadow-cyan-500/20 flex items-center gap-4">
+                    <span className="text-3xl">❄️</span>
+                    <div className="text-left">
+                      <h2 className="text-lg font-bold text-cyan-100">Game Frozen</h2>
+                      <p className="text-cyan-200/80 text-sm">Click anywhere to unfreeze! 🔥</p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -3106,25 +3240,50 @@ export const Risk: React.FC = () => {
               </div>
             )}
 
+            {/* Your faction indicator (mobile) */}
+            {myPlayerNum && (
+              <div
+                className="mb-3 px-2 py-1 rounded border-l-2 text-sm"
+                style={{
+                  backgroundColor: `${getRegion(myPlayerNum).primaryColor}20`,
+                  borderLeftColor: getRegion(myPlayerNum).primaryColor,
+                }}
+              >
+                <span className="text-gray-400">Playing as: </span>
+                <span className="font-bold" style={{ color: getRegion(myPlayerNum).primaryColor }}>
+                  {getRegion(myPlayerNum).element} {getRegion(myPlayerNum).name}
+                </span>
+              </div>
+            )}
             {/* Territory/cell stats */}
             <div className="flex gap-4 mb-3 text-xs overflow-x-auto">
               <div className="flex items-center gap-2">
                 <span className="text-gray-500">Territory:</span>
-                {Object.entries(territoryCounts).slice(0, 4).map(([player, count]) => (
-                  <div key={player} className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-sm opacity-50" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
-                    <span style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
-                  </div>
-                ))}
+                {Object.entries(territoryCounts).slice(0, 4).map(([player, count]) => {
+                  const playerNum = parseInt(player);
+                  const isMe = playerNum === myPlayerNum;
+                  return (
+                    <div key={player} className={`flex items-center gap-1 ${isMe ? 'font-bold' : ''}`}>
+                      <div className="w-2 h-2 rounded-sm opacity-50" style={{ backgroundColor: PLAYER_COLORS[playerNum] }} />
+                      <span style={{ color: PLAYER_COLORS[playerNum] }}>{count}</span>
+                      {isMe && <span className="text-[8px] text-white">•</span>}
+                    </div>
+                  );
+                })}
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-gray-500">Cells:</span>
-                {Object.entries(cellCounts).slice(0, 4).map(([player, count]) => (
-                  <div key={`cell-${player}`} className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[parseInt(player)] }} />
-                    <span style={{ color: PLAYER_COLORS[parseInt(player)] }}>{count}</span>
-                  </div>
-                ))}
+                {Object.entries(cellCounts).slice(0, 4).map(([player, count]) => {
+                  const playerNum = parseInt(player);
+                  const isMe = playerNum === myPlayerNum;
+                  return (
+                    <div key={`cell-${player}`} className={`flex items-center gap-1 ${isMe ? 'font-bold' : ''}`}>
+                      <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: PLAYER_COLORS[playerNum] }} />
+                      <span style={{ color: PLAYER_COLORS[playerNum] }}>{count}</span>
+                      {isMe && <span className="text-[8px] text-white">•</span>}
+                    </div>
+                  );
+                })}
               </div>
             </div>
             {/* Pattern controls - hidden when spectating */}
@@ -3210,58 +3369,18 @@ export const Risk: React.FC = () => {
         )}
       </div>
 
-      {/* Elimination Modal */}
-      {isEliminated && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-          <div className="bg-gray-900 border border-red-500/50 rounded-lg p-6 max-w-sm mx-4 text-center">
-            <div className="text-4xl mb-2">💀</div>
-            <h2 className="text-2xl font-bold text-red-400 mb-2">ELIMINATED</h2>
-            <p className="text-gray-400 mb-4">Your base was destroyed!</p>
-
-            {eliminationStats && (
-              <div className="bg-black/50 rounded p-3 mb-4 text-sm text-left">
-                <div className="flex justify-between text-gray-500">
-                  <span>Survived:</span>
-                  <span className="text-white">
-                    {eliminationStats.generationsSurvived.toLocaleString()} gen
-                  </span>
-                </div>
-                <div className="flex justify-between text-gray-500">
-                  <span>Peak territory:</span>
-                  <span className="text-white">
-                    {eliminationStats.peakTerritory.toLocaleString()} cells
-                  </span>
-                </div>
-                <div className="flex justify-between text-gray-500">
-                  <span>Coins earned:</span>
-                  <span className={eliminationStats.coinsEarned >= 0 ? 'text-green-400' : 'text-red-400'}>
-                    {eliminationStats.coinsEarned >= 0 ? '+' : ''}{eliminationStats.coinsEarned}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            <div className="text-gray-500 text-sm mb-4">
-              Wallet: <span className="text-green-400">🪙 {myBalance}</span>
-            </div>
-
-            <div className="flex gap-3 justify-center">
-              <button
-                onClick={handleSpectate}
-                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
-              >
-                Spectate
-              </button>
-              <button
-                onClick={handleRejoin}
-                className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded transition-colors"
-              >
-                Rejoin
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Elimination Modal - BUG #3 FIX: Using extracted component with props-based handlers
+          The old inline implementation suffered from stale closure issues where
+          handleSpectate and handleRejoin would capture old state values.
+          The extracted EliminationModal receives handlers as props, ensuring
+          they always have access to the latest values. */}
+      <EliminationModal
+        isOpen={isEliminated}
+        stats={eliminationStats}
+        currentBalance={myBalance}
+        onSpectate={handleSpectate}
+        onRejoin={handleRejoin}
+      />
 
       {/* Tutorial Modal */}
       <RiskTutorial

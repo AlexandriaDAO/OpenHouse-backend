@@ -1,5 +1,8 @@
 // Procedural texture generation for territory cells
 // Creates animated, randomized visual elements based on elemental themes
+// Uses REGIONS from lifeConstants to match main game faction colors
+
+import { REGIONS, getRegion } from '../../lifeConstants';
 
 // Simple hash function for deterministic randomness per cell
 function hashCell(x: number, y: number, seed: number = 0): number {
@@ -30,26 +33,36 @@ export interface ElementConfig {
   pulseAmount: number;       // How much circles grow/shrink (0-1)
 }
 
-// Default configs for player and enemy (can be extended with REGIONS later)
-export const PLAYER_ELEMENT: ElementConfig = {
-  primaryColor: 'rgba(34, 139, 34, 0.25)',    // Forest green
-  secondaryColor: 'rgba(139, 69, 19, 0.2)',   // Brown
-  circleCount: 4,
-  minRadius: 0.15,
-  maxRadius: 0.4,
-  animationSpeed: 0.3,
-  pulseAmount: 0.15,
-};
+// Helper to convert hex color to rgba with alpha
+function hexToRgba(hex: string, alpha: number): string {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (result) {
+    const r = parseInt(result[1], 16);
+    const g = parseInt(result[2], 16);
+    const b = parseInt(result[3], 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  return `rgba(100, 100, 100, ${alpha})`;
+}
 
-export const ENEMY_ELEMENT: ElementConfig = {
-  primaryColor: 'rgba(255, 69, 0, 0.25)',     // Orange red
-  secondaryColor: 'rgba(255, 215, 0, 0.2)',   // Gold
-  circleCount: 4,
-  minRadius: 0.15,
-  maxRadius: 0.35,
-  animationSpeed: 0.4,
-  pulseAmount: 0.2,
-};
+// Create element config from a region ID - derives colors from REGIONS
+export function getElementConfigForRegion(regionId: number): ElementConfig {
+  const region = getRegion(regionId);
+  return {
+    primaryColor: hexToRgba(region.primaryColor, 0.25),
+    secondaryColor: hexToRgba(region.secondaryColor || region.primaryColor, 0.2),
+    circleCount: 4,
+    minRadius: 0.15,
+    maxRadius: 0.35,
+    animationSpeed: 0.3 + (regionId % 3) * 0.05,  // Slight variation by region
+    pulseAmount: 0.15 + (regionId % 2) * 0.05,
+  };
+}
+
+// Default configs derived from REGIONS for backwards compatibility
+// Player = Region 1 (Earth), Enemy = Region 2 (Water) - matches PLAYER_ID/ENEMY_ID in types.ts
+export const PLAYER_ELEMENT: ElementConfig = getElementConfigForRegion(1);
+export const ENEMY_ELEMENT: ElementConfig = getElementConfigForRegion(2);
 
 // Parse a color string and return rgba components
 function parseColor(color: string): { r: number; g: number; b: number; a: number } {
@@ -162,11 +175,10 @@ export function drawProceduralTerritory(
       const pixelX = x * cellSize;
       const pixelY = y * cellSize;
 
-      // Draw background (slightly darker base)
-      const baseAlpha = territory === playerId ? 0.08 : 0.08;
-      ctx.fillStyle = territory === playerId
-        ? `rgba(34, 139, 34, ${baseAlpha})`
-        : `rgba(255, 69, 0, ${baseAlpha})`;
+      // Draw background using region colors
+      const baseAlpha = 0.08;
+      const region = getRegion(territory);
+      ctx.fillStyle = hexToRgba(region.primaryColor, baseAlpha);
       ctx.fillRect(pixelX, pixelY, cellSize, cellSize);
 
       // Draw procedural elements
@@ -177,6 +189,7 @@ export function drawProceduralTerritory(
 
 // Simpler version: just draw variation without full procedural circles
 // Uses color modulation for a more subtle effect
+// Now uses REGIONS colors for consistency with main game
 export function drawVariedTerritory(
   ctx: CanvasRenderingContext2D,
   cells: { territory: number }[][],
@@ -197,7 +210,6 @@ export function drawVariedTerritory(
 
       // Get deterministic variation for this cell
       const hash = hashCell(x, y, 0);
-      const hash2 = hashCell(x, y, 1);
 
       // Time-based variation
       const timeFactor = Math.sin(time * 0.3 + hash * Math.PI * 2) * 0.5 + 0.5;
@@ -206,22 +218,9 @@ export function drawVariedTerritory(
       const baseAlpha = 0.1 + hash * 0.08;
       const animatedAlpha = baseAlpha + timeFactor * 0.04;
 
-      if (territory === playerId) {
-        // Green with brown undertones
-        const greenAmount = 0.7 + hash2 * 0.3;
-        const r = Math.round(34 + (139 - 34) * (1 - greenAmount));
-        const g = Math.round(139 * greenAmount + 69 * (1 - greenAmount));
-        const b = Math.round(34 * greenAmount + 19 * (1 - greenAmount));
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${animatedAlpha})`;
-      } else {
-        // Red with gold undertones
-        const redAmount = 0.6 + hash2 * 0.4;
-        const r = 255;
-        const g = Math.round(69 * redAmount + 215 * (1 - redAmount));
-        const b = Math.round(redAmount * 0);
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${animatedAlpha})`;
-      }
-
+      // Get region colors from REGIONS (matches main game)
+      const region = getRegion(territory);
+      ctx.fillStyle = hexToRgba(region.primaryColor, animatedAlpha);
       ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
     }
   }

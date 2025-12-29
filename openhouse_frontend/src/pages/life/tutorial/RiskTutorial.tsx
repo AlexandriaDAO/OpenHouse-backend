@@ -19,7 +19,19 @@ import {
 } from './types';
 import { stepGenerationSinglePlayer, stepGenerationMultiplayer, checkTerritoryConnectivity, applyTerritoryCutoff, applyWiper } from './simulation';
 import { TUTORIAL_SLIDES } from './slides';
-import { drawProceduralTerritory, PLAYER_ELEMENT, ENEMY_ELEMENT } from './proceduralTexture';
+import { drawProceduralTerritory, PLAYER_ELEMENT, ENEMY_ELEMENT, getElementConfigForRegion } from './proceduralTexture';
+
+// Helper to convert hex color to rgba with custom alpha
+function hexToRgba(hex: string, alpha: number): string {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (result) {
+    const r = parseInt(result[1], 16);
+    const g = parseInt(result[2], 16);
+    const b = parseInt(result[3], 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  return `rgba(100, 100, 100, ${alpha})`;
+}
 
 interface RiskTutorialProps {
   isOpen: boolean;
@@ -518,7 +530,7 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
         } else {
           // Fade to transparent
           const alpha = 0.15 * (1 - (fadeProgress - 0.3) / 0.7);
-          ctx.fillStyle = `rgba(57, 255, 20, ${alpha})`;
+          ctx.fillStyle = hexToRgba(PLAYER_COLOR, alpha);
         }
         ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
       }
@@ -545,7 +557,7 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
     const isAttackStrategySlide = currentSlideData?.id === 'attack-strategy';
     if (showHint && !hasPlaced && currentSlideData?.implemented) {
       const pulseAlpha = 0.3 + 0.2 * Math.sin(Date.now() / 300);
-      ctx.fillStyle = `rgba(57, 255, 20, ${pulseAlpha})`;
+      ctx.fillStyle = hexToRgba(PLAYER_COLOR, pulseAlpha);
 
       if (isAttackStrategySlide && slideConfig.enemyBase) {
         // For attack-strategy, highlight 2x2 area just below enemy base wall
@@ -668,8 +680,8 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
         const centerY = spawnAnimation.y * cellSize + cellSize / 2;
 
         const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
-        gradient.addColorStop(0, `rgba(57, 255, 20, ${alpha})`);
-        gradient.addColorStop(1, 'rgba(57, 255, 20, 0)');
+        gradient.addColorStop(0, hexToRgba(PLAYER_COLOR, alpha));
+        gradient.addColorStop(1, hexToRgba(PLAYER_COLOR, 0));
 
         ctx.fillStyle = gradient;
         ctx.beginPath();
@@ -690,7 +702,7 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
     // Direction arrow for glider movement (when animating)
     if (hasPlaced && isAnimating && !slideConfig.enemyBase && currentSlideData?.id === 'place-cells') {
       // Draw a small arrow indicating down-right movement
-      ctx.strokeStyle = 'rgba(57, 255, 20, 0.7)';
+      ctx.strokeStyle = hexToRgba(PLAYER_COLOR, 0.7);
       ctx.lineWidth = 2;
       ctx.lineCap = 'round';
 
@@ -821,7 +833,7 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
         const baseQuadY = bqy * quadrantSize;
         
         ctx.font = 'bold 10px sans-serif';
-        ctx.fillStyle = 'rgba(57, 255, 20, 0.6)';
+        ctx.fillStyle = hexToRgba(PLAYER_COLOR, 0.6);
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
         ctx.fillText('SAFE', baseQuadX + 4, baseQuadY + 4);
@@ -830,7 +842,7 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
 
     // Attack direction arrow for attack-territory slide (diagonal up-left toward enemy)
     if (hasPlaced && isAnimating && slideConfig.enemyBase && currentSlideData?.id === 'attack-territory') {
-      ctx.strokeStyle = 'rgba(57, 255, 20, 0.7)';
+      ctx.strokeStyle = hexToRgba(PLAYER_COLOR, 0.7);
       ctx.lineWidth = 2;
       ctx.lineCap = 'round';
 

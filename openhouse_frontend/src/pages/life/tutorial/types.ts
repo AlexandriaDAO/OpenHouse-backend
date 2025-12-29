@@ -1,19 +1,22 @@
 // Tutorial types and constants
+// Uses same colors as main game from REGIONS/PLAYER_COLORS
 
-import { PLAYER_COLORS, BASE_SIZE } from '../../lifeConstants';
+import { PLAYER_COLORS, TERRITORY_COLORS, BASE_SIZE, REGIONS } from '../../lifeConstants';
 
 // Grid size for tutorial demonstrations
 export const TUTORIAL_GRID_SIZE = 24;
 
-// Player IDs
-export const PLAYER_ID = 1;
-export const ENEMY_ID = 2;
+// Player IDs - must match region IDs for color consistency
+export const PLAYER_ID = 1;  // Earth faction
+export const ENEMY_ID = 2;   // Water faction
 
-// Colors
-export const PLAYER_COLOR = PLAYER_COLORS[1];  // Green
-export const ENEMY_COLOR = PLAYER_COLORS[2];   // Red
-export const PLAYER_TERRITORY_COLOR = 'rgba(57, 255, 20, 0.15)';
-export const ENEMY_TERRITORY_COLOR = 'rgba(255, 57, 57, 0.15)';
+// Cell colors - derived from REGIONS via PLAYER_COLORS
+export const PLAYER_COLOR = PLAYER_COLORS[PLAYER_ID];  // Earth brown (#8B4513)
+export const ENEMY_COLOR = PLAYER_COLORS[ENEMY_ID];    // Water blue (#00BFFF)
+
+// Territory colors - derived from REGIONS via TERRITORY_COLORS
+export const PLAYER_TERRITORY_COLOR = TERRITORY_COLORS[PLAYER_ID];
+export const ENEMY_TERRITORY_COLOR = TERRITORY_COLORS[ENEMY_ID];
 
 // Cell state with alive status and owner
 export interface TutorialCell {
