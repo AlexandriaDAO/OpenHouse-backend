@@ -1,216 +1,304 @@
-import React, { useEffect, useRef, useState } from 'react';
-
-// Animation timing constants
-const TIMING = {
-  MIN_SPIN_DURATION: 2000,    // Minimum time ball spins (looks bad if too fast)
-  LANDING_DURATION: 4000,     // Time for ball to decelerate to position
-  RESULT_DISPLAY: 5000,       // Time to show results before reset
-  HIGHLIGHT_PULSE_MS: 1500,   // Pulse animation duration
-};
+import React, { useMemo } from 'react';
+import { useRouletteAnimation } from './useRouletteAnimation';
+import {
+  WHEEL_NUMBERS,
+  SEGMENTS,
+  SEGMENT_ANGLE,
+  DIMENSIONS as D,
+  COLORS,
+  getPocketColor,
+  isRed,
+} from './rouletteConstants';
 
 interface RouletteWheelProps {
   winningNumber: number | null;
-  isWaitingForResult: boolean;  // Ball spins fast, no target yet
-  isLanding: boolean;           // Ball decelerating to target
+  isWaitingForResult: boolean;
+  isLanding: boolean;
   onAnimationComplete?: () => void;
 }
 
-// European roulette wheel order (clockwise)
-const WHEEL_NUMBERS = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
-const RED_NUMBERS = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
+// Convert polar to cartesian coordinates
+const polarToCartesian = (angle: number, radius: number): [number, number] => {
+  const rad = (angle - 90) * (Math.PI / 180); // Start from top
+  return [
+    D.CENTER + radius * Math.cos(rad),
+    D.CENTER + radius * Math.sin(rad),
+  ];
+};
 
-// Calculate precise ball position for a winning number
-const calculateBallPosition = (winningNumber: number): number => {
-  const index = WHEEL_NUMBERS.indexOf(winningNumber);
-  const degreesPerSlot = 360 / 37;
-  // Add multiple full rotations for visual effect (5 full spins + target position)
-  const totalRotation = (5 * 360) + (index * degreesPerSlot);
-  return totalRotation;
+// Create SVG path for a pie segment
+const createSegmentPath = (index: number, innerR: number, outerR: number): string => {
+  const startAngle = index * SEGMENT_ANGLE;
+  const endAngle = startAngle + SEGMENT_ANGLE;
+
+  const [x1, y1] = polarToCartesian(startAngle, outerR);
+  const [x2, y2] = polarToCartesian(endAngle, outerR);
+  const [x3, y3] = polarToCartesian(endAngle, innerR);
+  const [x4, y4] = polarToCartesian(startAngle, innerR);
+
+  return `M ${x1} ${y1} A ${outerR} ${outerR} 0 0 1 ${x2} ${y2} L ${x3} ${y3} A ${innerR} ${innerR} 0 0 0 ${x4} ${y4} Z`;
 };
 
 export const RouletteWheel: React.FC<RouletteWheelProps> = ({
   winningNumber,
   isWaitingForResult,
   isLanding,
-  onAnimationComplete
+  onAnimationComplete,
 }) => {
-  const wheelRef = useRef<HTMLDivElement>(null);
-  const ballTrackRef = useRef<HTMLDivElement>(null);
-  const [showResult, setShowResult] = useState(false);
-  const [finalRotation, setFinalRotation] = useState<number | null>(null);
+  const { ballAngle, wheelAngle, ballRadius, showResult } = useRouletteAnimation({
+    winningNumber,
+    isSpinning: isWaitingForResult,
+    isLanding,
+    onComplete: onAnimationComplete,
+  });
 
-  // Handle waiting phase - continuous fast spinning
-  useEffect(() => {
-    if (isWaitingForResult && ballTrackRef.current && wheelRef.current) {
-      // Start continuous fast spinning
-      wheelRef.current.style.transition = 'none';
-      wheelRef.current.style.animation = 'wheelSpin 3s linear infinite';
-      ballTrackRef.current.style.transition = 'none';
-      ballTrackRef.current.style.animation = 'ballSpin 0.5s linear infinite';
-      setShowResult(false);
-      setFinalRotation(null);
-    }
-  }, [isWaitingForResult]);
+  // Pre-compute segment paths (static, won't change)
+  const segments = useMemo(() =>
+    WHEEL_NUMBERS.map((num, i) => ({
+      num,
+      path: createSegmentPath(i, D.POCKET_INNER, D.POCKET_OUTER),
+      color: getPocketColor(num),
+      textAngle: i * SEGMENT_ANGLE + SEGMENT_ANGLE / 2,
+      textRadius: (D.POCKET_INNER + D.POCKET_OUTER) / 2,
+    })),
+  []);
 
-  // Handle landing phase - decelerate to winning position
-  useEffect(() => {
-    if (isLanding && winningNumber !== null && ballTrackRef.current && wheelRef.current) {
-      const targetRotation = calculateBallPosition(winningNumber);
-      setFinalRotation(targetRotation);
+  // Pre-compute fret lines
+  const frets = useMemo(() =>
+    Array.from({ length: SEGMENTS }, (_, i) => {
+      const angle = i * SEGMENT_ANGLE;
+      const [x1, y1] = polarToCartesian(angle, D.POCKET_INNER);
+      const [x2, y2] = polarToCartesian(angle, D.POCKET_OUTER);
+      return { x1, y1, x2, y2 };
+    }),
+  []);
 
-      // Stop wheel spinning animation
-      wheelRef.current.style.animation = 'none';
+  // Ball position
+  const ballY = D.CENTER - D.BALL_TRACK + ((100 - ballRadius) * 0.2);
 
-      // Ball: transition from current spin to final position
-      ballTrackRef.current.style.animation = 'none';
-      // Small delay to let animation: none take effect
-      requestAnimationFrame(() => {
-        if (ballTrackRef.current) {
-          ballTrackRef.current.style.transition = `transform ${TIMING.LANDING_DURATION}ms cubic-bezier(0.17, 0.67, 0.12, 0.99)`;
-          ballTrackRef.current.style.transform = `rotate(-${targetRotation}deg)`;
-        }
-      });
-
-      // Show result after landing
-      const resultTimer = setTimeout(() => {
-        setShowResult(true);
-        onAnimationComplete?.();
-      }, TIMING.LANDING_DURATION);
-
-      return () => clearTimeout(resultTimer);
-    }
-  }, [isLanding, winningNumber, onAnimationComplete]);
-
-  // Reset when not spinning
-  useEffect(() => {
-    if (!isWaitingForResult && !isLanding && wheelRef.current && ballTrackRef.current) {
-      // Only reset if we're truly idle (no winning number showing)
-      if (winningNumber === null) {
-        wheelRef.current.style.animation = 'none';
-        ballTrackRef.current.style.animation = 'none';
-        ballTrackRef.current.style.transition = 'none';
-        ballTrackRef.current.style.transform = 'rotate(0deg)';
-        setShowResult(false);
-        setFinalRotation(null);
-      }
-    }
-  }, [isWaitingForResult, isLanding, winningNumber]);
-
-  const isRed = winningNumber !== null && RED_NUMBERS.includes(winningNumber);
-  const isGreen = winningNumber === 0;
+  const winnerIsRed = winningNumber !== null && isRed(winningNumber);
+  const winnerIsGreen = winningNumber === 0;
 
   return (
     <div className="relative flex items-center justify-center">
-      <style>{`
-        @keyframes wheelSpin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        @keyframes ballSpin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(-360deg); }
-        }
-        @keyframes pulse-glow {
-          0%, 100% {
-            box-shadow: 0 0 10px 2px rgba(250, 204, 21, 0.8);
-            transform: scale(1);
-          }
-          50% {
-            box-shadow: 0 0 20px 6px rgba(250, 204, 21, 1);
-            transform: scale(1.1);
-          }
-        }
-      `}</style>
+      <svg
+        viewBox={`0 0 ${D.VIEW_SIZE} ${D.VIEW_SIZE}`}
+        className="w-72 h-72 sm:w-80 sm:h-80 md:w-96 md:h-96"
+      >
+        <defs>
+          {/* Gradients */}
+          <radialGradient id="rimGradient" cx="30%" cy="30%">
+            <stop offset="0%" stopColor="#F4D03F" />
+            <stop offset="50%" stopColor={COLORS.GOLD} />
+            <stop offset="100%" stopColor={COLORS.GOLD_DARK} />
+          </radialGradient>
 
-      <div ref={wheelRef} className="relative w-72 h-72 sm:w-80 sm:h-80 md:w-96 md:h-96">
-        {/* Outer rim */}
-        <div className="absolute inset-0 rounded-full border-8 border-yellow-600 bg-gradient-radial from-yellow-800 to-yellow-900" />
+          <radialGradient id="coneGradient" cx="40%" cy="40%">
+            <stop offset="0%" stopColor="#5D4E37" />
+            <stop offset="100%" stopColor="#2A1F14" />
+          </radialGradient>
 
-        {/* Number sections */}
-        {WHEEL_NUMBERS.map((number, index) => {
-          const rotation = index * (360 / 37);
-          const isRedNum = RED_NUMBERS.includes(number);
-          const isGreenNum = number === 0;
-          const isWinner = showResult && number === winningNumber;
+          <radialGradient id="hubGradient" cx="30%" cy="30%">
+            <stop offset="0%" stopColor="#F4D03F" />
+            <stop offset="50%" stopColor={COLORS.GOLD} />
+            <stop offset="100%" stopColor="#6B5B3D" />
+          </radialGradient>
 
-          // Base color
-          let bgColor = isGreenNum ? 'bg-green-600' : isRedNum ? 'bg-red-600' : 'bg-black';
+          <radialGradient id="ballGradient" cx="30%" cy="30%">
+            <stop offset="0%" stopColor="#FFFFFF" />
+            <stop offset="70%" stopColor="#E8E8E8" />
+            <stop offset="100%" stopColor="#CCCCCC" />
+          </radialGradient>
 
-          // Winner highlight
-          if (isWinner) {
-            bgColor = 'bg-yellow-400';
-          }
+          {/* Ball shadow/glow */}
+          <filter id="ballGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="2" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
 
-          return (
-            <div
-              key={`sect-${index}`}
-              className="absolute inset-0 flex items-start justify-center"
-              style={{ transform: `rotate(${rotation}deg)` }}
-            >
-              <div
-                className={`${bgColor} text-${isWinner ? 'black' : 'white'} text-xs font-bold px-1 py-0.5 rounded mt-8 transition-all duration-300 ${
-                  isWinner ? 'animate-pulse shadow-lg shadow-yellow-400/50 scale-125 z-20' : ''
-                }`}
-              >
-                {number}
-              </div>
-            </div>
-          );
-        })}
+          <filter id="winnerGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feFlood floodColor={COLORS.WINNER_HIGHLIGHT} floodOpacity="0.8" />
+            <feComposite in2="blur" operator="in" />
+            <feMerge>
+              <feMergeNode />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
 
-        {/* Pockets rim */}
-        <div className="absolute inset-4 rounded-full border-4 border-yellow-700" />
-
-        {/* Ball track */}
-        <div ref={ballTrackRef} className="absolute inset-8 rounded-full">
-          <div
-            className={`absolute top-0 left-1/2 w-3 h-3 bg-white rounded-full shadow-lg -translate-x-1/2 transition-shadow duration-300 ${
-              (isWaitingForResult || isLanding) ? 'shadow-white/50' : ''
-            } ${showResult ? 'shadow-[0_0_10px_3px_rgba(255,255,255,0.8)]' : ''}`}
+        {/* Wheel group - rotates */}
+        <g transform={`rotate(${wheelAngle} ${D.CENTER} ${D.CENTER})`}>
+          {/* Outer rim */}
+          <circle
+            cx={D.CENTER}
+            cy={D.CENTER}
+            r={D.OUTER_RADIUS}
+            fill="url(#rimGradient)"
+            stroke={COLORS.GOLD_DARK}
+            strokeWidth="2"
           />
-        </div>
 
-        {/* Pockets */}
-        <div className="absolute inset-12 rounded-full bg-gradient-radial from-yellow-900 to-gray-900" />
+          {/* Ball track groove */}
+          <circle
+            cx={D.CENTER}
+            cy={D.CENTER}
+            r={D.BALL_TRACK}
+            fill="none"
+            stroke="#3D3D3D"
+            strokeWidth="12"
+            opacity="0.5"
+          />
 
-        {/* Center cone */}
-        <div className="absolute inset-16 rounded-full bg-gradient-radial from-red-900 to-black" />
+          {/* Pocket segments */}
+          {segments.map(({ num, path, color }) => {
+            const isWinner = showResult && num === winningNumber;
+            return (
+              <path
+                key={`pocket-${num}`}
+                d={path}
+                fill={isWinner ? COLORS.WINNER_HIGHLIGHT : color}
+                stroke="#1A1A1A"
+                strokeWidth="0.5"
+                filter={isWinner ? 'url(#winnerGlow)' : undefined}
+              />
+            );
+          })}
 
-        {/* Turret */}
-        <div className="absolute inset-20 rounded-full bg-gradient-radial from-yellow-600 to-yellow-800 border-2 border-yellow-500" />
+          {/* Frets (pocket dividers) */}
+          {frets.map((f, i) => (
+            <line
+              key={`fret-${i}`}
+              x1={f.x1}
+              y1={f.y1}
+              x2={f.x2}
+              y2={f.y2}
+              stroke={COLORS.FRET}
+              strokeWidth="2"
+            />
+          ))}
 
-        {/* Turret handle */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="w-2 h-24 bg-yellow-600 rounded" />
-        </div>
+          {/* Numbers */}
+          {segments.map(({ num, textAngle, textRadius }) => {
+            const [tx, ty] = polarToCartesian(textAngle, textRadius);
+            const isWinner = showResult && num === winningNumber;
+            return (
+              <text
+                key={`num-${num}`}
+                x={tx}
+                y={ty}
+                fill={isWinner ? '#000' : '#FFF'}
+                fontSize="11"
+                fontWeight="bold"
+                textAnchor="middle"
+                dominantBaseline="central"
+                transform={`rotate(${textAngle + 90} ${tx} ${ty})`}
+              >
+                {num}
+              </text>
+            );
+          })}
 
-        {/* Winning number callout - center overlay */}
-        {showResult && winningNumber !== null && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
-            <div
-              className="bg-black/90 rounded-full w-20 h-20 flex flex-col items-center justify-center border-2 border-yellow-400 animate-in zoom-in duration-300"
-              style={{ animation: 'pulse-glow 1.5s ease-in-out infinite' }}
+          {/* Inner cone */}
+          <circle
+            cx={D.CENTER}
+            cy={D.CENTER}
+            r={D.INNER_CONE}
+            fill="url(#coneGradient)"
+            stroke={COLORS.GOLD_DARK}
+            strokeWidth="2"
+          />
+
+          {/* Center hub */}
+          <circle
+            cx={D.CENTER}
+            cy={D.CENTER}
+            r={D.CENTER_HUB}
+            fill="url(#hubGradient)"
+            stroke={COLORS.GOLD_DARK}
+            strokeWidth="2"
+          />
+
+          {/* Hub decoration - cross */}
+          <line
+            x1={D.CENTER - 25}
+            y1={D.CENTER}
+            x2={D.CENTER + 25}
+            y2={D.CENTER}
+            stroke={COLORS.GOLD_DARK}
+            strokeWidth="3"
+            strokeLinecap="round"
+          />
+          <line
+            x1={D.CENTER}
+            y1={D.CENTER - 25}
+            x2={D.CENTER}
+            y2={D.CENTER + 25}
+            stroke={COLORS.GOLD_DARK}
+            strokeWidth="3"
+            strokeLinecap="round"
+          />
+        </g>
+
+        {/* Ball - rotates independently */}
+        <g transform={`rotate(${-ballAngle} ${D.CENTER} ${D.CENTER})`}>
+          <circle
+            cx={D.CENTER}
+            cy={ballY}
+            r={D.BALL_RADIUS}
+            fill="url(#ballGradient)"
+            filter={(isWaitingForResult || isLanding || showResult) ? 'url(#ballGlow)' : undefined}
+          />
+        </g>
+      </svg>
+
+      {/* Result overlay */}
+      {showResult && winningNumber !== null && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="bg-black/90 rounded-full w-20 h-20 flex flex-col items-center justify-center border-2 border-yellow-400 animate-pulse shadow-lg shadow-yellow-400/50">
+            <span
+              className={`text-3xl font-bold ${
+                winnerIsRed ? 'text-red-500' : winnerIsGreen ? 'text-green-500' : 'text-white'
+              }`}
             >
-              <span className={`text-3xl font-bold ${isRed ? 'text-red-500' : isGreen ? 'text-green-500' : 'text-white'}`}>
-                {winningNumber}
-              </span>
-              <span className="text-xs text-gray-400">
-                {isRed ? 'RED' : isGreen ? 'GREEN' : 'BLACK'}
-              </span>
-            </div>
+              {winningNumber}
+            </span>
+            <span className="text-xs text-gray-400">
+              {winnerIsRed ? 'RED' : winnerIsGreen ? 'GREEN' : 'BLACK'}
+            </span>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Spinning indicator */}
-      {isWaitingForResult && (
-        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full mt-2">
-          <div className="flex items-center gap-2 text-yellow-400 text-sm animate-pulse">
-            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-            </svg>
-            <span>Spinning...</span>
+      {/* Status indicator */}
+      {(isWaitingForResult || isLanding) && (
+        <div className="absolute -bottom-8 left-1/2 -translate-x-1/2">
+          <div className="flex items-center gap-2 text-yellow-400 text-sm">
+            {isWaitingForResult ? (
+              <>
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>
+                <span className="animate-pulse">Spinning...</span>
+              </>
+            ) : (
+              <span className="text-white animate-pulse">Ball landing...</span>
+            )}
           </div>
         </div>
       )}

@@ -1,6 +1,9 @@
 // Procedural texture generation for territory cells
 // Creates animated, randomized visual elements based on elemental themes
 // Uses REGIONS from lifeConstants to match main game faction colors
+//
+// PERFORMANCE: Hash values are cached since they're deterministic per cell position.
+// This eliminates redundant calculations on every frame.
 
 import { REGIONS, getRegion } from '../../lifeConstants';
 
@@ -13,12 +16,28 @@ function hashCell(x: number, y: number, seed: number = 0): number {
   return (h >>> 0) / 0xffffffff; // Normalize to 0-1
 }
 
-// Generate multiple hash values from one cell position
+// Cache for precomputed hash values (key: "x,y,count" -> hash array)
+const hashCache = new Map<string, number[]>();
+const MAX_CACHE_SIZE = 2000; // Limit memory usage
+
+// Generate multiple hash values from one cell position (with caching)
 function hashCellMulti(x: number, y: number, count: number): number[] {
-  const values: number[] = [];
+  const key = `${x},${y},${count}`;
+
+  const cached = hashCache.get(key);
+  if (cached) return cached;
+
+  const values: number[] = new Array(count);
   for (let i = 0; i < count; i++) {
-    values.push(hashCell(x, y, i * 12345));
+    values[i] = hashCell(x, y, i * 12345);
   }
+
+  // Simple cache eviction: clear when too large
+  if (hashCache.size >= MAX_CACHE_SIZE) {
+    hashCache.clear();
+  }
+  hashCache.set(key, values);
+
   return values;
 }
 
@@ -187,6 +206,23 @@ export function drawProceduralTerritory(
   }
 }
 
+// Cache for single hash values used in drawVariedTerritory
+const singleHashCache = new Map<string, number>();
+
+// Get cached single hash value
+function getCachedHash(x: number, y: number): number {
+  const key = `${x},${y}`;
+  const cached = singleHashCache.get(key);
+  if (cached !== undefined) return cached;
+
+  const hash = hashCell(x, y, 0);
+  if (singleHashCache.size >= MAX_CACHE_SIZE) {
+    singleHashCache.clear();
+  }
+  singleHashCache.set(key, hash);
+  return hash;
+}
+
 // Simpler version: just draw variation without full procedural circles
 // Uses color modulation for a more subtle effect
 // Now uses REGIONS colors for consistency with main game
@@ -208,8 +244,8 @@ export function drawVariedTerritory(
       if (territory === 0) continue;
       if (skipCells?.has(`${x},${y}`)) continue;
 
-      // Get deterministic variation for this cell
-      const hash = hashCell(x, y, 0);
+      // Get deterministic variation for this cell (cached)
+      const hash = getCachedHash(x, y);
 
       // Time-based variation
       const timeFactor = Math.sin(time * 0.3 + hash * Math.PI * 2) * 0.5 + 0.5;

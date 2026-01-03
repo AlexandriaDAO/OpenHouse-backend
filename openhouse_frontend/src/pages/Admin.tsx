@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import useDiceActor from '../hooks/actors/useDiceActor';
 import usePlinkoActor from '../hooks/actors/usePlinkoActor';
 import useCrashActor from '../hooks/actors/useCrashActor';
+import useRouletteActor from '../hooks/actors/useRouletteActor';
 import {
   HealthCheck,
   PendingWithdrawalInfo,
@@ -23,6 +24,7 @@ const GAME_COLORS: Record<string, { header: string; bg: string; badge: string }>
   dice: { header: 'text-dfinity-turquoise', bg: 'bg-dfinity-turquoise/10', badge: 'bg-dfinity-turquoise/30 text-dfinity-turquoise' },
   plinko: { header: 'text-orange-500', bg: 'bg-orange-500/10', badge: 'bg-orange-500/30 text-orange-500' },
   crash: { header: 'text-purple-500', bg: 'bg-purple-500/10', badge: 'bg-purple-500/30 text-purple-500' },
+  roulette: { header: 'text-red-500', bg: 'bg-red-500/10', badge: 'bg-red-500/30 text-red-500' },
 };
 
 // Helper functions
@@ -79,6 +81,7 @@ export const Admin: React.FC = () => {
   const { actor: diceActor } = useDiceActor();
   const { actor: plinkoActor } = usePlinkoActor();
   const { actor: crashActor } = useCrashActor();
+  const { actor: rouletteActor } = useRouletteActor();
   const { principal, isAuthenticated } = useAuth();
 
   // Map of actors by game ID
@@ -86,7 +89,8 @@ export const Admin: React.FC = () => {
     dice: diceActor,
     plinko: plinkoActor,
     crash: crashActor,
-  } as Record<GameType, any>), [diceActor, plinkoActor, crashActor]);
+    roulette: rouletteActor,
+  } as Record<GameType, any>), [diceActor, plinkoActor, crashActor, rouletteActor]);
 
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -456,6 +460,7 @@ export const Admin: React.FC = () => {
             dice: 'blue',
             plinko: 'orange',
             crash: 'purple',
+            roulette: 'purple',
           };
           return (
             <GameBalancesCard
@@ -476,6 +481,7 @@ export const Admin: React.FC = () => {
             dice: 'blue',
             plinko: 'purple',
             crash: 'purple',
+            roulette: 'purple',
           };
           return (
             <GameAuditLogCard

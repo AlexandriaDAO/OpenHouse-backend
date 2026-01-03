@@ -894,57 +894,17 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
     return () => clearInterval(timer);
   }, [floatingNumbers.length, flyingCoins.length, territoryFlashes.length]);
 
-  // Re-render during visual effects animations
-  useEffect(() => {
-    if (floatingNumbers.length === 0 && flyingCoins.length === 0 && territoryFlashes.length === 0) return;
+  // NOTE: Animation re-renders are now handled by the unified renderTick from the
+  // procedural texture RAF loop below. This eliminates 4 separate 30ms timers that
+  // were all cloning the entire grid just to force re-renders.
 
-    const timer = setInterval(() => {
-      setCells(prev => prev.map(row => row.map(cell => ({ ...cell }))));
-    }, 30);
-    return () => clearInterval(timer);
-  }, [floatingNumbers.length, flyingCoins.length, territoryFlashes.length]);
-
-  // Hint pulse animation
-  useEffect(() => {
-    if (!showHint || hasPlaced || !currentSlideData?.implemented) return;
-    const interval = setInterval(() => {
-      setCells(prev => prev.map(row => row.map(cell => ({ ...cell }))));
-    }, 50);
-    return () => clearInterval(interval);
-  }, [showHint, hasPlaced, currentSlideData?.implemented]);
-
-  // Fade animation timer - re-render while fading is active
-  useEffect(() => {
-    if (fadingTerritory.length === 0 || !fadeStartTime) return;
-    const elapsed = Date.now() - fadeStartTime;
-    if (elapsed >= 600) return;
-    const timer = setInterval(() => {
-      const now = Date.now();
-      if (now - fadeStartTime < 600) {
-        setCells(prev => prev.map(row => row.map(cell => ({ ...cell }))));
-      }
-    }, 30);
-    return () => clearInterval(timer);
-  }, [fadingTerritory, fadeStartTime]);
-
-  // Spawn animation timer - re-render while glow is active
+  // Auto-clear spawn animation after duration (no grid cloning needed)
   useEffect(() => {
     if (!spawnAnimation) return;
-    const elapsed = Date.now() - spawnAnimation.frame;
-    if (elapsed >= 500) {
+    const timer = setTimeout(() => {
       setSpawnAnimation(null);
-      return;
-    }
-    const timer = setInterval(() => {
-      const now = Date.now();
-      if (now - spawnAnimation.frame >= 500) {
-        setSpawnAnimation(null);
-      } else {
-        // Force re-render by updating cells reference
-        setCells(prev => prev.map(row => row.map(cell => ({ ...cell }))));
-      }
-    }, 30);
-    return () => clearInterval(timer);
+    }, 500);
+    return () => clearTimeout(timer);
   }, [spawnAnimation]);
 
   // Procedural texture animation loop - continuous update for smooth visuals
@@ -1099,19 +1059,13 @@ export const RiskTutorial: React.FC<RiskTutorialProps> = ({
     return () => clearInterval(timer);
   }, [currentSlideData?.id, isOpen, targetQuadrant, slideConfig.playerBase]);
 
-  // Wiper flash animation timer
+  // Wiper flash auto-clear (animation handled by renderTick)
   useEffect(() => {
     if (!wipeFlashTime) return;
-    const timer = setInterval(() => {
-      setCells(prev => prev.map(row => row.map(cell => ({ ...cell }))));
-    }, 30);
     const cleanup = setTimeout(() => {
       setWipeFlashTime(null);
     }, 800);
-    return () => {
-      clearInterval(timer);
-      clearTimeout(cleanup);
-    };
+    return () => clearTimeout(cleanup);
   }, [wipeFlashTime]);
 
   // Handle canvas click

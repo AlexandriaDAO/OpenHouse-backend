@@ -12,7 +12,7 @@ export const TUTORIAL_SLIDES: SlideDefinition[] = [
   {
     id: 'attack-territory',
     title: 'Attack Enemy Territory',
-    description: 'Send your glider toward the enemy base. Each time your cells touch enemy territory, they lose coins from their base!',
+    description: 'Send your glider toward the enemy base. Each blocked birth steals 10 coins from their base to your wallet!',
     implemented: true,
   },
   {
@@ -24,19 +24,19 @@ export const TUTORIAL_SLIDES: SlideDefinition[] = [
   {
     id: 'attack-strategy',
     title: 'Winning Strategy: Wall Siege',
-    description: 'Place a stationary block (2x2) next to enemy walls. It will continuously drain their coins without dying!',
+    description: 'Place a stationary block (2x2) next to enemy walls. Each blocked birth drains 10 coins - a 10x return on your 1 coin placement!',
     implemented: true,
   },
   {
     id: 'wipers',
     title: 'Beware the Wipers',
-    description: 'Every 5 minutes, a quadrant gets wiped clean. Watch the timer and avoid getting caught!',
+    description: 'Every 2 minutes, a quadrant gets wiped clean. Watch the timer and avoid getting caught!',
     implemented: true,
   },
   {
     id: 'coins-economy',
     title: 'The Coin Economy',
-    description: 'Earn coins from your territory. Spend coins to place cells. Use the faucet to get more!',
+    description: 'Place cells for 1 coin each. Siege enemy walls to steal 10 coins per hit. Use the faucet to get more!',
     implemented: true,
   },
 ];

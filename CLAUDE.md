@@ -78,17 +78,17 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 - **Canister**: `crash_backend`
 
 ### 4. Roulette
-- **Mechanics**: Classic roulette against the dealer
-- **Objective**: Get closer to 21 than dealer without busting
-- **Actions**: Hit, Stand, Double Down, Split
+- **Mechanics**: European roulette (single zero, 0-36)
+- **Objective**: Predict where the ball lands on the wheel
+- **Bet Types**: Straight (35:1), Split (17:1), Street (11:1), Corner (8:1), Six Line (5:1), Column/Dozen (2:1), Red/Black/Odd/Even/High/Low (1:1)
 - **Min Bet**: 0.01 USDT
-- **Max Win**: 10 USDT
-- **House Edge**: ~1%
+- **Max Bets Per Spin**: 20
+- **House Edge**: 2.70% (European rules)
 - **Canister**: `roulette_backend`
 
 ### Future Games
 - **Slots**: Traditional slot machine with crypto themes
-- **Roulette**: European roulette with single zero
+- **Blackjack**: Classic card game against the dealer
 
 ## 🏗️ Development Workflow
 
@@ -139,7 +139,9 @@ dfx canister --network ic call crash_backend get_game_state
 
 # Manual testing - Roulette game
 dfx canister --network ic call roulette_backend greet '("Player")'
-dfx canister --network ic call roulette_backend get_stats
+dfx canister --network ic call roulette_backend get_board_layout
+dfx canister --network ic call roulette_backend get_payouts
+dfx canister --network ic call roulette_backend get_max_bet
 
 # Check frontend
 open https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
@@ -190,16 +192,17 @@ get_recent_rounds(limit: u32) -> Vec<GameRound>
 
 ### Roulette Backend
 ```rust
-// Game methods
-start_game(bet: u64, seed: String) -> Result<GameStartResult, String>
-hit(game_id: u64) -> Result<ActionResult, String>
-stand(game_id: u64) -> Result<ActionResult, String>
-double_down(game_id: u64) -> Result<ActionResult, String>
-split(game_id: u64) -> Result<ActionResult, String>
+// Spin the wheel with bets
+spin(bets: Vec<Bet>) -> Result<SpinResult, String>
 
 // Query functions
-get_game(game_id: u64) -> Option<RouletteGame>
-get_stats() -> GameStats
+get_max_bet() -> u64
+get_board_layout() -> BoardLayout
+get_payouts() -> Vec<PayoutInfo>
+greet(name: String) -> String
+
+// Bet types: Straight(u8), Split(u8,u8), Street(u8), Corner(u8),
+// SixLine(u8), Column(u8), Dozen(u8), Red, Black, Even, Odd, Low, High
 ```
 
 ### Dice Backend

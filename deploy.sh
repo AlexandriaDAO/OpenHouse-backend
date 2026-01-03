@@ -1,6 +1,6 @@
 #!/bin/bash
 # OpenHouse Multi-Game Casino Deployment Script - Mainnet Only
-# Usage: ./deploy.sh [--crash-only|--plinko-only|--roulette-only|--dice-only|--frontend-only] [--test]
+# Usage: ./deploy.sh [--roulette-only|--life-only|--life2-only|--life3-only|--frontend-only] [--test]
 
 set -e
 
@@ -13,20 +13,8 @@ RUN_TESTS=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --crash-only)
-            DEPLOY_TARGET="crash"
-            shift
-            ;;
-        --plinko-only)
-            DEPLOY_TARGET="plinko"
-            shift
-            ;;
         --roulette-only)
             DEPLOY_TARGET="roulette"
-            shift
-            ;;
-        --dice-only)
-            DEPLOY_TARGET="dice"
             shift
             ;;
         --life-only)
@@ -55,10 +43,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: ./deploy.sh [options]"
             echo ""
             echo "Options:"
-            echo "  --crash-only       Deploy only crash backend"
-            echo "  --plinko-only      Deploy only plinko backend"
-            echo "  --roulette-only   Deploy only roulette backend (Rust)"
-            echo "  --dice-only        Deploy only dice backend"
+            echo "  --roulette-only    Deploy only roulette backend"
             echo "  --life-only        Deploy only life1 backend (Game of Life - Server 1)"
             echo "  --life2-only       Deploy only life2 backend (Game of Life - Server 2)"
             echo "  --life3-only       Deploy only life3 backend (Life Server 3)"
@@ -68,8 +53,8 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Examples:"
             echo "  ./deploy.sh                    # Deploy everything to mainnet"
-            echo "  ./deploy.sh --crash-only       # Deploy only crash backend"
-            echo "  ./deploy.sh --roulette-only   # Deploy only roulette backend"
+            echo "  ./deploy.sh --roulette-only    # Deploy only roulette backend"
+            echo "  ./deploy.sh --life-only        # Deploy only life1 backend"
             echo "  ./deploy.sh --test             # Deploy and run tests"
             echo ""
             echo "IMPORTANT: This script ALWAYS deploys to MAINNET"
@@ -93,10 +78,7 @@ echo "Target: $DEPLOY_TARGET"
 echo "Working from: $SCRIPT_DIR"
 echo ""
 echo "Mainnet Canister IDs:"
-echo "  Crash Backend:     fws6k-tyaaa-aaaap-qqc7q-cai"
-echo "  Plinko Backend:    weupr-2qaaa-aaaap-abl3q-cai"
-echo "  Roulette Backend: wvrcw-3aaaa-aaaah-arm4a-cai"
-echo "  Dice Backend:      whchi-hyaaa-aaaao-a4ruq-cai"
+echo "  Roulette Backend:  wvrcw-3aaaa-aaaah-arm4a-cai"
 echo "  Life1 Backend:     pijnb-7yaaa-aaaae-qgcuq-cai"
 echo "  Life2 Backend:     qoski-4yaaa-aaaai-q4g4a-cai"
 echo "  Life3 Backend:     66p3s-uaaaa-aaaad-ac47a-cai"
@@ -125,48 +107,6 @@ use_daopad_identity() {
     echo ""
 }
 
-# Function to deploy crash backend
-deploy_crash() {
-    echo "================================================"
-    echo "Deploying Crash Backend Canister"
-    echo "================================================"
-
-    # Build the backend canister
-    echo "Building crash backend canister..."
-    cargo build --release --target wasm32-unknown-unknown --package crash_backend
-
-    # Skip candid extraction - using manually created .did file
-    echo "Using pre-defined candid interface..."
-
-    # Deploy to mainnet
-    echo "Deploying crash backend to mainnet..."
-    dfx deploy crash_backend --network ic
-
-    echo "Crash backend deployment completed!"
-    echo ""
-}
-
-# Function to deploy plinko backend
-deploy_plinko() {
-    echo "================================================"
-    echo "Deploying Plinko Backend Canister"
-    echo "================================================"
-
-    # Build the backend canister
-    echo "Building plinko backend canister..."
-    cargo build --release --target wasm32-unknown-unknown --package plinko_backend
-
-    # Skip candid extraction - using manually created .did file
-    echo "Using pre-defined candid interface..."
-
-    # Deploy to mainnet
-    echo "Deploying plinko backend to mainnet..."
-    dfx deploy plinko_backend --network ic
-
-    echo "Plinko backend deployment completed!"
-    echo ""
-}
-
 # Function to deploy roulette backend
 deploy_roulette() {
     echo "================================================"
@@ -187,27 +127,6 @@ deploy_roulette() {
     dfx deploy roulette_backend --network ic
 
     echo "Roulette backend deployment completed!"
-    echo ""
-}
-
-# Function to deploy dice backend
-deploy_dice() {
-    echo "=================================================="
-    echo "Deploying Dice Backend Canister"
-    echo "=================================================="
-
-    # Build the backend canister
-    echo "Building dice backend canister..."
-    cargo build --release --target wasm32-unknown-unknown --package dice_backend
-
-    # Skip candid extraction - using manually created .did file
-    echo "Using pre-defined candid interface..."
-
-    # Deploy to mainnet
-    echo "Deploying dice backend to mainnet..."
-    dfx deploy dice_backend --network ic
-
-    echo "Dice backend deployment completed!"
     echo ""
 }
 
@@ -285,10 +204,7 @@ deploy_frontend() {
 
     # CRITICAL: Regenerate declarations from Candid interfaces
     echo "Regenerating backend declarations from Candid interfaces..."
-    dfx generate crash_backend 2>/dev/null || echo "Warning: Could not generate crash_backend declarations"
-    dfx generate plinko_backend 2>/dev/null || echo "Warning: Could not generate plinko_backend declarations"
     dfx generate roulette_backend 2>/dev/null || echo "Warning: Could not generate roulette_backend declarations"
-    dfx generate dice_backend 2>/dev/null || echo "Warning: Could not generate dice_backend declarations"
     dfx generate life1_backend 2>/dev/null || echo "Warning: Could not generate life1_backend declarations"
     dfx generate life2_backend 2>/dev/null || echo "Warning: Could not generate life2_backend declarations"
     dfx generate life3_backend 2>/dev/null || echo "Warning: Could not generate life3_backend declarations"
@@ -336,21 +252,9 @@ run_tests() {
     echo "Running Post-Deployment Tests"
     echo "=================================================="
 
-    # Test crash backend
-    echo "Testing crash backend canister..."
-    dfx canister --network ic call crash_backend greet '("Tester")' 2>/dev/null || echo "Crash backend test method not yet implemented"
-
-    # Test plinko backend
-    echo "Testing plinko backend canister..."
-    dfx canister --network ic call plinko_backend greet '("Tester")' 2>/dev/null || echo "Plinko backend test method not yet implemented"
-
     # Test roulette backend
     echo "Testing roulette backend canister..."
     dfx canister --network ic call roulette_backend greet '("Tester")' 2>/dev/null || echo "Roulette backend test method not yet implemented"
-
-    # Test dice backend
-    echo "Testing dice backend canister..."
-    dfx canister --network ic call dice_backend greet '("Tester")' 2>/dev/null || echo "Dice backend test method not yet implemented"
 
     # Check frontend is accessible
     echo "Checking frontend accessibility..."
@@ -366,17 +270,8 @@ main() {
     use_daopad_identity
 
     case $DEPLOY_TARGET in
-        crash)
-            # deploy_crash
-            ;;
-        plinko)
-            # deploy_plinko
-            ;;
         roulette)
             deploy_roulette
-            ;;
-        dice)
-            # deploy_dice
             ;;
         life)
             deploy_life
@@ -391,10 +286,7 @@ main() {
             deploy_frontend
             ;;
         all)
-            deploy_crash
-            deploy_plinko
             deploy_roulette
-            deploy_dice
             deploy_life
             deploy_life2
             deploy_life3
@@ -409,10 +301,7 @@ main() {
     echo "=================================================="
     echo "Deployment Complete!"
     echo "=================================================="
-    echo "Crash Backend:     https://dashboard.internetcomputer.org/canister/fws6k-tyaaa-aaaap-qqc7q-cai"
-    echo "Plinko Backend:    https://dashboard.internetcomputer.org/canister/weupr-2qaaa-aaaap-abl3q-cai"
-    echo "Roulette Backend: https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai"
-    echo "Dice Backend:      https://dashboard.internetcomputer.org/canister/whchi-hyaaa-aaaao-a4ruq-cai"
+    echo "Roulette Backend:  https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai"
     echo "Life1 Backend:     https://dashboard.internetcomputer.org/canister/pijnb-7yaaa-aaaae-qgcuq-cai"
     echo "Life2 Backend:     https://dashboard.internetcomputer.org/canister/qoski-4yaaa-aaaai-q4g4a-cai"
     echo "Life3 Backend:     https://dashboard.internetcomputer.org/canister/66p3s-uaaaa-aaaad-ac47a-cai"

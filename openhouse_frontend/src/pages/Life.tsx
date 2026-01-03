@@ -2679,7 +2679,7 @@ export const Risk: React.FC = () => {
                       <th className="text-left font-normal pb-1"></th>
                       <th className="text-right font-normal pb-1 px-1 cursor-help" title="Territory: Total cells you own (faded color). Expands when your living cells touch neutral ground.">Terr</th>
                       <th className="text-right font-normal pb-1 px-1 cursor-help" title="Living Cells: Active cells following Game of Life rules. Need 2-3 neighbors to survive.">Cells</th>
-                      <th className="text-right font-normal pb-1 px-1 cursor-help" title="Base Treasury: Coins stored in your fortress. Drained by 1 each time enemies touch your territory. Reach 0 = eliminated!">Base</th>
+                      <th className="text-right font-normal pb-1 px-1 cursor-help" title="Base Treasury: Coins stored in your fortress. Drained by 10 each time enemies siege your walls. Reach 0 = eliminated!">Base</th>
                     </tr>
                   </thead>
                   <tbody>

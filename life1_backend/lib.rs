@@ -43,6 +43,7 @@ const MAX_PLAYERS: usize = 8;
 const FAUCET_AMOUNT: u64 = 1000;
 const BASE_COST: u64 = 100;
 const PLACEMENT_COST: u64 = 1;
+const SIEGE_DAMAGE: u64 = 10;  // Coins stolen per blocked birth (10x placement cost = high ROI for reaching walls)
 const MAX_PLACE_CELLS: usize = 1000;
 
 /// Timing
@@ -930,21 +931,23 @@ fn apply_changes(births: &[(usize, usize)], deaths: &[usize], survivors: &[usize
         };
         if let Some(base_owner) = base_owner_opt {
             if base_owner != new_owner {
-                // SIEGE! Birth prevented, transfer 1 coin
+                // SIEGE! Birth prevented, transfer coins (capped at what defender has)
                 let mut eliminated = false;
 
                 BASES.with(|bases| {
                     let mut bases = bases.borrow_mut();
                     if let Some(base) = &mut bases[base_owner] {
                         if base.coins > 0 {
-                            base.coins -= 1;
+                            // Take up to SIEGE_DAMAGE, but not more than defender has
+                            let damage = base.coins.min(SIEGE_DAMAGE);
+                            base.coins -= damage;
 
-                            // Transfer coin to attacker's wallet
+                            // Transfer coins to attacker's wallet
                             PLAYERS.with(|players| {
                                 if let Some(attacker_principal) = &players.borrow()[new_owner] {
                                     WALLETS.with(|wallets| {
                                         let mut wallets = wallets.borrow_mut();
-                                        *wallets.entry(*attacker_principal).or_insert(0) += 1;
+                                        *wallets.entry(*attacker_principal).or_insert(0) += damage;
                                     });
                                 }
                             });

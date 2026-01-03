@@ -4,6 +4,7 @@ use super::liquidity_pool;
 use super::types::*;
 
 const ADMIN_PRINCIPAL: &str = "p7336-jmpo5-pkjsf-7dqkd-ea3zu-g2ror-ctcn2-sxtuo-tjve3-ulrx7-wae";
+#[cfg(target_arch = "wasm32")]
 const WASM_PAGE_SIZE_BYTES: u64 = 65536;
 const REASONABLE_MAX_LIMIT: usize = 10_000; // Safety net for unbounded queries
 
