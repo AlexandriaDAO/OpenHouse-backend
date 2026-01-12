@@ -46,12 +46,6 @@
       "package": "life3_backend",
       "candid": "life3_backend/life3_backend.did",
       "specified_id": "66p3s-uaaaa-aaaad-ac47a-cai"
-    },
-    "openhouse_frontend": {
-      "type": "assets",
-      "source": ["openhouse_frontend/dist"],
-      "specified_id": "pezw3-laaaa-aaaal-qssoa-cai",
-      "dependencies": []
     }
   },
   "defaults": {

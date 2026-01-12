@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenHouse Multi-Game Casino Deployment Script - Mainnet Only
-# Usage: ./deploy.sh [--roulette-only|--life-only|--life2-only|--life3-only|--frontend-only] [--test]
+# OpenHouse Backend Deployment Script - Mainnet Only
+# Usage: ./deploy.sh [--roulette-only|--life-only|--life2-only|--life3-only] [--test]
 
 set -e
 
@@ -29,16 +29,12 @@ while [[ $# -gt 0 ]]; do
             DEPLOY_TARGET="life3"
             shift
             ;;
-        --frontend-only)
-            DEPLOY_TARGET="frontend"
-            shift
-            ;;
         --test)
             RUN_TESTS=true
             shift
             ;;
         --help)
-            echo "OpenHouse Casino Deployment Script - Mainnet Only"
+            echo "OpenHouse Backend Deployment Script - Mainnet Only"
             echo ""
             echo "Usage: ./deploy.sh [options]"
             echo ""
@@ -47,18 +43,18 @@ while [[ $# -gt 0 ]]; do
             echo "  --life-only        Deploy only life1 backend (Game of Life - Server 1)"
             echo "  --life2-only       Deploy only life2 backend (Game of Life - Server 2)"
             echo "  --life3-only       Deploy only life3 backend (Life Server 3)"
-            echo "  --frontend-only    Deploy only the frontend"
             echo "  --test             Run post-deployment tests"
             echo "  --help             Show this help message"
             echo ""
             echo "Examples:"
-            echo "  ./deploy.sh                    # Deploy everything to mainnet"
+            echo "  ./deploy.sh                    # Deploy all backends to mainnet"
             echo "  ./deploy.sh --roulette-only    # Deploy only roulette backend"
             echo "  ./deploy.sh --life-only        # Deploy only life1 backend"
             echo "  ./deploy.sh --test             # Deploy and run tests"
             echo ""
             echo "IMPORTANT: This script ALWAYS deploys to MAINNET"
             echo "There is no local testing environment - all testing happens on mainnet"
+            echo "NOTE: Frontend is deployed separately from the OpenHouse repo"
             exit 0
             ;;
         *)
@@ -71,7 +67,7 @@ done
 
 # Display deployment configuration
 echo "================================================"
-echo "OpenHouse Casino Deployment - MAINNET ONLY"
+echo "OpenHouse Backend Deployment - MAINNET ONLY"
 echo "================================================"
 echo "Network: IC (Mainnet)"
 echo "Target: $DEPLOY_TARGET"
@@ -82,7 +78,6 @@ echo "  Roulette Backend:  wvrcw-3aaaa-aaaah-arm4a-cai"
 echo "  Life1 Backend:     pijnb-7yaaa-aaaae-qgcuq-cai"
 echo "  Life2 Backend:     qoski-4yaaa-aaaai-q4g4a-cai"
 echo "  Life3 Backend:     66p3s-uaaaa-aaaad-ac47a-cai"
-echo "  Frontend:          pezw3-laaaa-aaaal-qssoa-cai"
 echo "================================================"
 echo ""
 
@@ -196,56 +191,6 @@ deploy_life3() {
     echo ""
 }
 
-# Function to deploy frontend
-deploy_frontend() {
-    echo "=================================================="
-    echo "Deploying OpenHouse Frontend Canister"
-    echo "=================================================="
-
-    # CRITICAL: Regenerate declarations from Candid interfaces
-    echo "Regenerating backend declarations from Candid interfaces..."
-    dfx generate roulette_backend 2>/dev/null || echo "Warning: Could not generate roulette_backend declarations"
-    dfx generate life1_backend 2>/dev/null || echo "Warning: Could not generate life1_backend declarations"
-    dfx generate life2_backend 2>/dev/null || echo "Warning: Could not generate life2_backend declarations"
-    dfx generate life3_backend 2>/dev/null || echo "Warning: Could not generate life3_backend declarations"
-
-    # Sync declarations
-    echo "Copying fresh declarations to frontend..."
-    if [ -d "src/declarations" ]; then
-        mkdir -p openhouse_frontend/src/declarations
-        cp -r src/declarations/* openhouse_frontend/src/declarations/ 2>/dev/null || true
-        echo "✅ Declarations synced successfully"
-    else
-        echo "⚠️  Warning: src/declarations directory not found"
-    fi
-
-    # Build frontend
-    echo "Building frontend..."
-    if [ -d "openhouse_frontend" ]; then
-        cd openhouse_frontend
-
-        if [ -f "package.json" ]; then
-            echo "Installing frontend dependencies..."
-            npm install
-
-            echo "Building frontend assets..."
-            npm run build
-        else
-            echo "Using static frontend assets..."
-        fi
-
-        cd ..
-    fi
-
-    # Deploy frontend to mainnet
-    echo "Deploying frontend to mainnet..."
-    dfx deploy openhouse_frontend --network ic
-
-    echo "Frontend deployment completed!"
-    echo "Access at: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io"
-    echo ""
-}
-
 # Function to run tests
 run_tests() {
     echo "=================================================="
@@ -256,9 +201,9 @@ run_tests() {
     echo "Testing roulette backend canister..."
     dfx canister --network ic call roulette_backend greet '("Tester")' 2>/dev/null || echo "Roulette backend test method not yet implemented"
 
-    # Check frontend is accessible
-    echo "Checking frontend accessibility..."
-    curl -s -o /dev/null -w "Frontend HTTP Status: %{http_code}\n" https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
+    # Test life backends
+    echo "Testing life1 backend canister..."
+    dfx canister --network ic call life1_backend greet '("Tester")' 2>/dev/null || echo "Life1 backend test method not yet implemented"
 
     echo "Tests completed!"
     echo ""
@@ -282,15 +227,11 @@ main() {
         life3)
             deploy_life3
             ;;
-        frontend)
-            deploy_frontend
-            ;;
         all)
             deploy_roulette
             deploy_life
             deploy_life2
             deploy_life3
-            deploy_frontend
             ;;
     esac
 
@@ -305,9 +246,9 @@ main() {
     echo "Life1 Backend:     https://dashboard.internetcomputer.org/canister/pijnb-7yaaa-aaaae-qgcuq-cai"
     echo "Life2 Backend:     https://dashboard.internetcomputer.org/canister/qoski-4yaaa-aaaai-q4g4a-cai"
     echo "Life3 Backend:     https://dashboard.internetcomputer.org/canister/66p3s-uaaaa-aaaad-ac47a-cai"
-    echo "Frontend:          https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io"
     echo ""
     echo "Remember: All changes are live on mainnet immediately!"
+    echo "NOTE: Frontend is deployed separately from the OpenHouse repo"
 }
 
 # Run main function

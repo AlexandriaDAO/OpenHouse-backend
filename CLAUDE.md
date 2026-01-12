@@ -1,10 +1,10 @@
-# OpenHouse Casino - Claude Deployment Guide
+# OpenHouse Backend - Claude Deployment Guide
 
-## 🎰 CRITICAL: Mainnet-Only Multi-Game Casino
+## 🎰 CRITICAL: Mainnet-Only Backend Canisters
 
 **⚠️ IMPORTANT: There is no local testing environment. ALL testing happens on mainnet.**
 
-OpenHouse is an open-source, transparent odds casino platform on the Internet Computer. Every change you make goes directly to production canisters.
+This repository contains only the **backend canisters** for the OpenHouse casino platform. The frontend is maintained separately in the [OpenHouse](https://github.com/AlexandriaDAO/OpenHouse) repository.
 
 ## 🎯 Project Philosophy
 
@@ -16,17 +16,14 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 ## 🚀 Quick Start
 
 ```bash
-# Deploy everything to mainnet
+# Deploy all backends to mainnet
 ./deploy.sh
 
 # Deploy specific game backend
-./deploy.sh --dice-only
-./deploy.sh --plinko-only
-./deploy.sh --crash-only
 ./deploy.sh --roulette-only
-
-# Deploy frontend only
-./deploy.sh --frontend-only
+./deploy.sh --life-only
+./deploy.sh --life2-only
+./deploy.sh --life3-only
 
 # Deploy with tests
 ./deploy.sh --test
@@ -34,20 +31,17 @@ OpenHouse is an open-source, transparent odds casino platform on the Internet Co
 
 ## 📦 Canister Architecture
 
-| Component | Canister ID | Purpose | URL |
-|-----------|-------------|---------|-----|
-| **Dice Backend** | `whchi-hyaaa-aaaao-a4ruq-cai` | Dice game logic | - |
-| **Plinko Backend** | `weupr-2qaaa-aaaap-abl3q-cai` | Plinko game logic | - |
-| **Crash Backend** | `fws6k-tyaaa-aaaap-qqc7q-cai` | Crash game logic | - |
-| **Roulette Backend** | `wvrcw-3aaaa-aaaah-arm4a-cai` | Roulette game logic | - |
-| **OpenHouse Frontend** | `pezw3-laaaa-aaaal-qssoa-cai` | Multi-game router UI | https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io |
+| Component | Canister ID | Purpose |
+|-----------|-------------|---------|
+| **Dice Backend** | `whchi-hyaaa-aaaao-a4ruq-cai` | Dice game logic |
+| **Plinko Backend** | `weupr-2qaaa-aaaap-abl3q-cai` | Plinko game logic |
+| **Crash Backend** | `fws6k-tyaaa-aaaap-qqc7q-cai` | Crash game logic |
+| **Roulette Backend** | `wvrcw-3aaaa-aaaah-arm4a-cai` | Roulette game logic |
+| **Life1 Backend** | `pijnb-7yaaa-aaaae-qgcuq-cai` | Game of Life - Server 1 |
+| **Life2 Backend** | `qoski-4yaaa-aaaai-q4g4a-cai` | Game of Life - Server 2 |
+| **Life3 Backend** | `66p3s-uaaaa-aaaad-ac47a-cai` | Game of Life - Server 3 |
 
-### Frontend Routes
-- `/` - Game selection homepage
-- `/dice` - Dice game interface
-- `/plinko` - Plinko game interface
-- `/crash` - Crash game interface
-- `/roulette` - Roulette game interface
+**Note:** Frontend is deployed separately from the [OpenHouse](https://github.com/AlexandriaDAO/OpenHouse) repo.
 
 ## 🎮 Games Overview
 
@@ -99,23 +93,21 @@ vim dice_backend/src/lib.rs
 vim plinko_backend/src/lib.rs
 vim crash_backend/src/lib.rs
 vim roulette_backend/src/lib.rs
-
-# Frontend changes
-vim openhouse_frontend/dist/index.html
-# (Will add proper React/Vue setup later)
+vim life1_backend/src/lib.rs
+vim life2_backend/src/lib.rs
+vim life3_backend/src/lib.rs
 ```
 
 ### Step 2: Deploy to Mainnet (MANDATORY)
 ```bash
-# Deploy everything
+# Deploy all backends
 ./deploy.sh
 
 # Or deploy specific components
-./deploy.sh --dice-only
-./deploy.sh --plinko-only
-./deploy.sh --crash-only
 ./deploy.sh --roulette-only
-./deploy.sh --frontend-only
+./deploy.sh --life-only
+./deploy.sh --life2-only
+./deploy.sh --life3-only
 ```
 
 ### Step 3: Test on Mainnet
@@ -142,9 +134,6 @@ dfx canister --network ic call roulette_backend greet '("Player")'
 dfx canister --network ic call roulette_backend get_board_layout
 dfx canister --network ic call roulette_backend get_payouts
 dfx canister --network ic call roulette_backend get_max_bet
-
-# Check frontend
-open https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
 ```
 
 ### Step 4: Commit Changes
@@ -238,12 +227,9 @@ cd <game>_backend
 # Update deploy.sh
 ```
 
-### 3. Add Frontend Route
-```bash
-# Add game card to homepage
-# Create game-specific UI page
-# Connect to backend canister
-```
+### 3. Coordinate with Frontend
+The frontend is maintained in the separate [OpenHouse](https://github.com/AlexandriaDAO/OpenHouse) repository.
+After adding a new backend canister, coordinate with the frontend team to add the corresponding UI.
 
 ## 🐛 Common Issues & Solutions
 
@@ -256,14 +242,6 @@ If a withdrawal times out (rare ~1 in 30B), users will see a recovery panel:
 3. **If Funds Missing**: Click "Retry Transfer" to attempt again
 
 The system will never automatically rollback a timeout to prevent double-spend.
-
-### Issue: Frontend can't call backend methods
-**Solution:** Sync declarations after backend changes
-```bash
-# After any backend deployment
-cp -r src/declarations/* openhouse_frontend/src/declarations/
-./deploy.sh --frontend-only
-```
 
 ### Issue: Deployment fails with permission error
 **Solution:** Ensure using daopad identity
@@ -338,24 +316,26 @@ Before each deployment:
 - [ ] Review betting limits across games
 - [ ] Test error handling paths
 - [ ] Ensure stable memory persistence
-- [ ] Check frontend routing works
 
 After deployment:
 - [ ] Run integration tests: `./deploy.sh --test`
-- [ ] Verify frontend at https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
-- [ ] Test each game's core functionality
-- [ ] Check all routes work correctly
+- [ ] Test each game's core functionality via dfx calls
 - [ ] Monitor canister cycles balance
 - [ ] Watch initial user interactions
+- [ ] Notify frontend team if API changes were made
 
 ## 🔗 Resources
 
-- **Frontend**: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
+- **Frontend Repo**: https://github.com/AlexandriaDAO/OpenHouse
+- **Live Frontend**: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
 - **IC Dashboard**: https://dashboard.internetcomputer.org
 - **Dice Backend**: https://dashboard.internetcomputer.org/canister/whchi-hyaaa-aaaao-a4ruq-cai
 - **Plinko Backend**: https://dashboard.internetcomputer.org/canister/weupr-2qaaa-aaaap-abl3q-cai
 - **Crash Backend**: https://dashboard.internetcomputer.org/canister/fws6k-tyaaa-aaaap-qqc7q-cai
 - **Roulette Backend**: https://dashboard.internetcomputer.org/canister/wvrcw-3aaaa-aaaah-arm4a-cai
+- **Life1 Backend**: https://dashboard.internetcomputer.org/canister/pijnb-7yaaa-aaaae-qgcuq-cai
+- **Life2 Backend**: https://dashboard.internetcomputer.org/canister/qoski-4yaaa-aaaai-q4g4a-cai
+- **Life3 Backend**: https://dashboard.internetcomputer.org/canister/66p3s-uaaaa-aaaad-ac47a-cai
 - **VRF Documentation**: https://internetcomputer.org/docs/current/references/ic-interface-spec#ic-raw_rand
 
 ## ⚡ Key Principles
@@ -366,7 +346,10 @@ After deployment:
 4. **Use VRF for all randomness** - Ensures provable fairness
 5. **Test on mainnet immediately** - Every change is live
 6. **Document everything** - Future developers need context
+7. **Backend-only repo** - Frontend is maintained separately in the OpenHouse repo
 
 ---
 
 **Remember**: You're working directly on mainnet. Every deployment affects real users immediately. The house always needs an edge, but at OpenHouse, that edge is transparent!
+
+**Note**: This repository contains only backend canisters. For frontend changes, see the [OpenHouse](https://github.com/AlexandriaDAO/OpenHouse) repository.

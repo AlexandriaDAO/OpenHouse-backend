@@ -1,8 +1,10 @@
-# 🎰 OpenHouse Casino
+# 🎰 OpenHouse Backend
 
-**The first casino where YOU can be the house**
+**Backend canisters for OpenHouse Casino - The first casino where YOU can be the house**
 
 Built by [Alexandria](https://alexandria.xyz) - an open-source gaming studio on the Internet Computer.
+
+> **Note**: This repository contains only the **backend canisters**. The frontend is maintained separately in the [OpenHouse](https://github.com/AlexandriaDAO/OpenHouse) repository.
 
 ## 🎯 What Makes OpenHouse Different
 
@@ -74,15 +76,17 @@ OpenHouse is created by [Alexandria](https://alexandria.xyz), an open-source gam
 
 ## 🏗️ Architecture
 
-OpenHouse is built as a modular system where each game runs in its own Internet Computer canister:
+OpenHouse backend is built as a modular system where each game runs in its own Internet Computer canister:
 
 ```
-openhouse/
+openhouse-backend/
 ├── crash_backend/          # Crash game canister (fws6k-tyaaa-aaaap-qqc7q-cai)
 ├── plinko_backend/         # Plinko game canister (weupr-2qaaa-aaaap-abl3q-cai)
-├── roulette_backend/      # Roulette game canister (wvrcw-3aaaa-aaaah-arm4a-cai)
+├── roulette_backend/       # Roulette game canister (wvrcw-3aaaa-aaaah-arm4a-cai)
 ├── dice_backend/           # Dice game canister (whchi-hyaaa-aaaao-a4ruq-cai)
-└── openhouse_frontend/     # Multi-game UI (pezw3-laaaa-aaaal-qssoa-cai)
+├── life1_backend/          # Game of Life - Server 1 (pijnb-7yaaa-aaaae-qgcuq-cai)
+├── life2_backend/          # Game of Life - Server 2 (qoski-4yaaa-aaaai-q4g4a-cai)
+└── life3_backend/          # Game of Life - Server 3 (66p3s-uaaaa-aaaad-ac47a-cai)
 ```
 
 Each game backend is written in Rust and independently manages:
@@ -96,21 +100,20 @@ Each game backend is written in Rust and independently manages:
 **⚠️ Important**: OpenHouse runs entirely on IC mainnet. There is no local testing environment - all development and testing happens in production.
 
 ```bash
-# Deploy all games and frontend
+# Deploy all backend canisters
 ./deploy.sh
 
-# Deploy specific game
-./deploy.sh --crash-only
-./deploy.sh --plinko-only
+# Deploy specific backend
 ./deploy.sh --roulette-only
-./deploy.sh --dice-only
-
-# Deploy frontend only
-./deploy.sh --frontend-only
+./deploy.sh --life-only
+./deploy.sh --life2-only
+./deploy.sh --life3-only
 
 # Deploy with tests
 ./deploy.sh --test
 ```
+
+**Note**: Frontend is deployed separately from the [OpenHouse](https://github.com/AlexandriaDAO/OpenHouse) repository.
 
 ## 🔬 How Provable Fairness Works
 
@@ -175,7 +178,7 @@ Anyone can:
 
 ### Project Structure
 ```
-openhouse/
+openhouse-backend/
 ├── crash_backend/
 │   ├── src/lib.rs           # Crash game logic
 │   └── crash_backend.did    # Candid interface
@@ -188,11 +191,18 @@ openhouse/
 ├── dice_backend/
 │   ├── src/lib.rs           # Dice game logic
 │   └── dice_backend.did     # Candid interface
-├── openhouse_frontend/
-│   └── dist/                # Static HTML/CSS/JS
+├── life1_backend/
+│   ├── src/lib.rs           # Game of Life - Server 1
+│   └── life1_backend.did    # Candid interface
+├── life2_backend/
+│   ├── src/lib.rs           # Game of Life - Server 2
+│   └── life2_backend.did    # Candid interface
+├── life3_backend/
+│   ├── src/lib.rs           # Game of Life - Server 3
+│   └── life3_backend.did    # Candid interface
 ├── deploy.sh                # Deployment script
 ├── dfx.json                 # IC configuration
-└── CLAUDE.md               # Detailed developer guide
+└── CLAUDE.md                # Detailed developer guide
 ```
 
 ### Testing on Mainnet
@@ -214,8 +224,8 @@ dfx canister --network ic call roulette_backend get_stats
 dfx canister --network ic call dice_backend get_stats
 dfx canister --network ic call dice_backend calculate_payout_info '(50 : nat8, variant { Over })'
 
-# Check frontend
-open https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
+# Test Life backends
+dfx canister --network ic call life1_backend greet '("Tester")'
 ```
 
 ## 📊 Monitoring
@@ -247,7 +257,8 @@ See `CLAUDE.md` for detailed instructions on adding new games to the platform.
 
 ## 📚 Resources
 
-- **Frontend**: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
+- **Frontend Repo**: https://github.com/AlexandriaDAO/OpenHouse
+- **Live Frontend**: https://pezw3-laaaa-aaaal-qssoa-cai.icp0.io
 - **Developer Guide**: [CLAUDE.md](./CLAUDE.md)
 - **IC Documentation**: https://internetcomputer.org/docs
 - **VRF Spec**: https://internetcomputer.org/docs/current/references/ic-interface-spec#ic-raw_rand
